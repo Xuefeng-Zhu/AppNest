@@ -4,6 +4,20 @@ import 'package:appnest_spec/appnest_spec.dart';
 import 'package:test/test.dart';
 
 void main() {
+  test('publication review reports an action-only rename with stable IDs', () {
+    final before = starterTemplates()['planner']!;
+    final after = before.patch({
+      'type': 'RenameLabel',
+      'targetId': 'editTask',
+      'label': 'Edit item',
+    }, () => throw StateError('Renames must preserve IDs'));
+    expect(after.diff(before), [
+      'Rename action ${before.action('editTask').label} to Edit item',
+    ]);
+    expect(after.actions.map((a) => a.id), before.actions.map((a) => a.id));
+    expect(after.compatibilityErrors(before), isEmpty);
+    expect(before.diff(before), ['No structural changes']);
+  });
   test(
     'broken view and behavior bindings, version types and policy requests fail',
     () {
@@ -62,6 +76,52 @@ void main() {
       expect(
         () => AppSpec.parse(jsonEncode(unsupported)),
         throwsA(isA<SpecException>()),
+      );
+    },
+  );
+  test('unsupported capability diagnostics name invalid entries and explain policy placement', () {
+    final json = starterTemplates()['reading']!.toJson();
+    json['requires'].addAll([
+      'personalTracker.v1',
+      'arbitrary.code',
+      'arbitrary.code',
+    ]);
+    expect(
+      () => AppSpec.parse(jsonEncode(json)),
+      throwsA(
+        isA<SpecException>().having(
+          (error) => error.message,
+          'actionable message',
+          allOf(
+            contains('"personalTracker.v1", "arbitrary.code"'),
+            contains('AppSpec schema requires enum'),
+            contains('policyPresetRequest, not requires'),
+          ),
+        ),
+      ),
+    );
+  });
+  test(
+    'unsupported capability diagnostics remain bounded for many long names',
+    () {
+      final json = starterTemplates()['reading']!.toJson();
+      json['requires'].addAll(
+        List.generate(10, (i) => 'unsupported$i${'x' * 140}'),
+      );
+      expect(
+        () => AppSpec.parse(jsonEncode(json)),
+        throwsA(
+          isA<SpecException>().having(
+            (error) => error.message,
+            'bounded message',
+            allOf(
+              contains('unsupported0'),
+              contains('(and 5 more)'),
+              isNot(contains('unsupported5')),
+              hasLength(lessThan(1000)),
+            ),
+          ),
+        ),
       );
     },
   );

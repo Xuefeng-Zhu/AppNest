@@ -7,7 +7,7 @@ import 'package:appnest_renderer/appnest_renderer.dart';
 import 'package:flutter/material.dart';
 
 import '../../client.dart';
-import '../mini_app/mini_app_screen.dart';
+import 'page_editor.dart';
 
 class BuilderScreen extends StatefulWidget {
   final BuilderSnapshot initial;
@@ -261,19 +261,21 @@ class _BuilderScreenState extends State<BuilderScreen> {
   }
 
   Future<void> publish() async {
+    final reviewed = draft;
+    final reviewedSpec = AppSpec.parse(reviewed.candidateJson);
     final rules = enabled.toList()..sort();
     final scope = <int>{};
     final candidates = <RuntimeRecord>[];
-    if (draft.baseVersionId != null && rules.isNotEmpty) {
+    if (reviewed.baseVersionId != null && rules.isNotEmpty) {
       try {
-        final collections = preview.spec.automationRequests
+        final collections = reviewedSpec.automationRequests
             .where((r) => enabled.contains(r.id))
             .map((r) => r.collectionId)
             .toSet();
         for (final collection in collections) {
           candidates.addAll(
             (await client.runtime.query(
-              draft.appId,
+              reviewed.appId,
               collection,
               jsonEncode({'limit': 50}),
             )).records,
@@ -297,10 +299,10 @@ class _BuilderScreenState extends State<BuilderScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  ...draft.changes.map((c) => Text('• $c')),
+                  ...reviewed.changes.map((c) => Text('• $c')),
                   const SizedBox(height: 16),
-                  Text('Policy request: ${preview.spec.policyPresetRequest}'),
-                  Text('Capabilities: ${preview.spec.requires.join(', ')}'),
+                  Text('Policy request: ${reviewedSpec.policyPresetRequest}'),
+                  Text('Capabilities: ${reviewedSpec.requires.join(', ')}'),
                   Text(
                     'Enabled reminders: ${rules.isEmpty ? 'None' : rules.join(', ')}',
                   ),
@@ -331,7 +333,7 @@ class _BuilderScreenState extends State<BuilderScreen> {
                     'This publishes structure only. Synthetic preview records are never copied.',
                   ),
                   SelectableText(
-                    'Candidate: ${draft.candidateHash}',
+                    'Candidate: ${reviewed.candidateHash}',
                     style: const TextStyle(fontSize: 11),
                   ),
                 ],
@@ -352,29 +354,32 @@ class _BuilderScreenState extends State<BuilderScreen> {
       ),
     );
     if (yes != true) return;
+    if (draft.candidateHash != reviewed.candidateHash ||
+        draft.mutation != reviewed.mutation) {
+      setState(
+        () => error = 'The preview changed during review. Review the updated preview before publishing.',
+      );
+      return;
+    }
     await perform(() async {
       await client.builder.publish(
         PublishRequest(
-          draftId: draft.draftId,
-          candidateHash: draft.candidateHash,
-          expectedCurrentVersionId: draft.baseVersionId,
+          draftId: reviewed.draftId,
+          candidateHash: reviewed.candidateHash,
+          expectedCurrentVersionId: reviewed.baseVersionId,
           enabledRuleIds: rules,
           activateExistingRecordIds: scope.toList()..sort(),
           reviewHash: hashJson({
-            'candidateHash': draft.candidateHash,
+            'candidateHash': reviewed.candidateHash,
             'enabledRuleIds': rules,
             'activateExistingRecordIds': scope.toList()..sort(),
           }),
-          idempotencyKey: 'publish-${draft.draftId}-${draft.candidateHash}',
+          idempotencyKey:
+              'publish-${reviewed.draftId}-${reviewed.candidateHash}',
         ),
       );
       if (mounted) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute<void>(
-            builder: (_) => MiniAppScreen(appId: draft.appId),
-          ),
-        );
+        Navigator.pop(context, reviewed.appId);
       }
     });
   }
@@ -412,6 +417,7 @@ class _BuilderScreenState extends State<BuilderScreen> {
                       draft.draftId,
                       draft.mutation,
                       prompt.text,
+                      startFromScratch: widget.initial.jobId != null,
                     ),
                   ),
                 ),
@@ -421,6 +427,29 @@ class _BuilderScreenState extends State<BuilderScreen> {
           onPressed: busy ? null : manual,
           icon: const Icon(Icons.tune),
           label: const Text('Edit manually'),
+        ),
+        TextButton.icon(
+          onPressed: busy
+              ? null
+              : () async {
+                  final patch = await showDialog<Map<String, dynamic>>(
+                    context: context,
+                    builder: (_) => PageEditor(spec: preview.spec),
+                  );
+                  if (patch != null) {
+                    await perform(
+                      () async => update(
+                        await client.builder.patch(
+                          draft.draftId,
+                          draft.mutation,
+                          jsonEncode(patch),
+                        ),
+                      ),
+                    );
+                  }
+                },
+          icon: const Icon(Icons.dashboard_customize_outlined),
+          label: const Text('Pages & navigation'),
         ),
         if (error != null)
           Text(

@@ -2,7 +2,13 @@
 
 Describe the tool your group needs. AppNest creates it—with shared data, permissions, and automations.
 
-A working local Flutter web + Serverpod modular monolith. Mini apps are validated declarative definitions, **not generated executable code**. Reading journals, shared chore boards and capacity-limited volunteer shifts share one renderer and one transactional runtime.
+A working local Flutter web + Serverpod modular monolith. Mini apps are validated declarative definitions, **not generated executable code**. Daily Planner, reading journals, shared chore boards and capacity-limited volunteer shifts share one renderer and one transactional runtime.
+
+## Personal mini-apps
+
+**Daily Planner** introduces app-owned Today, Tasks and Progress tabs, dedicated task details and editing pages, local-day grouping, search and filters, and database-wide progress totals. Due times and personal reminders are independent and optional. Reminders go to the app owner's AppNest inbox only after the rule is explicitly approved at publication.
+
+The builder's **Pages & navigation** editor controls pages, sections, tabs, field presentation, filters, sorting, destinations and approved themes. The AI builder receives the same validated schema and semantic operations. Existing published definitions keep their canonical hashes and legacy rendering until explicitly republished with navigation. See [mini-app behavior and authoring](docs/MINI_APPS.md) and [dated verification evidence](docs/VERIFICATION.md).
 
 ## Run locally
 
@@ -57,9 +63,9 @@ Without provider credentials the UI explicitly says **Template mode — AI provi
 
 Add `AI_BASE_URL`, `AI_MODEL`, and `AI_API_KEY` under the appropriate environment in the ignored `appnest_server/config/passwords.yaml`. See `config/passwords.example.yaml`. Use an actual operator-approved chat-completion-compatible provider and its real model ID; the adapter appends `/chat/completions` to the base URL. Restart the server. Secrets are never sent to Flutter or read from an AppSpec. `.env` files alone are not read by this adapter.
 
-The provider receives the schema, capability catalog, templates, request and current definition; it does not receive private records. Output is untrusted and bounded. Generation is durable background work with validation/repair, stale-result guards and explicit publication. The deterministic `FakeAiProvider` is test-only.
+For new apps, the provider receives the request, schema, capability contract and repair diagnostics without starter templates or a placeholder definition. Edits also receive the current definition to preserve stable IDs. Neither flow receives private records. Output is untrusted and bounded. Generation is durable background work with validation/repair, stale-result guards and explicit publication. The deterministic `FakeAiProvider` is test-only. See the [fresh AI creation check](docs/AI_CREATION_CHECK.md) for actual browser results and limitations.
 
-**Nebius live generation verified on 2026-09-22:** the local development server uses `nvidia/Nemotron-3-Ultra-550b-a55b` at `https://api.tokenfactory.us-central1.nebius.com/v1`, as listed in that model's Nebius public-endpoint panel. A dedicated AppNest key is stored only in ignored, mode-0600 `config/passwords.yaml`; it is not included in source or Flutter builds. Confirm current model routing in the [Nebius catalog](https://tokenfactory.nebius.com/models/catalog) when configuring another environment. The authenticated browser flow generated and validated “Community Kitchen Helpers” in two attempts. Its saved generation job identifies the Nemotron model and regional provider. The resulting draft remains **unpublished**, with zero live records and zero automations. Credentialed additive editing and the complete publish/share/reminder AI demo have not yet been verified. The existing template/manual demo remains separate evidence.
+**Nebius live generation verified on 2026-09-22:** the local development server uses `nvidia/Nemotron-3-Ultra-550b-a55b` at `https://api.tokenfactory.us-central1.nebius.com/v1`. A dedicated AppNest key is stored only in ignored, mode-0600 `config/passwords.yaml`; it is not included in source or Flutter builds. Confirm current model routing in the [Nebius catalog](https://tokenfactory.nebius.com/models/catalog) when configuring another environment. Real browser chat created and published **Plant Corner** and **Trip Kit** from fresh prompts, with custom fields, pages, tabs and workflows. Live creation/editing, status changes and summary counts passed, and an AI label edit preserved all IDs and other definition values. Initial failures, refinements and exact evidence are recorded in the [AI creation check](docs/AI_CREATION_CHECK.md). This does not establish universal one-shot generation quality or a complete AI-authored sharing/reminder flow.
 
 ## Verify and demonstrate
 

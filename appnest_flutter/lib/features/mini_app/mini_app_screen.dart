@@ -1,5 +1,6 @@
 import 'package:appnest_client/appnest_client.dart';
 import 'package:appnest_renderer/appnest_renderer.dart';
+import 'package:appnest_spec/appnest_spec.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -9,33 +10,143 @@ import 'live_adapter.dart';
 
 class MiniAppScreen extends StatefulWidget {
   final int appId;
-  const MiniAppScreen({super.key, required this.appId});
+  final MiniAppLocation? initialLocation;
+  final int? initialRecordId;
+  final ValueChanged<MiniAppLocation>? onLocationChanged;
+  final Future<void> Function()? onClose;
+  final Future<void> Function(int appId, {int? recordId})? onOpenApp;
+  const MiniAppScreen({
+    super.key,
+    required this.appId,
+    this.initialLocation,
+    this.initialRecordId,
+    this.onLocationChanged,
+    this.onClose,
+    this.onOpenApp,
+  });
   @override
-  State<MiniAppScreen> createState() => _MiniAppScreenState();
+  State<MiniAppScreen> createState() => MiniAppScreenState();
 }
 
-class _MiniAppScreenState extends State<MiniAppScreen> {
+class MiniAppScreenState extends State<MiniAppScreen> {
   AppManifest? manifest;
   Object? error;
   LiveRuntimeAdapter? adapter;
+  final controller = MiniAppController();
+  MiniAppLocation? initialLocation;
+  int _loadGeneration = 0;
   @override
   void initState() {
     super.initState();
     load();
   }
 
+  @override
+  void dispose() {
+    _loadGeneration++;
+    controller.dispose();
+    super.dispose();
+  }
+
+  Future<bool> canLeave() => controller.canLeave();
+  Future<bool> back() async {
+    final location = controller.location;
+    final entry = adapter?.spec.navigation?.entryPageId;
+    if (location == null ||
+        (location.pageId == entry &&
+            location.recordId == null &&
+            !location.editing)) {
+      return false;
+    }
+    await controller.back();
+    // A declined discard confirmation still consumes the back action.
+    return true;
+  }
+
+  Future<MiniAppLocation?> _resolveLocation(
+    MiniAppLocation? requested,
+    int? recordId,
+  ) async {
+    final a = adapter;
+    final nav = a?.spec.navigation;
+    if (a == null || nav == null) return null;
+    if (requested != null) {
+      return nav.pages.any((p) => p.id == requested.pageId)
+          ? requested
+          : MiniAppLocation(nav.entryPageId);
+    }
+    if (recordId != null) {
+      final record = await a.get(recordId);
+      final detail = a.spec.views
+          .where(
+            (v) => v.collectionId == record.collectionId && v.type == 'details',
+          )
+          .firstOrNull;
+      final page = nav.pages
+          .where((p) => p.viewIds.contains(detail?.id))
+          .firstOrNull;
+      if (page != null) return MiniAppLocation(page.id, recordId: recordId);
+    }
+    return MiniAppLocation(nav.entryPageId);
+  }
+
+  Future<bool> navigateTo(MiniAppLocation? location, {int? recordId}) async {
+    if (adapter == null) return true;
+    try {
+      final next = await _resolveLocation(location, recordId);
+      if (next != null) return await controller.navigate(next);
+      return true;
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          error = const SpecException('This item is no longer available.');
+        });
+      }
+      return true;
+    }
+  }
+
+  Future<void> close() async {
+    if (widget.onClose != null) {
+      await widget.onClose!();
+    } else if (await canLeave() && mounted) {
+      Navigator.pop(context);
+    }
+  }
+
   Future<void> load() async {
+    final generation = ++_loadGeneration;
     try {
       final m = await client.apps.manifest(widget.appId);
+      if (!mounted || generation != _loadGeneration) return;
+      final next = LiveRuntimeAdapter(client, m);
+      adapter = next;
+      final location = await _resolveLocation(
+        controller.location ?? widget.initialLocation,
+        widget.initialRecordId,
+      );
+      if (!mounted || generation != _loadGeneration) return;
       if (mounted) {
         setState(() {
           manifest = m;
-          adapter = LiveRuntimeAdapter(client, m);
+          adapter = next;
+          initialLocation = location;
           error = null;
+        });
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && generation == _loadGeneration && location != null) {
+            widget.onLocationChanged?.call(controller.location ?? location);
+          }
         });
       }
     } catch (e) {
-      if (mounted) setState(() => error = e);
+      if (mounted && generation == _loadGeneration) {
+        setState(() {
+          error = e;
+          adapter = null;
+          manifest = null;
+        });
+      }
     }
   }
 
@@ -219,34 +330,51 @@ class _MiniAppScreenState extends State<MiniAppScreen> {
     final builder = m?.role == 'owner' || m?.role == 'builder';
     return Scaffold(
       appBar: AppBar(
-        title: Text(m?.name ?? 'Opening app…'),
+        automaticallyImplyLeading: false,
+        toolbarHeight: 54,
+        title: Row(
+          children: [
+            Icon(switch (adapter?.spec.icon) {
+              'book' => Icons.menu_book_outlined,
+              'board' => Icons.view_kanban_outlined,
+              'people' => Icons.people_outline,
+              'check' => Icons.check_circle_outline,
+              _ => Icons.auto_awesome_outlined,
+            }, size: 22),
+            const SizedBox(width: 9),
+            Expanded(
+              child: Text(
+                m?.name ?? 'Opening app…',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        ),
         actions: [
           if (m != null)
-            IconButton(
-              onPressed: activity,
-              tooltip: 'Activity and reminder history',
-              icon: const Icon(Icons.history),
-            ),
-          if (builder && !m!.archived)
-            IconButton(
-              onPressed: share,
-              tooltip: 'Share',
-              icon: const Icon(Icons.person_add_alt),
-            ),
-          if (m != null)
             PopupMenuButton<String>(
+              tooltip: 'Mini-app menu',
+              icon: const Icon(Icons.more_horiz),
               onSelected: (value) async {
                 try {
+                  if (value == 'activity') await activity();
+                  if (value == 'share') await share();
                   if (value == 'edit') {
+                    if (!await canLeave()) return;
                     final d = await client.builder.begin(
                       m.workspaceId,
                       'reading',
                       m.appId,
                     );
                     if (context.mounted) {
-                      await Navigator.push(
+                      await Navigator.push<int>(
                         context,
-                        MaterialPageRoute<void>(
+                        MaterialPageRoute<int>(
                           builder: (_) => BuilderScreen(initial: d),
                         ),
                       );
@@ -256,20 +384,26 @@ class _MiniAppScreenState extends State<MiniAppScreen> {
                   if (value == 'members') await manage();
                   if (value == 'unpin') {
                     await client.apps.pin(m.appId, false);
-                    if (context.mounted) Navigator.pop(context);
+                    if (context.mounted) await close();
                   }
                   if (value == 'remix') {
+                    if (!await canLeave()) return;
                     final id = await client.apps.remix(m.appId, m.workspaceId);
                     if (context.mounted) {
-                      Navigator.pushReplacement(
-                        context,
-                        MaterialPageRoute<void>(
-                          builder: (_) => MiniAppScreen(appId: id),
-                        ),
-                      );
+                      if (widget.onOpenApp != null) {
+                        await widget.onOpenApp!(id);
+                      } else {
+                        Navigator.pushReplacement(
+                          context,
+                          MaterialPageRoute<void>(
+                            builder: (_) => MiniAppScreen(appId: id),
+                          ),
+                        );
+                      }
                     }
                   }
                   if (value == 'archive') {
+                    if (!await canLeave()) return;
                     if (!context.mounted) return;
                     final yes = await showDialog<bool>(
                       context: context,
@@ -304,6 +438,15 @@ class _MiniAppScreenState extends State<MiniAppScreen> {
                 }
               },
               itemBuilder: (_) => [
+                const PopupMenuItem(
+                  value: 'activity',
+                  child: Text('Activity & reminders'),
+                ),
+                if (builder && !m.archived)
+                  const PopupMenuItem(
+                    value: 'share',
+                    child: Text('Invite to app'),
+                  ),
                 if (builder && !m.archived)
                   const PopupMenuItem(
                     value: 'edit',
@@ -329,15 +472,41 @@ class _MiniAppScreenState extends State<MiniAppScreen> {
                   ),
               ],
             ),
+          Container(height: 20, width: 1, color: const Color(0xffd7ddd7)),
+          IconButton(
+            onPressed: close,
+            tooltip: 'Close mini-app',
+            icon: const Icon(Icons.close, size: 20),
+          ),
+          const SizedBox(width: 8),
         ],
       ),
       body: error != null
-          ? Center(child: Text('$error'))
+          ? Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.cloud_off_outlined, size: 36),
+                    const SizedBox(height: 16),
+                    const Text(
+                      'This app or item is unavailable. Try again to check your access.',
+                    ),
+                    const SizedBox(height: 16),
+                    FilledButton(onPressed: load, child: const Text('Retry')),
+                  ],
+                ),
+              ),
+            )
           : adapter == null
           ? const Center(child: CircularProgressIndicator())
           : MiniAppRuntime(
               key: ValueKey('${m!.versionId}-${m.archived}'),
               adapter: adapter!,
+              controller: controller,
+              initialLocation: initialLocation,
+              onLocationChanged: widget.onLocationChanged,
             ),
     );
   }

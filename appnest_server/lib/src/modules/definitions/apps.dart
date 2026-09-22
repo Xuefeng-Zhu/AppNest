@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:appnest_spec/appnest_spec.dart';
 import 'package:serverpod/serverpod.dart';
 
@@ -85,6 +87,8 @@ class Apps {
           description: switch (e.key) {
             'reading' => 'Keep your reading life in one place.',
             'chores' => 'Make shared responsibilities clear.',
+            'planner' =>
+              'Plan today, track tasks, and choose personal reminders.',
             _ => 'Bring people together, one place at a time.',
           },
         ),
@@ -145,7 +149,8 @@ class Apps {
       CASE WHEN a."ownerId"=@actor THEN 'owner' ELSE g.role END,
       EXISTS(SELECT 1 FROM nest_shortcut p WHERE p."appId"=a.id AND p."actorId"=@actor),
       (SELECT count(*) FROM nest_record r WHERE r."appId"=a.id AND NOT r.deleted),
-      (SELECT coalesce(sum(p.capacity-p.allocated),0)::bigint FROM nest_pool p WHERE p."appId"=a.id),v."specJson"
+      (SELECT coalesce(sum(p.capacity-p.allocated),0)::bigint FROM nest_pool p WHERE p."appId"=a.id),v."specJson",
+      (SELECT coalesce(json_agg(u."ruleId" ORDER BY u."ruleId"),'[]'::json)::text FROM nest_automation u WHERE u."appId"=a.id AND u.enabled)
       FROM nest_app a LEFT JOIN nest_grant g ON g."appId"=a.id AND g."actorId"=@actor AND NOT g.revoked
       JOIN nest_version v ON v.id=a."activeVersionId"
       WHERE a."workspaceId"=@workspace AND (a."ownerId"=@actor OR g.id IS NOT NULL) ORDER BY a.id DESC LIMIT 100''',
@@ -167,31 +172,43 @@ class Apps {
             recordCount: r[7] as int,
             availablePlaces: r[8] as int,
             specJson: r[9] as String,
+            approvedRuleIds: List<String>.from(
+              jsonDecode(r[10] as String) as List,
+            ),
           ),
         )
         .toList();
   }
 
-  static Future<AppManifest> manifest(Session s, int id) async {
-    final a = await access(s, id), spec = await a.spec(s);
-    return AppManifest(
-      appId: id,
-      workspaceId: a.app.workspaceId,
-      name: a.app.name,
-      versionId: a.app.activeVersionId,
-      specJson: spec.canonical,
-      role: a.role,
-      archived: a.app.archived,
-      pinned:
-          await AppShortcut.db.findFirstRow(
-            s,
-            where: (t) => t.appId.equals(id) & t.actorId.equals(actor(s)),
-          ) !=
-          null,
-      recordCount: 0,
-      availablePlaces: 0,
-    );
-  }
+  static Future<AppManifest> manifest(Session s, int id) =>
+      s.db.transaction((tx) async {
+        final a = await access(s, id, tx: tx, lock: true),
+            spec = await a.spec(s, tx: tx);
+        final rules = await Automation.db.find(
+          s,
+          where: (t) => t.appId.equals(id) & t.enabled.equals(true),
+          transaction: tx,
+        );
+        return AppManifest(
+          appId: id,
+          workspaceId: a.app.workspaceId,
+          name: a.app.name,
+          versionId: a.app.activeVersionId,
+          specJson: spec.canonical,
+          role: a.role,
+          archived: a.app.archived,
+          pinned:
+              await AppShortcut.db.findFirstRow(
+                s,
+                where: (t) => t.appId.equals(id) & t.actorId.equals(actor(s)),
+                transaction: tx,
+              ) !=
+              null,
+          recordCount: 0,
+          availablePlaces: 0,
+          approvedRuleIds: rules.map((rule) => rule.ruleId).toList()..sort(),
+        );
+      });
 
   static Future<int> remix(Session s, int appId, int workspaceId) async {
     final a = await access(s, appId);

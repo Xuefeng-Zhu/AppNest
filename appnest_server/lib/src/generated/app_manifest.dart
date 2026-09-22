@@ -10,6 +10,7 @@
 // ignore_for_file: invalid_use_of_internal_member
 
 // ignore_for_file: no_leading_underscores_for_library_prefixes
+import 'package:appnest_server/src/generated/protocol.dart' as _i270vp9r;
 import 'package:serverpod/serverpod.dart' as _is;
 
 abstract class AppManifest
@@ -25,6 +26,7 @@ abstract class AppManifest
     required this.pinned,
     required this.recordCount,
     required this.availablePlaces,
+    this.approvedRuleIds,
   });
 
   factory AppManifest({
@@ -38,6 +40,7 @@ abstract class AppManifest
     required bool pinned,
     required int recordCount,
     required int availablePlaces,
+    List<String>? approvedRuleIds,
   }) = _AppManifestImpl;
 
   factory AppManifest.fromJson(Map<String, dynamic> jsonSerialization) {
@@ -52,6 +55,11 @@ abstract class AppManifest
       pinned: _is.BoolJsonExtension.fromJson(jsonSerialization['pinned']),
       recordCount: jsonSerialization['recordCount'] as int,
       availablePlaces: jsonSerialization['availablePlaces'] as int,
+      approvedRuleIds: jsonSerialization['approvedRuleIds'] == null
+          ? null
+          : _i270vp9r.Protocol().deserialize<List<String>>(
+              jsonSerialization['approvedRuleIds'],
+            ),
     );
   }
 
@@ -75,6 +83,8 @@ abstract class AppManifest
 
   int availablePlaces;
 
+  List<String>? approvedRuleIds;
+
   /// Returns a shallow copy of this [AppManifest]
   /// with some or all fields replaced by the given arguments.
   @_is.useResult
@@ -89,6 +99,7 @@ abstract class AppManifest
     bool? pinned,
     int? recordCount,
     int? availablePlaces,
+    List<String>? approvedRuleIds,
   });
   @override
   Map<String, dynamic> toJson() {
@@ -104,6 +115,7 @@ abstract class AppManifest
       'pinned': pinned,
       'recordCount': recordCount,
       'availablePlaces': availablePlaces,
+      if (approvedRuleIds != null) 'approvedRuleIds': approvedRuleIds?.toJson(),
     };
   }
 
@@ -121,6 +133,7 @@ abstract class AppManifest
       'pinned': pinned,
       'recordCount': recordCount,
       'availablePlaces': availablePlaces,
+      if (approvedRuleIds != null) 'approvedRuleIds': approvedRuleIds?.toJson(),
     };
   }
 
@@ -144,6 +157,7 @@ class _AppManifestImpl extends AppManifest {
     required bool pinned,
     required int recordCount,
     required int availablePlaces,
+    List<String>? approvedRuleIds,
   }) : super._(
          appId: appId,
          workspaceId: workspaceId,
@@ -155,6 +169,7 @@ class _AppManifestImpl extends AppManifest {
          pinned: pinned,
          recordCount: recordCount,
          availablePlaces: availablePlaces,
+         approvedRuleIds: approvedRuleIds,
        );
 
   /// Returns a shallow copy of this [AppManifest]
@@ -172,6 +187,7 @@ class _AppManifestImpl extends AppManifest {
     bool? pinned,
     int? recordCount,
     int? availablePlaces,
+    Object? approvedRuleIds = _Undefined,
   }) {
     return AppManifest(
       appId: appId ?? this.appId,
@@ -184,6 +200,9 @@ class _AppManifestImpl extends AppManifest {
       pinned: pinned ?? this.pinned,
       recordCount: recordCount ?? this.recordCount,
       availablePlaces: availablePlaces ?? this.availablePlaces,
+      approvedRuleIds: approvedRuleIds is List<String>?
+          ? approvedRuleIds
+          : this.approvedRuleIds?.map((e0) => e0).toList(),
     );
   }
 }

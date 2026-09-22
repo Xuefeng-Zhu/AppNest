@@ -21,6 +21,8 @@ abstract class InboxItem
     required this.body,
     required this.createdAt,
     required this.isRead,
+    this.recordId,
+    this.collectionId,
   });
 
   factory InboxItem({
@@ -30,6 +32,8 @@ abstract class InboxItem
     required String body,
     required DateTime createdAt,
     required bool isRead,
+    int? recordId,
+    String? collectionId,
   }) = _InboxItemImpl;
 
   factory InboxItem.fromJson(Map<String, dynamic> jsonSerialization) {
@@ -42,6 +46,8 @@ abstract class InboxItem
         jsonSerialization['createdAt'],
       ),
       isRead: _is.BoolJsonExtension.fromJson(jsonSerialization['isRead']),
+      recordId: jsonSerialization['recordId'] as int?,
+      collectionId: jsonSerialization['collectionId'] as String?,
     );
   }
 
@@ -57,6 +63,10 @@ abstract class InboxItem
 
   bool isRead;
 
+  int? recordId;
+
+  String? collectionId;
+
   /// Returns a shallow copy of this [InboxItem]
   /// with some or all fields replaced by the given arguments.
   @_is.useResult
@@ -67,6 +77,8 @@ abstract class InboxItem
     String? body,
     DateTime? createdAt,
     bool? isRead,
+    int? recordId,
+    String? collectionId,
   });
   @override
   Map<String, dynamic> toJson() {
@@ -78,6 +90,8 @@ abstract class InboxItem
       'body': body,
       'createdAt': createdAt.toJson(),
       'isRead': isRead,
+      if (recordId != null) 'recordId': recordId,
+      if (collectionId != null) 'collectionId': collectionId,
     };
   }
 
@@ -91,6 +105,8 @@ abstract class InboxItem
       'body': body,
       'createdAt': createdAt.toJson(),
       'isRead': isRead,
+      if (recordId != null) 'recordId': recordId,
+      if (collectionId != null) 'collectionId': collectionId,
     };
   }
 
@@ -100,6 +116,8 @@ abstract class InboxItem
   }
 }
 
+class _Undefined {}
+
 class _InboxItemImpl extends InboxItem {
   _InboxItemImpl({
     required int id,
@@ -108,6 +126,8 @@ class _InboxItemImpl extends InboxItem {
     required String body,
     required DateTime createdAt,
     required bool isRead,
+    int? recordId,
+    String? collectionId,
   }) : super._(
          id: id,
          appId: appId,
@@ -115,6 +135,8 @@ class _InboxItemImpl extends InboxItem {
          body: body,
          createdAt: createdAt,
          isRead: isRead,
+         recordId: recordId,
+         collectionId: collectionId,
        );
 
   /// Returns a shallow copy of this [InboxItem]
@@ -128,6 +150,8 @@ class _InboxItemImpl extends InboxItem {
     String? body,
     DateTime? createdAt,
     bool? isRead,
+    Object? recordId = _Undefined,
+    Object? collectionId = _Undefined,
   }) {
     return InboxItem(
       id: id ?? this.id,
@@ -136,6 +160,8 @@ class _InboxItemImpl extends InboxItem {
       body: body ?? this.body,
       createdAt: createdAt ?? this.createdAt,
       isRead: isRead ?? this.isRead,
+      recordId: recordId is int? ? recordId : this.recordId,
+      collectionId: collectionId is String? ? collectionId : this.collectionId,
     );
   }
 }

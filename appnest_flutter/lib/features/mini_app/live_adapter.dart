@@ -14,6 +14,8 @@ class LiveRuntimeAdapter extends RuntimeAdapter {
   @override
   bool get preview => false;
   @override
+  List<String> get approvedRuleIds => manifest.approvedRuleIds ?? const [];
+  @override
   bool get readOnly =>
       manifest.archived ||
       role == 'viewer' ||
@@ -42,14 +44,11 @@ class LiveRuntimeAdapter extends RuntimeAdapter {
             {'capacity.claim.v1', 'capacity.release.v1'}.contains(a.capability);
   }
 
-  @override
-  Future<RuntimePage> query(
-    String collectionId,
-    Map<String, dynamic> query,
-  ) async {
+  Future<void> _checkDefinition() async {
     final current = await client.apps.manifest(manifest.appId);
     manifest.role = current.role;
     manifest.archived = current.archived;
+    manifest.approvedRuleIds = current.approvedRuleIds;
     if (current.versionId != manifest.versionId) {
       throw NestError(
         category: 'staleDefinition',
@@ -57,26 +56,69 @@ class LiveRuntimeAdapter extends RuntimeAdapter {
             'The app definition changed. Close and reopen the app to refresh.',
       );
     }
+  }
+
+  RuntimeItem _item(RuntimeRecord r) => RuntimeItem(
+    r.id,
+    r.collectionId,
+    Map<String, dynamic>.from(r.data as Map),
+    revision: r.revision,
+    capacity: r.capacity,
+    allocated: r.allocated,
+    claimed: r.claimed,
+    allowedActions: r.allowedActions,
+  );
+
+  @override
+  Future<RuntimeItem> get(int recordId) async {
+    await _checkDefinition();
+    return _item(await client.runtime.get(manifest.appId, recordId));
+  }
+
+  @override
+  Future<RuntimeSummary> summary(
+    String collectionId,
+    Map<String, dynamic> query,
+    String groupFieldId,
+  ) async {
+    await _checkDefinition();
+    final result = await client.runtime.summary(
+      manifest.appId,
+      collectionId,
+      jsonEncode(query),
+      groupFieldId,
+    );
+    return RuntimeSummary(result.total, result.groups);
+  }
+
+  @override
+  Future<List<RuntimeReminderState>> reminderState(int recordId) async {
+    await _checkDefinition();
+    return (await client.runtime.reminderState(manifest.appId, recordId))
+        .map(
+          (r) => RuntimeReminderState(
+            r.ruleId,
+            r.state,
+            scheduledAt: r.scheduledAt,
+            eligible: r.eligible,
+          ),
+        )
+        .toList();
+  }
+
+  @override
+  Future<RuntimePage> query(
+    String collectionId,
+    Map<String, dynamic> query,
+  ) async {
+    await _checkDefinition();
     final page = await client.runtime.query(
       manifest.appId,
       collectionId,
       jsonEncode(query),
     );
     return RuntimePage(
-      page.records
-          .map(
-            (r) => RuntimeItem(
-              r.id,
-              r.collectionId,
-              Map<String, dynamic>.from(r.data as Map),
-              revision: r.revision,
-              capacity: r.capacity,
-              allocated: r.allocated,
-              claimed: r.claimed,
-              allowedActions: r.allowedActions,
-            ),
-          )
-          .toList(),
+      page.records.map(_item).toList(),
       page.total,
       page.nextCursor,
     );

@@ -34,8 +34,15 @@ class BuilderEndpoint extends Endpoint {
     Session session,
     int draftId,
     int mutation,
-    String request,
-  ) => Builder.generate(session, draftId, mutation, request);
+    String request, {
+    bool? startFromScratch,
+  }) => Builder.generate(
+    session,
+    draftId,
+    mutation,
+    request,
+    startFromScratch: startFromScratch ?? true,
+  );
   Future<int> publish(Session session, PublishRequest request) =>
       Builder.publish(session, request);
   Future<List<ActivityItem>> runs(Session session, int appId) async {

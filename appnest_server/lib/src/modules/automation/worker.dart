@@ -10,6 +10,63 @@ import '../runtime/access.dart';
 import '../builder/provider.dart';
 
 class Worker {
+  /// Delivery conditions deliberately do not participate in occurrence identity:
+  /// completing/reopening or editing unrelated fields cannot resend a reminder.
+  static bool conditionMatches(
+    AutomationSpec definition,
+    Map<String, dynamic> data,
+  ) =>
+      definition.condition == null ||
+      data[definition.condition!.fieldId] == definition.condition!.value;
+
+  static String scheduleSignature(
+    Automation rule,
+    String? date,
+    DateTime? due,
+  ) => hashJson({
+    'ruleVersion': rule.ruleVersion,
+    'timestamp': date,
+    'due': due?.toIso8601String(),
+  });
+
+  static String enrollmentKind(Automation rule) =>
+      'enrollRule:${rule.id}:${rule.ruleVersion}';
+
+  /// Enrollment is approval evidence, independent of whether a reminder time
+  /// has been selected or its outbox event has already been processed.
+  static Future<bool> isEnrolled(
+    Session s,
+    MiniApp app,
+    Automation rule,
+    EntityRecord record,
+    Transaction tx,
+  ) async {
+    if (!record.createdAt.isBefore(rule.activatedAt)) return true;
+    if (await AutomationRun.db.findFirstRow(
+          s,
+          where: (t) =>
+              t.automationId.equals(rule.id!) &
+              t.recordId.equals(record.id!) &
+              t.ruleVersion.equals(rule.ruleVersion),
+          transaction: tx,
+        ) !=
+        null) {
+      return true;
+    }
+    return await OutboxEvent.db.findFirstRow(
+          s,
+          where: (t) =>
+              t.appId.equals(app.id!) &
+              t.recordId.equals(record.id!) &
+              (t.kind.equals(enrollmentKind(rule)) |
+                  // Preserve already queued pre-generation-stamp activation events.
+                  // Their old current-version restriction cannot enroll a later rule.
+                  t.kind.equals('activateExisting:${app.activeVersionId}')),
+          transaction: tx,
+        ) !=
+        null;
+  }
+
   static Future<bool> hasAccess(
     Session s,
     MiniApp app,
@@ -164,27 +221,11 @@ class Worker {
           if (definition.collectionId != record.collectionId) continue;
           final date = payload(record.data)[definition.fieldId];
           if (date == null) continue;
-          final prior = await AutomationRun.db.findFirstRow(
-            s,
-            where: (t) =>
-                t.automationId.equals(rule.id!) &
-                t.recordId.equals(record.id!) &
-                t.ruleVersion.equals(rule.ruleVersion),
-            transaction: tx,
-          );
-          if (record.createdAt.isBefore(rule.activatedAt) &&
-              e.kind != 'activateExisting:${app.activeVersionId}' &&
-              prior == null) {
-            continue;
-          }
+          if (!await isEnrolled(s, app, rule, record, tx)) continue;
           final due = DateTime.parse(
             date as String,
           ).subtract(Duration(seconds: definition.offsetSeconds));
-          final signature = hashJson({
-            'ruleVersion': rule.ruleVersion,
-            'timestamp': date,
-            'due': due.toIso8601String(),
-          });
+          final signature = scheduleSignature(rule, date, due);
           final occurrence = hashJson({
             'app': app.id,
             'rule': rule.id,
@@ -269,15 +310,19 @@ class Worker {
               date as String,
             ).subtract(Duration(seconds: definition.offsetSeconds));
       suppress =
-          hashJson({
-                'ruleVersion': rule.ruleVersion,
-                'timestamp': date,
-                'due': due?.toIso8601String(),
-              }) !=
+          scheduleSignature(rule, date as String?, due) !=
               run.scheduleSignature ||
+          !conditionMatches(definition, payload(record.data)) ||
           !await hasAccess(s, app, rule.executionActorId, tx, builder: true);
       if (!suppress) {
-        if (definition.effect == 'notifyActiveClaimants') {
+        if (definition.effect == 'notifyOwner') {
+          // Owner identity is trusted app state, never a generated actor ID.
+          if (await hasAccess(s, app, app.ownerId, tx)) {
+            recipients.add(app.ownerId);
+          } else {
+            suppress = true;
+          }
+        } else if (definition.effect == 'notifyActiveClaimants') {
           final pools = await ResourcePool.db.find(
             s,
             where: (t) =>
@@ -405,6 +450,7 @@ class Worker {
     AppSpec? candidate;
     AiResult? result;
     String? error;
+    String? errorKind;
     try {
       final ai = provider ?? ChatCompletionProvider.configured(s);
       if (ai == null) {
@@ -427,10 +473,7 @@ class Worker {
           'lease': job.leaseGeneration,
         }),
       );
-      if (result.text.length > Limits.definitionBytes) {
-        throw const SpecException('Generated definition is too large.');
-      }
-      final output = payload(jsonDecode(result.text));
+      final output = parseAiOutput(result.text);
       if (output['unsupported'] is String) {
         throw SpecException(
           str(output['unsupported'], 'unsupported explanation', max: 1000),
@@ -448,14 +491,23 @@ class Worker {
         final errors = base.compatibilityErrors(candidate!);
         if (errors.isNotEmpty) throw SpecException(errors.join(' '));
       } else {
-        candidate = AppSpec.parse(result.text);
+        candidate = AppSpec.parse(jsonEncode(output));
       }
+    } on AiResponseException catch (e) {
+      error = e.message;
+      errorKind = e.kind;
     } on SpecException catch (e) {
       error = e.message;
+      errorKind = 'spec_validation';
     } on NestError catch (e) {
       error = e.message;
+      errorKind = 'request_validation';
+    } on FormatException {
+      error = 'The generated definition contains an invalid value format. Return valid values matching the AppSpec schema.';
+      errorKind = 'value_format';
     } catch (_) {
-      error = 'The provider returned an invalid response or timed out.';
+      error = 'Generation could not validate the response. Return a complete object matching the AppSpec schema.';
+      errorKind = 'unexpected';
     }
     await s.db.transaction((tx) async {
       final app = await MiniApp.db.findFirstRow(
@@ -495,7 +547,7 @@ class Worker {
       }
       await GenerationJob.db.updateRow(s, j, transaction: tx);
       s.log(
-        'generation_result job_id=$id status=${j.status} attempt=${j.attempts}',
+        'generation_result job_id=$id status=${j.status} attempt=${j.attempts} error_kind=${errorKind ?? 'none'}',
       );
     });
   }

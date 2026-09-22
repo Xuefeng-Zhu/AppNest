@@ -8,11 +8,17 @@ import 'package:appnest_server/src/modules/runtime/access.dart';
 import 'package:appnest_server/src/modules/runtime/commands.dart';
 import 'package:appnest_server/src/modules/runtime/integrity.dart';
 import 'package:appnest_server/src/modules/automation/worker.dart';
+import 'package:appnest_server/src/modules/builder/builder.dart';
+import 'package:appnest_server/src/modules/collaboration/sharing.dart';
+import 'package:appnest_server/src/modules/runtime/queries.dart';
 
 Future<void> main() async {
   final tag = Platform.environment['APPNEST_RESTART_TAG'],
-      phase = Platform.environment['APPNEST_RESTART_PHASE'];
-  if (tag == null || !{'write', 'read'}.contains(phase)) {
+      phase = Platform.environment['APPNEST_RESTART_PHASE'],
+      scenario = Platform.environment['APPNEST_RESTART_SCENARIO'] ?? 'claimant';
+  if (tag == null ||
+      !{'write', 'read'}.contains(phase) ||
+      !{'claimant', 'planner'}.contains(scenario)) {
     throw StateError('Use scripts/restart_smoke.dart.');
   }
   final pod = Serverpod(
@@ -29,12 +35,25 @@ Future<void> main() async {
   final s = await pod.createSession();
   s.updateAuthenticated(
     AuthenticationInfo(
-      'restart-$tag',
+      'restart-$scenario-$tag',
       {},
       authId: 'test-only-internal-session',
     ),
   );
   await Integrity.ensure(s);
+  if (scenario == 'planner') {
+    if (phase == 'write') {
+      await _writePlanner(s, tag);
+      stdout.writeln(
+        'Committed owner reminder runs. Exiting before scheduling.',
+      );
+      exit(0);
+    }
+    await _readPlanner(s, tag);
+    await s.close();
+    await pod.shutdown(exitProcess: false);
+    return;
+  }
   if (phase == 'write') {
     final w = await Apps.createWorkspace(s, 'Restart $tag'),
         app = await Apps.instantiate(s, w, 'volunteer'),
@@ -135,4 +154,135 @@ Future<void> main() async {
   );
   await s.close();
   await pod.shutdown(exitProcess: false);
+}
+
+Future<void> _writePlanner(Session s, String tag) async {
+  final workspace = await Apps.createWorkspace(s, 'Planner restart $tag');
+  final draft = await Builder.begin(s, workspace, 'planner', null);
+  final enabled = ['taskReminder'];
+  final version = await Builder.publish(
+    s,
+    PublishRequest(
+      draftId: draft.draftId,
+      candidateHash: draft.candidateHash,
+      enabledRuleIds: enabled,
+      activateExistingRecordIds: const [],
+      reviewHash: hashJson({
+        'candidateHash': draft.candidateHash,
+        'enabledRuleIds': enabled,
+        'activateExistingRecordIds': [],
+      }),
+      idempotencyKey: 'publish-planner',
+    ),
+  );
+  for (final done in [false, true]) {
+    final result = await Commands.execute(
+      s,
+      ActionRequest(
+        appId: draft.appId,
+        actionId: 'addTask',
+        expectedDefinitionVersionId: version,
+        input: {
+          'data': {
+            'title': done ? 'Completed before restart' : 'Open at restart',
+            'status': 'Open',
+            'reminderAt': clock().toIso8601String(),
+          },
+        },
+        idempotencyKey: 'task-$done',
+      ),
+    );
+    if (done) {
+      await Commands.execute(
+        s,
+        ActionRequest(
+          appId: draft.appId,
+          actionId: 'moveTask',
+          targetRecordId: result.recordId,
+          expectedDefinitionVersionId: version,
+          expectedRecordRevision: result.revision,
+          input: {'value': 'Done'},
+          idempotencyKey: 'complete',
+        ),
+      );
+    }
+  }
+  for (final event in await OutboxEvent.db.find(
+    s,
+    where: (t) => t.appId.equals(draft.appId),
+  )) {
+    await Worker.plan(s, event.id!);
+  }
+  if (await AutomationRun.db.count(
+        s,
+        where: (t) => t.appId.equals(draft.appId) & t.status.equals('pending'),
+      ) !=
+      2) {
+    throw StateError('Owner reminder runs were not committed.');
+  }
+}
+
+Future<void> _readPlanner(Session s, String tag) async {
+  final workspace = (await Workspace.db.findFirstRow(
+    s,
+    where: (t) => t.name.equals('Planner restart $tag'),
+  ))!;
+  final app = (await MiniApp.db.findFirstRow(
+    s,
+    where: (t) => t.workspaceId.equals(workspace.id!),
+  ))!;
+  final runs = await AutomationRun.db.find(
+    s,
+    where: (t) => t.appId.equals(app.id!),
+    orderBy: (t) => t.id,
+  );
+  await Worker.drain(s);
+  for (final run in runs) {
+    await Worker.execute(s, run.id!);
+    await Worker.execute(s, run.id!);
+  }
+  final statuses = await AutomationRun.db.find(
+    s,
+    where: (t) => t.appId.equals(app.id!),
+    orderBy: (t) => t.id,
+  );
+  if (statuses.length != 2 ||
+      statuses.first.status != 'succeeded' ||
+      statuses.last.status != 'suppressed') {
+    throw StateError(
+      'Owner reminder delivery conditions did not survive restart.',
+    );
+  }
+  final inbox = await Sharing.inbox(s);
+  if (inbox.length != 1 ||
+      inbox.single.recordId != runs.first.recordId ||
+      inbox.single.collectionId != 'tasks') {
+    throw StateError(
+      'Owner inbox delivery was lost, duplicated or mistargeted.',
+    );
+  }
+  final completed = await Queries.get(s, app.id!, runs.last.recordId);
+  await Commands.execute(
+    s,
+    ActionRequest(
+      appId: app.id!,
+      actionId: 'moveTask',
+      targetRecordId: completed.id,
+      expectedDefinitionVersionId: app.activeVersionId!,
+      expectedRecordRevision: completed.revision,
+      input: {'value': 'Open'},
+      idempotencyKey: 'reopen-after-restart',
+    ),
+  );
+  await Worker.drain(s);
+  if ((await Queries.reminderState(s, app.id!, completed.id)).single.state !=
+          'suppressed' ||
+      (await Sharing.inbox(s)).length != 1 ||
+      await AutomationRun.db.count(s, where: (t) => t.appId.equals(app.id!)) !=
+          2) {
+    throw StateError('Reopening revived a terminal owner reminder.');
+  }
+  stdout.writeln(
+    'PASS: owner reminder recovered, completed task suppressed, reopen and duplicate wake-ups did not resend.',
+  );
 }

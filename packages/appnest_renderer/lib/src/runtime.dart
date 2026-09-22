@@ -1,13 +1,13 @@
 part of '../appnest_renderer.dart';
 
-class MiniAppRuntime extends StatefulWidget {
+class _LegacyMiniAppRuntime extends StatefulWidget {
   final RuntimeAdapter adapter;
-  const MiniAppRuntime({super.key, required this.adapter});
+  const _LegacyMiniAppRuntime({required this.adapter});
   @override
-  State<MiniAppRuntime> createState() => _MiniAppRuntimeState();
+  State<_LegacyMiniAppRuntime> createState() => __LegacyMiniAppRuntimeState();
 }
 
-class _MiniAppRuntimeState extends State<MiniAppRuntime>
+class __LegacyMiniAppRuntimeState extends State<_LegacyMiniAppRuntime>
     with WidgetsBindingObserver {
   late String viewId;
   RuntimePage? page;

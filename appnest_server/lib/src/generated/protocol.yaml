@@ -35,6 +35,8 @@ builder:
   - runs:
 runtime:
   - query:
+  - summary:
+  - reminderState:
   - get:
   - execute:
   - inbox:

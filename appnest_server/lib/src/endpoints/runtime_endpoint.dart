@@ -15,6 +15,18 @@ class RuntimeEndpoint extends Endpoint {
     String collectionId,
     String queryJson,
   ) => Queries.query(session, appId, collectionId, queryJson);
+  Future<RecordSummary> summary(
+    Session session,
+    int appId,
+    String collectionId,
+    String queryJson,
+    String groupFieldId,
+  ) => Queries.summary(session, appId, collectionId, queryJson, groupFieldId);
+  Future<List<ReminderState>> reminderState(
+    Session session,
+    int appId,
+    int recordId,
+  ) => Queries.reminderState(session, appId, recordId);
   Future<RuntimeRecord> get(Session session, int appId, int recordId) =>
       Queries.get(session, appId, recordId);
   Future<ActionOutcome> execute(Session session, ActionRequest request) =>

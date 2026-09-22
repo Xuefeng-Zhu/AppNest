@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'client.dart';
 import 'screens/sign_in_screen.dart';
 import 'features/home/home_screen.dart';
+import 'navigation/app_router.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -75,17 +76,30 @@ ThemeData _buildTheme(Brightness brightness) {
   );
 }
 
-class MyApp extends StatelessWidget {
+class MyApp extends StatefulWidget {
   const MyApp({super.key});
 
   @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> {
+  final router = AppNestRouterDelegate();
+  @override
+  void dispose() {
+    router.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return MaterialApp(
+    return MaterialApp.router(
       title: 'AppNest',
       debugShowCheckedModeBanner: false,
       theme: _buildTheme(Brightness.light),
       themeMode: ThemeMode.light,
-      home: const Scaffold(body: SignInScreen(child: HomeScreen())),
+      routerDelegate: router,
+      routeInformationParser: const AppNestRouteParser(),
     );
   }
 }

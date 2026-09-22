@@ -11,6 +11,7 @@
 
 // ignore_for_file: no_leading_underscores_for_library_prefixes
 import 'dart:async' as _ida;
+
 import 'package:appnest_client/src/protocol/action_outcome.dart' as _ik2rv6uc;
 import 'package:appnest_client/src/protocol/action_request.dart' as _ijhj5a9o;
 import 'package:appnest_client/src/protocol/activity_item.dart' as _ihdhb6mh;
@@ -24,6 +25,8 @@ import 'package:appnest_client/src/protocol/member_info.dart' as _iqjsfrnp;
 import 'package:appnest_client/src/protocol/platform_info.dart' as _iulf0zlt;
 import 'package:appnest_client/src/protocol/publish_request.dart' as _iqanq366;
 import 'package:appnest_client/src/protocol/record_page.dart' as _iwu2xk3k;
+import 'package:appnest_client/src/protocol/record_summary.dart' as _i4pq30c6;
+import 'package:appnest_client/src/protocol/reminder_state.dart' as _i1a6ysmx;
 import 'package:appnest_client/src/protocol/runtime_record.dart' as _itbezqp1;
 import 'package:appnest_client/src/protocol/template_info.dart' as _ik25ew2o;
 import 'package:appnest_client/src/protocol/workspace_info.dart' as _i1i173ve;
@@ -33,6 +36,7 @@ import 'package:serverpod_auth_core_client/serverpod_auth_core_client.dart'
 import 'package:serverpod_auth_idp_client/serverpod_auth_idp_client.dart'
     as _iaic;
 import 'package:serverpod_client/serverpod_client.dart' as _isc;
+
 import 'protocol.dart' as _il2as5qe;
 
 /// By extending [EmailIdpBaseEndpoint], the email identity provider endpoints
@@ -458,14 +462,16 @@ class EndpointBuilder extends _isc.EndpointRef {
   _ida.Future<_i3ykup7f.BuilderSnapshot> generate(
     int draftId,
     int mutation,
-    String request,
-  ) => caller.callServerEndpoint<_i3ykup7f.BuilderSnapshot>(
+    String request, {
+    bool? startFromScratch,
+  }) => caller.callServerEndpoint<_i3ykup7f.BuilderSnapshot>(
     'builder',
     'generate',
     {
       'draftId': draftId,
       'mutation': mutation,
       'request': request,
+      'startFromScratch': startFromScratch,
     },
   );
 
@@ -502,6 +508,34 @@ class EndpointRuntime extends _isc.EndpointRef {
       'appId': appId,
       'collectionId': collectionId,
       'queryJson': queryJson,
+    },
+  );
+
+  _ida.Future<_i4pq30c6.RecordSummary> summary(
+    int appId,
+    String collectionId,
+    String queryJson,
+    String groupFieldId,
+  ) => caller.callServerEndpoint<_i4pq30c6.RecordSummary>(
+    'runtime',
+    'summary',
+    {
+      'appId': appId,
+      'collectionId': collectionId,
+      'queryJson': queryJson,
+      'groupFieldId': groupFieldId,
+    },
+  );
+
+  _ida.Future<List<_i1a6ysmx.ReminderState>> reminderState(
+    int appId,
+    int recordId,
+  ) => caller.callServerEndpoint<List<_i1a6ysmx.ReminderState>>(
+    'runtime',
+    'reminderState',
+    {
+      'appId': appId,
+      'recordId': recordId,
     },
   );
 

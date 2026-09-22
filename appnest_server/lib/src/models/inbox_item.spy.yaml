@@ -6,3 +6,5 @@ fields:
   body: String
   createdAt: DateTime
   isRead: bool
+  recordId: int?
+  collectionId: String?

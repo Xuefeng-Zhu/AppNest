@@ -5,6 +5,7 @@ import 'package:serverpod/serverpod.dart';
 
 import '../../generated/protocol.dart';
 import '../runtime/access.dart';
+import '../automation/worker.dart';
 import 'provider.dart';
 
 class Builder {
@@ -128,12 +129,35 @@ class Builder {
       return snapshot(s, d, tx: tx);
     }),
   );
+
+  /// A successful unpublished generation establishes a definition to edit.
+  /// Manual changes and later failed requests retain that context; a failed
+  /// first request leaves only the placeholder and must still create from scratch.
+  static Future<String> generationMode(
+    Session s,
+    AppDraft d, {
+    required Transaction tx,
+    bool startFromScratch = true,
+  }) async {
+    if (!startFromScratch || d.baseVersionId != null) return 'edit';
+    final successful = await GenerationJob.db.findFirstRow(
+      s,
+      where: (t) =>
+          t.appId.equals(d.appId) &
+          t.draftId.equals(d.id!) &
+          t.status.equals('preview ready'),
+      transaction: tx,
+    );
+    return successful == null ? 'create' : 'edit';
+  }
+
   static Future<BuilderSnapshot> generate(
     Session s,
     int id,
     int mutation,
-    String request,
-  ) => validated(
+    String request, {
+    bool startFromScratch = true,
+  }) => validated(
     () => s.db.transaction((tx) async {
       str(request, 'request', max: Limits.promptBytes);
       if (utf8.encode(request).length > Limits.promptBytes) {
@@ -194,7 +218,12 @@ class Builder {
           mutation: d.mutation,
           status: 'queued',
           requestText: request,
-          mode: d.baseVersionId == null ? 'create' : 'edit',
+          mode: await generationMode(
+            s,
+            d,
+            tx: tx,
+            startFromScratch: startFromScratch,
+          ),
           promptVersion: 'appnest-v1',
           nextAttemptAt: clock(),
           diagnostics: '',
@@ -276,8 +305,10 @@ class Builder {
       }
       final review = hashJson({
         'candidateHash': spec.hash,
-        'enabledRuleIds': request.enabledRuleIds..sort(),
-        'activateExistingRecordIds': request.activateExistingRecordIds..sort(),
+        'enabledRuleIds': List<String>.from(request.enabledRuleIds)..sort(),
+        'activateExistingRecordIds': List<int>.from(
+          request.activateExistingRecordIds,
+        )..sort(),
       });
       if (review != request.reviewHash) {
         fail(
@@ -344,19 +375,32 @@ class Builder {
           await Automation.db.updateRow(s, old, transaction: tx);
         }
       }
+      final approvedRules = await Automation.db.find(
+        s,
+        where: (t) => t.appId.equals(a.app.id!) & t.enabled.equals(true),
+        transaction: tx,
+      );
       for (final id in request.activateExistingRecordIds.toSet()) {
-        await record(s, a, id, tx: tx);
-        await OutboxEvent.db.insertRow(
-          s,
-          OutboxEvent(
-            appId: a.app.id!,
-            recordId: id,
-            kind: 'activateExisting:${version.id}',
-            nextAttemptAt: clock(),
-            createdAt: clock(),
-          ),
-          transaction: tx,
-        );
+        final existing = await record(s, a, id, tx: tx);
+        for (final rule in approvedRules) {
+          if (spec.automationRequests
+                  .firstWhere((r) => r.id == rule.ruleId)
+                  .collectionId !=
+              existing.collectionId) {
+            continue;
+          }
+          await OutboxEvent.db.insertRow(
+            s,
+            OutboxEvent(
+              appId: a.app.id!,
+              recordId: id,
+              kind: Worker.enrollmentKind(rule),
+              nextAttemptAt: clock(),
+              createdAt: clock(),
+            ),
+            transaction: tx,
+          );
+        }
       }
       a.app.activeVersionId = version.id;
       a.app.name = spec.name;

@@ -47,6 +47,10 @@
           "workflow.v1",
           "assignment.v1",
           "notifications.inApp.v1",
+          "navigation.v1",
+          "views.configured.v1",
+          "notifications.owner.v1",
+          "automations.conditions.v1",
           "records.create.v1",
           "records.patch.v1",
           "assignment.assign.v1",
@@ -228,6 +232,126 @@
               "maxLength": 64
             },
             "maxItems": 32
+          },
+          "presentation": {
+            "enum": [
+              "compact",
+              "cards"
+            ]
+          },
+          "fieldIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$",
+              "maxLength": 64
+            },
+            "maxItems": 40
+          },
+          "filterFieldIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$",
+              "maxLength": 64
+            },
+            "maxItems": 8
+          },
+          "query": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "filters": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "fieldId": {
+                      "type": "string",
+                      "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$",
+                      "maxLength": 64
+                    },
+                    "operator": {
+                      "enum": [
+                        "eq",
+                        "in",
+                        "gte",
+                        "lte",
+                        "lt",
+                        "contains"
+                      ]
+                    },
+                    "value": {}
+                  },
+                  "required": [
+                    "fieldId",
+                    "operator",
+                    "value"
+                  ]
+                },
+                "maxItems": 8
+              },
+              "sort": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "fieldId": {
+                      "type": "string",
+                      "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$",
+                      "maxLength": 64
+                    },
+                    "descending": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "fieldId",
+                    "descending"
+                  ]
+                },
+                "maxItems": 2
+              },
+              "limit": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 100
+              }
+            },
+            "required": []
+          },
+          "dateFilter": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "fieldId": {
+                "type": "string",
+                "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$",
+                "maxLength": 64
+              },
+              "period": {
+                "enum": [
+                  "today",
+                  "overdue"
+                ]
+              }
+            },
+            "required": [
+              "fieldId",
+              "period"
+            ]
+          },
+          "detailPageId": {
+            "type": "string",
+            "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$",
+            "maxLength": 64
+          },
+          "formPageId": {
+            "type": "string",
+            "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$",
+            "maxLength": 64
           }
         },
         "required": [
@@ -341,7 +465,8 @@
               "type": {
                 "enum": [
                   "notifyActiveClaimants",
-                  "notifyAssignee"
+                  "notifyAssignee",
+                  "notifyOwner"
                 ]
               },
               "channel": {
@@ -352,6 +477,26 @@
               "type",
               "channel"
             ]
+          },
+          "condition": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "fieldId": {
+                "type": "string",
+                "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$",
+                "maxLength": 64
+              },
+              "value": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80
+              }
+            },
+            "required": [
+              "fieldId",
+              "value"
+            ]
           }
         },
         "required": [
@@ -361,6 +506,105 @@
         ]
       },
       "maxItems": 10
+    },
+    "navigation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "entryPageId": {
+          "type": "string",
+          "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$",
+          "maxLength": 64
+        },
+        "pages": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$",
+                "maxLength": 64
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "viewIds": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$",
+                  "maxLength": 64
+                },
+                "maxItems": 8,
+                "minItems": 1,
+                "uniqueItems": true
+              },
+              "showDate": {
+                "type": "boolean"
+              },
+              "primaryActionId": {
+                "type": "string",
+                "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$",
+                "maxLength": 64
+              }
+            },
+            "required": [
+              "id",
+              "title",
+              "viewIds"
+            ]
+          },
+          "maxItems": 16,
+          "minItems": 1
+        },
+        "tabs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "pageId": {
+                "type": "string",
+                "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$",
+                "maxLength": 64
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 40
+              },
+              "icon": {
+                "enum": [
+                  "book",
+                  "board",
+                  "people",
+                  "spark",
+                  "check",
+                  "today",
+                  "list",
+                  "chart"
+                ]
+              }
+            },
+            "required": [
+              "pageId",
+              "label",
+              "icon"
+            ]
+          },
+          "maxItems": 5,
+          "minItems": 1
+        }
+      },
+      "required": [
+        "entryPageId",
+        "pages",
+        "tabs"
+      ]
     }
   },
   "required": [

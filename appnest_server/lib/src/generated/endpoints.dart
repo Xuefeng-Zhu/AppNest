@@ -699,6 +699,11 @@ class Endpoints extends _is.EndpointDispatch {
               type: _is.getType<String>(),
               nullable: false,
             ),
+            'startFromScratch': _is.ParameterDescription(
+              name: 'startFromScratch',
+              type: _is.getType<bool?>(),
+              nullable: true,
+            ),
           },
           call:
               (
@@ -710,6 +715,7 @@ class Endpoints extends _is.EndpointDispatch {
                     params['draftId'],
                     params['mutation'],
                     params['request'],
+                    startFromScratch: params['startFromScratch'],
                   ),
         ),
         'publish': _is.MethodConnector(
@@ -785,6 +791,68 @@ class Endpoints extends _is.EndpointDispatch {
                     params['appId'],
                     params['collectionId'],
                     params['queryJson'],
+                  ),
+        ),
+        'summary': _is.MethodConnector(
+          name: 'summary',
+          params: {
+            'appId': _is.ParameterDescription(
+              name: 'appId',
+              type: _is.getType<int>(),
+              nullable: false,
+            ),
+            'collectionId': _is.ParameterDescription(
+              name: 'collectionId',
+              type: _is.getType<String>(),
+              nullable: false,
+            ),
+            'queryJson': _is.ParameterDescription(
+              name: 'queryJson',
+              type: _is.getType<String>(),
+              nullable: false,
+            ),
+            'groupFieldId': _is.ParameterDescription(
+              name: 'groupFieldId',
+              type: _is.getType<String>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _is.Session session,
+                Map<String, dynamic> params,
+              ) async =>
+                  (endpoints['runtime'] as _i7rxtwkb.RuntimeEndpoint).summary(
+                    session,
+                    params['appId'],
+                    params['collectionId'],
+                    params['queryJson'],
+                    params['groupFieldId'],
+                  ),
+        ),
+        'reminderState': _is.MethodConnector(
+          name: 'reminderState',
+          params: {
+            'appId': _is.ParameterDescription(
+              name: 'appId',
+              type: _is.getType<int>(),
+              nullable: false,
+            ),
+            'recordId': _is.ParameterDescription(
+              name: 'recordId',
+              type: _is.getType<int>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _is.Session session,
+                Map<String, dynamic> params,
+              ) async => (endpoints['runtime'] as _i7rxtwkb.RuntimeEndpoint)
+                  .reminderState(
+                    session,
+                    params['appId'],
+                    params['recordId'],
                   ),
         ),
         'get': _is.MethodConnector(

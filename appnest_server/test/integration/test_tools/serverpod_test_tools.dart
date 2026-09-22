@@ -31,6 +31,8 @@ import 'package:appnest_server/src/generated/member_info.dart' as _ii9ccrrn;
 import 'package:appnest_server/src/generated/platform_info.dart' as _iahkg3u7;
 import 'package:appnest_server/src/generated/publish_request.dart' as _ivuulprf;
 import 'package:appnest_server/src/generated/record_page.dart' as _inxyi3b7;
+import 'package:appnest_server/src/generated/record_summary.dart' as _ihgikx6k;
+import 'package:appnest_server/src/generated/reminder_state.dart' as _ihdyt6mq;
 import 'package:appnest_server/src/generated/runtime_record.dart' as _iwyk2d6u;
 import 'package:appnest_server/src/generated/template_info.dart' as _iacdzrq5;
 import 'package:appnest_server/src/generated/workspace_info.dart' as _i829frra;
@@ -1132,8 +1134,9 @@ class _BuilderEndpoint {
     _ist.TestSessionBuilder sessionBuilder,
     int draftId,
     int mutation,
-    String request,
-  ) async {
+    String request, {
+    bool? startFromScratch,
+  }) async {
     return _ist.callAwaitableFunctionAndHandleExceptions(() async {
       var _localUniqueSession =
           (sessionBuilder as _ist.InternalTestSessionBuilder).internalBuild(
@@ -1149,6 +1152,7 @@ class _BuilderEndpoint {
             'draftId': draftId,
             'mutation': mutation,
             'request': request,
+            'startFromScratch': startFromScratch,
           }),
           serializationManager: _serializationManager,
         );
@@ -1260,6 +1264,76 @@ class _RuntimeEndpoint {
           _localUniqueSession,
           _localCallContext.arguments,
         ) as _ida.Future<_inxyi3b7.RecordPage>);
+        return _localReturnValue;
+      } finally {
+        await _localUniqueSession.close();
+      }
+    });
+  }
+
+  _ida.Future<_ihgikx6k.RecordSummary> summary(
+    _ist.TestSessionBuilder sessionBuilder,
+    int appId,
+    String collectionId,
+    String queryJson,
+    String groupFieldId,
+  ) async {
+    return _ist.callAwaitableFunctionAndHandleExceptions(() async {
+      var _localUniqueSession =
+          (sessionBuilder as _ist.InternalTestSessionBuilder).internalBuild(
+            endpoint: 'runtime',
+            method: 'summary',
+          );
+      try {
+        var _localCallContext = await _endpointDispatch.getMethodCallContext(
+          createSessionCallback: (_) => _localUniqueSession,
+          endpointPath: 'runtime',
+          methodName: 'summary',
+          parameters: _ist.testObjectToJson({
+            'appId': appId,
+            'collectionId': collectionId,
+            'queryJson': queryJson,
+            'groupFieldId': groupFieldId,
+          }),
+          serializationManager: _serializationManager,
+        );
+        var _localReturnValue = await (_localCallContext.method.call(
+          _localUniqueSession,
+          _localCallContext.arguments,
+        ) as _ida.Future<_ihgikx6k.RecordSummary>);
+        return _localReturnValue;
+      } finally {
+        await _localUniqueSession.close();
+      }
+    });
+  }
+
+  _ida.Future<List<_ihdyt6mq.ReminderState>> reminderState(
+    _ist.TestSessionBuilder sessionBuilder,
+    int appId,
+    int recordId,
+  ) async {
+    return _ist.callAwaitableFunctionAndHandleExceptions(() async {
+      var _localUniqueSession =
+          (sessionBuilder as _ist.InternalTestSessionBuilder).internalBuild(
+            endpoint: 'runtime',
+            method: 'reminderState',
+          );
+      try {
+        var _localCallContext = await _endpointDispatch.getMethodCallContext(
+          createSessionCallback: (_) => _localUniqueSession,
+          endpointPath: 'runtime',
+          methodName: 'reminderState',
+          parameters: _ist.testObjectToJson({
+            'appId': appId,
+            'recordId': recordId,
+          }),
+          serializationManager: _serializationManager,
+        );
+        var _localReturnValue = await (_localCallContext.method.call(
+          _localUniqueSession,
+          _localCallContext.arguments,
+        ) as _ida.Future<List<_ihdyt6mq.ReminderState>>);
         return _localReturnValue;
       } finally {
         await _localUniqueSession.close();

@@ -212,9 +212,11 @@ class Sharing {
   });
   static Future<List<InboxItem>> inbox(Session s) async {
     final rows = await s.db.unsafeQuery(
-      '''SELECT n.id,n."appId",n.title,n.body,n."createdAt",n."readAt" FROM nest_notification n
+      '''SELECT n.id,n."appId",n.title,n.body,n."createdAt",n."readAt",r.id,r."collectionId" FROM nest_notification n
       JOIN nest_app a ON a.id=n."appId" JOIN nest_workspace_member m ON m."workspaceId"=a."workspaceId" AND m."actorId"=@actor
       LEFT JOIN nest_grant g ON g."appId"=a.id AND g."actorId"=@actor AND NOT g.revoked
+      LEFT JOIN nest_run u ON u.id=n."runId" AND u."appId"=a.id
+      LEFT JOIN nest_record r ON r.id=u."recordId" AND r."appId"=a.id AND NOT r.deleted
       WHERE n."actorId"=@actor AND (a."ownerId"=@actor OR g.id IS NOT NULL) ORDER BY n.id DESC LIMIT 100''',
       parameters: QueryParameters.named({'actor': actor(s)}),
     );
@@ -227,6 +229,8 @@ class Sharing {
             body: r[3] as String,
             createdAt: r[4] as DateTime,
             isRead: r[5] != null,
+            recordId: r[6] as int?,
+            collectionId: r[7] as String?,
           ),
         )
         .toList();

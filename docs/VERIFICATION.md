@@ -1,4 +1,71 @@
-# Local verification — 2026-09-21
+# Local verification
+
+## Fresh AI creation — 2026-09-22
+
+Real browser chat created and published **Plant Corner** and **Trip Kit** without selecting templates. Both have custom fields, app-owned tabs, dedicated forms/details and status summaries. Verified preview isolation, live create/edit, workflow transitions, mixed status proportions and a semantic AI label edit with exact hash evidence for preservation. Generation failures led to bounded parsing, prompt, edit-context and renderer fixes; the process was not uniformly successful on the first attempt. See [AI_CREATION_CHECK.md](AI_CREATION_CHECK.md) for prompts, job evidence, screenshots and limits.
+
+After these fixes, `scripts/verify.sh` passed **123 tests** (29 spec, 40 renderer, 25 host, 29 server/provider), both process-restart scenarios, clean analysis and formatting. The release web build and Wasm compatibility dry run passed. The earlier planner-specific result below remains historical evidence of that implementation stage.
+
+## Rich personal mini-apps — 2026-09-22
+
+The Daily Planner release adds declarative pages/tabs, dedicated details/forms, authenticated locations, grouped summaries and personal inbox reminders. Source and behavior are documented in [MINI_APPS.md](MINI_APPS.md).
+
+`bash scripts/verify.sh` completed successfully after the final code changes:
+
+| Check | Executed result |
+| --- | --- |
+| Static analysis, fatal infos | No issues |
+| Formatting | 110 source files checked, zero changes |
+| AppSpec tests | 26 passed, including explicit DST timezone assertions |
+| Renderer tests | 34 passed, including full planner navigation/edit flow at mobile and desktop sizes with 150% text and external history synchronization |
+| Flutter host tests | 25 passed, including authenticated routing, publication review, manual page/view editing and browser-history stack regressions |
+| PostgreSQL integration tests | 22 passed, including 7 planner-specific tests |
+| Restart smoke | Both claimant and owner reminder scenarios passed across independent write/read processes |
+| Release web build | `flutter build web --no-pub --dart-define=SERVER_URL=http://localhost:8180/ --output ../appnest_server/web/app` succeeded; Wasm compatibility dry run passed |
+
+Total: **107 automated tests**, plus the process-restart checks. Test Insights remains disabled because the isolated test configuration has no service secret; the PostgreSQL tests and reminder recovery completed successfully. Generated transport code was produced with Serverpod CLI 4.0.0 and then formatted by Dart; no generated source was hand-edited.
+
+The built web bundle is local output, not a deployment. The Wasm result is a compatibility dry run, not an executed Wasm application.
+
+Automated coverage includes:
+
+- Legacy canonical hashes, omitted optional properties, published record preservation, invalid view/page/action references, semantic page/tab edits, exact-candidate publication, and a deterministic AI-provider page-addition proposal.
+- Preview query/workflow/receipt parity, summaries beyond a results page, exclusive local-day bounds, undated records, and explicit 23-/25-hour daylight-saving assertions in `America/Los_Angeles`.
+- Preserved search/filter/pagination/scroll state, rapid tab changes, guarded edits/back/close, stale definitions, unavailable records, revoked access, read-only roles, manual page creation and legacy view editing without changing hidden predicates.
+- Today → Tasks → details → editor/save → back → Progress at 390×844 and 1440×1000 with 150% text, including a mobile safe-area inset. Controls are hit-tested and layout exceptions checked. Save/error feedback floats above the bottom tabs so Progress remains immediately reachable.
+- Real PostgreSQL owner reminders, complete/reopen, rescheduling/clearing, terminal delivered/suppressed occurrences, duplicate wakes, archive suppression, recipient authorization and inbox record targets.
+- Durable explicit enrollment across presentation-only publication and initially unset reminder times, without inheriting approval into changed or re-enabled rule generations.
+- Separate-process restart recovery for both existing claimant reminders and planner owner reminders. Completed tasks remain suppressed after reopening; duplicate wakeups do not resend notifications.
+
+The integration lifecycle creates a draft, previews its validated definition, applies manual edits, publishes, creates tasks, completes/reopens tasks, delivers an owner reminder and resolves its authorized inbox record. Its AI proposal uses `FakeAiProvider`. It does not establish live provider quality or a connected browser flow.
+
+Rendered synthetic preview captures were inspected with real fonts and icons at 390×844 and 1440×1000. [Today mobile](evidence/rich-miniapps/today-mobile.png), [Today desktop](evidence/rich-miniapps/today-desktop.png), [Tasks](evidence/rich-miniapps/tasks-mobile.png), [details](evidence/rich-miniapps/details-mobile.png), [editor](evidence/rich-miniapps/editor-mobile.png) and [Progress](evidence/rich-miniapps/progress-mobile.png) are PNG files at their named viewport dimensions. These captures show isolated synthetic data, not live backend delivery.
+
+### Connected browser verification — 2026-09-22
+
+After the user's explicit request to restart and verify, the existing `local.appnest.dev` job was restarted with its unchanged configuration and persistent database. Serverpod 4.0.0 / Dart 3.13.0 initialized at 13:44:29 UTC; ports 8180/8181/8182 resumed normally. No reseeding, credential change or database reset was performed.
+
+Verified through the authenticated Flutter release build at `http://localhost:8182/`:
+
+- Daily Planner template → isolated preview → manual app rename → exact-candidate publication with explicit `taskReminder` approval. The live app initially contained zero records, confirming preview data was not copied.
+- Created **Daily Planner · Live check** (local app 42) and **Verify planner reminder** (record 42), with independent due time 09:00 and reminder time 06:47 in the device's America/Los_Angeles timezone.
+- The reminder delivered to AppNest's inbox. Server logs show run 2 succeeded once at 13:47:30 UTC. Selecting the inbox item issued `readNotification` and opened `/apps/42/pages/taskDetailPage?record=42` after authorized lookup.
+- Complete changed today's and all-task progress to 100% Done. Reopen restored Open; editing notes retained the delivered state without another completion for the same occurrence.
+- Mobile editing/saving, immediately selecting Progress while the save message is visible, Open/Done and priority filters, title search, and preserved search/filter state after a details round-trip.
+- Created an undated follow-up with no reminder; today's scheduled total stayed 1 while the all-task total became 2.
+- Reloaded the authenticated record URL and verified persisted task fields, notes and delivered reminder state. Browser Back while editing prompted for discard; Keep editing restored the editor URL, and Discard preserved the saved notes.
+
+Live testing exposed a browser-history defect: returning from an editor created another browser entry. The fix distinguishes forward/return/external navigation, traverses known parent entries and safely replaces direct-link fallbacks. New regression tests model actual push/replace/traversal behavior, rejected and rapid Back presses, and delayed record reads after a screen is replaced. After rebuilding, the actual browser verified Tasks → details → editor → browser Back → Keep editing → Cancel/Discard → details → browser Back → Tasks. Save → details → browser Back → Tasks and accepted browser Back followed by in-app Back also passed. Closing the mini-app returned to the launcher; opening the reminder again returned to the same task. The final inbox still contained exactly one reminder after completion/reopening and subsequent note edits. Cross-document navigation, browser refresh and closing the browser tab do not have an AppNest `beforeunload` prompt; the guarded flows are in-app and same-document navigation.
+
+Live screenshots: [Today mobile](evidence/rich-miniapps/live/today-mobile.jpg), [task desktop](evidence/rich-miniapps/live/task-desktop.jpg), [task mobile](evidence/rich-miniapps/live/task-mobile.jpg), [filtered Tasks mobile](evidence/rich-miniapps/live/tasks-mobile.jpg), [Progress mobile](evidence/rich-miniapps/live/progress-mobile.jpg). These use synthetic test content stored in the real local development database. The JPEG captures are 1440×989 (desktop) and 390×844 (mobile); the requested desktop viewport was 1440×1000. Large-text flow coverage is separately established by the 150% widget tests; these browser captures use normal text scale.
+
+The browser console had no warning/error entries during the inspected flows. Server stderr recorded one Relic/Serverpod `ConnectionClosed` diagnostic during stream teardown; subsequent authenticated requests and the task reopen succeeded. This is recorded as a framework teardown diagnostic, not silently counted as a clean server log. No reminder retry or duplicate completion was observed.
+
+Serverpod/Dart MCP tools were unavailable. Official CLI generation, isolated tests, the existing local job and browser automation were used. MCP hot restart/log tails/Flutter driver checks remain unexecuted. No persistence model change or migration is required. No production deployment, version upgrade or authentication shortcut was introduced.
+
+## Historical baseline — 2026-09-21
+
+The results below describe the earlier release. They are retained as historical evidence, not proof of the new planner's live browser flow. The earlier “no provider” and “no host tests” notes no longer describe current source: README records a separate 2026-09-22 live AI generation check, and the host now has automated navigation/builder tests.
 
 ## Executed results
 

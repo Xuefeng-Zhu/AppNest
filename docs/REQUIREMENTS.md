@@ -29,8 +29,14 @@ Status meanings: **tested** = locally executed evidence; **implemented** = sourc
 
 ## Additional scope
 
+### Rich personal mini-apps (2026-09-22)
+
+Implemented: Daily Planner Today/Tasks/Progress, dedicated detail/editor pages, app identity and themed tabs/desktop navigation, authenticated page/record URLs, guarded unsaved edits, retained filters/search/pagination/scroll, grouped database-wide summaries, independent personal reminder times, owner delivery and typed reminder state. Manual and AI definition editing share capability gates, strict references, publication diffs and canonical compatibility checks.
+
+Automated acceptance covers legacy hashes and records; invalid navigation/action references; semantic page edits; preview/live query parity; rapid navigation, unavailable records, stale responses, revoked access and read-only roles; local midnight/DST boundaries and undated tasks; reminder status transitions, rescheduling/clearing, explicit enrollment, deduplication, archive suppression and restart recovery. Exact executed results and remaining live browser checks are recorded in [VERIFICATION.md](VERIFICATION.md). Isolated rendered screenshots do not prove connected end-to-end delivery. See [MINI_APPS.md](MINI_APPS.md) for the implemented contract.
+
 Typed endpoints cover manifests/list/templates/instantiate/remix/archive/pin; builder begin/get/patch/generate/publish; record query/get and create/patch through the uniform action endpoint; invitations/grants; event streams; inbox/read and run history. Notification effects have no arbitrary client-callable endpoint. All seven semantic components exist; approved view tokens compose list/detail/action/capacity cards, forms, boards and summaries rather than arbitrary widgets.
 
 Generated source and migrations are delivered. The JSONB adapter and custom database guards are documented and tested. Operational request/job/run logs and local guardrails are present. External production auth/email/Redis/storage, cloud deployment, attachments, comprehensive performance/retention operations and full accessibility certification remain deferred as documented in SECURITY.md.
 
-The central **template/manual** demo is verified end to end. Real natural-language generation through Nebius Nemotron is now verified through an unpublished preview. The complete **live AI** demo still requires a credentialed edit and the publish/share/reminder sequence; a successful generation alone is not evidence of that full sequence.
+The central **template/manual** demo is verified end to end. Real natural-language generation through Nebius Nemotron also created and published Plant Corner and Trip Kit, with authenticated live record editing, workflow transitions and summary counts. A credentialed semantic label edit preserved the rest of the definition exactly. See [the AI creation check](AI_CREATION_CHECK.md). AI-authored additive field changes and the complete AI sharing/reminder sequence remain separate unverified layers.

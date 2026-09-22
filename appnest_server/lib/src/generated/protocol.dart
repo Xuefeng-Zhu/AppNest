@@ -15,6 +15,7 @@ import 'package:appnest_server/src/generated/activity_item.dart' as _irfbx1ex;
 import 'package:appnest_server/src/generated/app_manifest.dart' as _i5x0vch8;
 import 'package:appnest_server/src/generated/inbox_item.dart' as _iofnszjt;
 import 'package:appnest_server/src/generated/member_info.dart' as _ii9ccrrn;
+import 'package:appnest_server/src/generated/reminder_state.dart' as _ihdyt6mq;
 import 'package:appnest_server/src/generated/template_info.dart' as _iacdzrq5;
 import 'package:appnest_server/src/generated/workspace_info.dart' as _i829frra;
 import 'package:serverpod/protocol.dart' as _isp;
@@ -55,6 +56,8 @@ import 'outbox_event.dart' as _i6i2iffh;
 import 'platform_info.dart' as _ici3to49;
 import 'publish_request.dart' as _iijemlr5;
 import 'record_page.dart' as _i4a9pphb;
+import 'record_summary.dart' as _ifx2sflx;
+import 'reminder_state.dart' as _ipsxd53m;
 import 'resource_pool.dart' as _i6hl3xhc;
 import 'runtime_record.dart' as _ilpx295a;
 import 'template.dart' as _ibutn46j;
@@ -91,6 +94,8 @@ export 'outbox_event.dart';
 export 'platform_info.dart';
 export 'publish_request.dart';
 export 'record_page.dart';
+export 'record_summary.dart';
+export 'reminder_state.dart';
 export 'resource_pool.dart';
 export 'runtime_record.dart';
 export 'template.dart';
@@ -2254,6 +2259,12 @@ class Protocol extends _is.DatabaseSerializationManager {
     if (t == _i4a9pphb.RecordPage) {
       return _i4a9pphb.RecordPage.fromJson(data) as T;
     }
+    if (t == _ifx2sflx.RecordSummary) {
+      return _ifx2sflx.RecordSummary.fromJson(data) as T;
+    }
+    if (t == _ipsxd53m.ReminderState) {
+      return _ipsxd53m.ReminderState.fromJson(data) as T;
+    }
     if (t == _i6hl3xhc.ResourcePool) {
       return _i6hl3xhc.ResourcePool.fromJson(data) as T;
     }
@@ -2375,6 +2386,14 @@ class Protocol extends _is.DatabaseSerializationManager {
     if (t == _is.getType<_i4a9pphb.RecordPage?>()) {
       return (data != null ? _i4a9pphb.RecordPage.fromJson(data) : null) as T;
     }
+    if (t == _is.getType<_ifx2sflx.RecordSummary?>()) {
+      return (data != null ? _ifx2sflx.RecordSummary.fromJson(data) : null)
+          as T;
+    }
+    if (t == _is.getType<_ipsxd53m.ReminderState?>()) {
+      return (data != null ? _ipsxd53m.ReminderState.fromJson(data) : null)
+          as T;
+    }
     if (t == _is.getType<_i6hl3xhc.ResourcePool?>()) {
       return (data != null ? _i6hl3xhc.ResourcePool.fromJson(data) : null) as T;
     }
@@ -2405,6 +2424,12 @@ class Protocol extends _is.DatabaseSerializationManager {
     if (t == List<String>) {
       return (data as List).map((e) => deserialize<String>(e)).toList() as T;
     }
+    if (t == _is.getType<List<String>?>()) {
+      return (data != null
+              ? (data as List).map((e) => deserialize<String>(e)).toList()
+              : null)
+          as T;
+    }
     if (t == List<int>) {
       return (data as List).map((e) => deserialize<int>(e)).toList() as T;
     }
@@ -2413,6 +2438,11 @@ class Protocol extends _is.DatabaseSerializationManager {
               .map((e) => deserialize<_ilpx295a.RuntimeRecord>(e))
               .toList()
           as T;
+    }
+    if (t == Map<String, int>) {
+      return (data as Map).map(
+        (k, v) => MapEntry(deserialize<String>(k), deserialize<int>(v)),
+      ) as T;
     }
     if (t == List<_i829frra.WorkspaceInfo>) {
       return (data as List)
@@ -2441,6 +2471,12 @@ class Protocol extends _is.DatabaseSerializationManager {
     if (t == List<_irfbx1ex.ActivityItem>) {
       return (data as List)
               .map((e) => deserialize<_irfbx1ex.ActivityItem>(e))
+              .toList()
+          as T;
+    }
+    if (t == List<_ihdyt6mq.ReminderState>) {
+      return (data as List)
+              .map((e) => deserialize<_ihdyt6mq.ReminderState>(e))
               .toList()
           as T;
     }
@@ -2495,6 +2531,8 @@ class Protocol extends _is.DatabaseSerializationManager {
       _ici3to49.PlatformInfo => 'PlatformInfo',
       _iijemlr5.PublishRequest => 'PublishRequest',
       _i4a9pphb.RecordPage => 'RecordPage',
+      _ifx2sflx.RecordSummary => 'RecordSummary',
+      _ipsxd53m.ReminderState => 'ReminderState',
       _i6hl3xhc.ResourcePool => 'ResourcePool',
       _ilpx295a.RuntimeRecord => 'RuntimeRecord',
       _ibutn46j.Template => 'Template',
@@ -2576,6 +2614,10 @@ class Protocol extends _is.DatabaseSerializationManager {
         return 'PublishRequest';
       case _i4a9pphb.RecordPage():
         return 'RecordPage';
+      case _ifx2sflx.RecordSummary():
+        return 'RecordSummary';
+      case _ipsxd53m.ReminderState():
+        return 'ReminderState';
       case _i6hl3xhc.ResourcePool():
         return 'ResourcePool';
       case _ilpx295a.RuntimeRecord():
@@ -2707,6 +2749,12 @@ class Protocol extends _is.DatabaseSerializationManager {
     }
     if (dataClassName == 'RecordPage') {
       return deserialize<_i4a9pphb.RecordPage>(data['data']);
+    }
+    if (dataClassName == 'RecordSummary') {
+      return deserialize<_ifx2sflx.RecordSummary>(data['data']);
+    }
+    if (dataClassName == 'ReminderState') {
+      return deserialize<_ipsxd53m.ReminderState>(data['data']);
     }
     if (dataClassName == 'ResourcePool') {
       return deserialize<_i6hl3xhc.ResourcePool>(data['data']);

@@ -74,6 +74,48 @@ Map<String, dynamic> appSpecSchema() {
       'titleFieldId': id,
       'groupByFieldId': id,
       'actionIds': arr(id, 32),
+      'presentation': {
+        'enum': ['compact', 'cards'],
+      },
+      'fieldIds': arr(id, Limits.fields),
+      'filterFieldIds': arr(id, Limits.filters),
+      'query': obj({
+        'filters': arr(
+          obj(
+            {
+              'fieldId': id,
+              'operator': {
+                'enum': ['eq', 'in', 'gte', 'lte', 'lt', 'contains'],
+              },
+              'value': {},
+            },
+            ['fieldId', 'operator', 'value'],
+          ),
+          Limits.filters,
+        ),
+        'sort': arr(
+          obj(
+            {
+              'fieldId': id,
+              'descending': {'type': 'boolean'},
+            },
+            ['fieldId', 'descending'],
+          ),
+          2,
+        ),
+        'limit': {'type': 'integer', 'minimum': 1, 'maximum': Limits.pageSize},
+      }, []),
+      'dateFilter': obj(
+        {
+          'fieldId': id,
+          'period': {
+            'enum': ['today', 'overdue'],
+          },
+        },
+        ['fieldId', 'period'],
+      ),
+      'detailPageId': id,
+      'formPageId': id,
     },
     ['id', 'type', 'collectionId'],
   );
@@ -102,14 +144,47 @@ Map<String, dynamic> appSpecSchema() {
       'effect': obj(
         {
           'type': {
-            'enum': ['notifyActiveClaimants', 'notifyAssignee'],
+            'enum': ['notifyActiveClaimants', 'notifyAssignee', 'notifyOwner'],
           },
           'channel': {'const': 'inApp'},
         },
         ['type', 'channel'],
       ),
+      'condition': obj(
+        {
+          'fieldId': id,
+          'value': {'type': 'string', 'minLength': 1, 'maxLength': 80},
+        },
+        ['fieldId', 'value'],
+      ),
     },
     ['id', 'trigger', 'effect'],
+  );
+  final page = obj(
+    {
+      'id': id,
+      'title': label,
+      'viewIds': {...arr(id, 8), 'minItems': 1, 'uniqueItems': true},
+      'showDate': {'type': 'boolean'},
+      'primaryActionId': id,
+    },
+    ['id', 'title', 'viewIds'],
+  );
+  final tab = obj(
+    {
+      'pageId': id,
+      'label': {'type': 'string', 'minLength': 1, 'maxLength': 40},
+      'icon': {'enum': navigationIcons.toList()},
+    },
+    ['pageId', 'label', 'icon'],
+  );
+  final navigation = obj(
+    {
+      'entryPageId': id,
+      'pages': {...arr(page, 16), 'minItems': 1},
+      'tabs': {...arr(tab, 5), 'minItems': 1},
+    },
+    ['entryPageId', 'pages', 'tabs'],
   );
   return {
     r'$schema': 'https://json-schema.org/draft/2020-12/schema',
@@ -131,6 +206,7 @@ Map<String, dynamic> appSpecSchema() {
         'actions': arr(action, Limits.actions),
         'policyPresetRequest': {'enum': policyPresets.toList()},
         'automationRequests': arr(rule, Limits.rules),
+        'navigation': navigation,
       },
       [
         'formatVersion',

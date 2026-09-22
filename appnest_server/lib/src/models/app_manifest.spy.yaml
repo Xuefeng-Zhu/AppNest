@@ -10,3 +10,4 @@ fields:
   pinned: bool
   recordCount: int
   availablePlaces: int
+  approvedRuleIds: List<String>?

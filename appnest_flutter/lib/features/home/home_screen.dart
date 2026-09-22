@@ -10,7 +10,9 @@ import '../mini_app/mini_app_screen.dart';
 import 'home_load_failure.dart';
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key});
+  final Future<void> Function(int appId, {int? recordId})? onOpenApp;
+  final int refreshToken;
+  const HomeScreen({super.key, this.onOpenApp, this.refreshToken = 0});
   @override
   State<HomeScreen> createState() => _HomeScreenState();
 }
@@ -40,6 +42,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     prompt.dispose();
     super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(covariant HomeScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.refreshToken != widget.refreshToken) load();
   }
 
   @override
@@ -102,10 +110,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> open(int id) async {
+  Future<void> open(int id, {int? recordId}) async {
+    if (widget.onOpenApp != null) {
+      await widget.onOpenApp!(id, recordId: recordId);
+      return;
+    }
     await Navigator.push(
       context,
-      MaterialPageRoute<void>(builder: (_) => MiniAppScreen(appId: id)),
+      MaterialPageRoute<void>(
+        builder: (_) => MiniAppScreen(appId: id, initialRecordId: recordId),
+      ),
     );
     load();
   }
@@ -114,13 +128,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     try {
       var d = await client.builder.begin(workspaceId!, templateKey, null);
       if (generate) {
-        d = await client.builder.generate(d.draftId, d.mutation, prompt.text);
+        d = await client.builder.generate(
+          d.draftId,
+          d.mutation,
+          prompt.text,
+          startFromScratch: true,
+        );
       }
       if (mounted) {
-        await Navigator.push(
+        final published = await Navigator.push<int>(
           context,
-          MaterialPageRoute<void>(builder: (_) => BuilderScreen(initial: d)),
+          MaterialPageRoute<int>(builder: (_) => BuilderScreen(initial: d)),
         );
+        if (published != null && mounted) await open(published);
       }
       load();
     } catch (e) {
@@ -593,7 +613,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                           subtitle: Text('${n.body}\n${n.createdAt.toLocal()}'),
                           onTap: () async {
                             await client.runtime.readNotification(n.id);
-                            open(n.appId);
+                            open(n.appId, recordId: n.recordId);
                           },
                         ),
                       ),

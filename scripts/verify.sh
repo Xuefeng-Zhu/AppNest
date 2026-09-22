@@ -5,7 +5,8 @@ cd "$appnest_root"
 dart analyze --fatal-infos
 dart format --output=none --set-exit-if-changed appnest_server/lib appnest_server/test appnest_server/bin appnest_client/bin appnest_flutter/lib appnest_flutter/test packages scripts
 cd "$appnest_root/packages/appnest_spec"
-dart test
+# Exercise both 23- and 25-hour local days in the relative-day contract tests.
+TZ=America/Los_Angeles dart test
 cd "$appnest_root/packages/appnest_renderer"
 flutter test
 cd "$appnest_root/appnest_flutter"

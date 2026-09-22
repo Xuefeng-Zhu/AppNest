@@ -15,6 +15,7 @@ import 'package:appnest_client/src/protocol/activity_item.dart' as _ihdhb6mh;
 import 'package:appnest_client/src/protocol/app_manifest.dart' as _igbv6cp9;
 import 'package:appnest_client/src/protocol/inbox_item.dart' as _ic0zicoc;
 import 'package:appnest_client/src/protocol/member_info.dart' as _iqjsfrnp;
+import 'package:appnest_client/src/protocol/reminder_state.dart' as _i1a6ysmx;
 import 'package:appnest_client/src/protocol/template_info.dart' as _ik25ew2o;
 import 'package:appnest_client/src/protocol/workspace_info.dart' as _i1i173ve;
 import 'package:serverpod_auth_core_client/serverpod_auth_core_client.dart'
@@ -22,6 +23,7 @@ import 'package:serverpod_auth_core_client/serverpod_auth_core_client.dart'
 import 'package:serverpod_auth_idp_client/serverpod_auth_idp_client.dart'
     as _iaic;
 import 'package:serverpod_client/serverpod_client.dart' as _isc;
+
 import 'action_outcome.dart' as _isykbnbw;
 import 'action_request.dart' as _ii1w3lxm;
 import 'activity_item.dart' as _irh51hj1;
@@ -35,6 +37,8 @@ import 'nest_error.dart' as _i0tc2cek;
 import 'platform_info.dart' as _ici3to49;
 import 'publish_request.dart' as _iijemlr5;
 import 'record_page.dart' as _i4a9pphb;
+import 'record_summary.dart' as _ifx2sflx;
+import 'reminder_state.dart' as _ipsxd53m;
 import 'runtime_record.dart' as _ilpx295a;
 import 'template_info.dart' as _i1ykl0x7;
 import 'workspace_info.dart' as _ixz9batj;
@@ -51,6 +55,8 @@ export 'nest_error.dart';
 export 'platform_info.dart';
 export 'publish_request.dart';
 export 'record_page.dart';
+export 'record_summary.dart';
+export 'reminder_state.dart';
 export 'runtime_record.dart';
 export 'template_info.dart';
 export 'workspace_info.dart';
@@ -129,6 +135,12 @@ class Protocol extends _isc.SerializationManager {
     if (t == _i4a9pphb.RecordPage) {
       return _i4a9pphb.RecordPage.fromJson(data) as T;
     }
+    if (t == _ifx2sflx.RecordSummary) {
+      return _ifx2sflx.RecordSummary.fromJson(data) as T;
+    }
+    if (t == _ipsxd53m.ReminderState) {
+      return _ipsxd53m.ReminderState.fromJson(data) as T;
+    }
     if (t == _ilpx295a.RuntimeRecord) {
       return _ilpx295a.RuntimeRecord.fromJson(data) as T;
     }
@@ -181,6 +193,14 @@ class Protocol extends _isc.SerializationManager {
     if (t == _isc.getType<_i4a9pphb.RecordPage?>()) {
       return (data != null ? _i4a9pphb.RecordPage.fromJson(data) : null) as T;
     }
+    if (t == _isc.getType<_ifx2sflx.RecordSummary?>()) {
+      return (data != null ? _ifx2sflx.RecordSummary.fromJson(data) : null)
+          as T;
+    }
+    if (t == _isc.getType<_ipsxd53m.ReminderState?>()) {
+      return (data != null ? _ipsxd53m.ReminderState.fromJson(data) : null)
+          as T;
+    }
     if (t == _isc.getType<_ilpx295a.RuntimeRecord?>()) {
       return (data != null ? _ilpx295a.RuntimeRecord.fromJson(data) : null)
           as T;
@@ -198,6 +218,12 @@ class Protocol extends _isc.SerializationManager {
     if (t == List<String>) {
       return (data as List).map((e) => deserialize<String>(e)).toList() as T;
     }
+    if (t == _isc.getType<List<String>?>()) {
+      return (data != null
+              ? (data as List).map((e) => deserialize<String>(e)).toList()
+              : null)
+          as T;
+    }
     if (t == List<int>) {
       return (data as List).map((e) => deserialize<int>(e)).toList() as T;
     }
@@ -206,6 +232,11 @@ class Protocol extends _isc.SerializationManager {
               .map((e) => deserialize<_ilpx295a.RuntimeRecord>(e))
               .toList()
           as T;
+    }
+    if (t == Map<String, int>) {
+      return (data as Map).map(
+        (k, v) => MapEntry(deserialize<String>(k), deserialize<int>(v)),
+      ) as T;
     }
     if (t == List<_i1i173ve.WorkspaceInfo>) {
       return (data as List)
@@ -234,6 +265,12 @@ class Protocol extends _isc.SerializationManager {
     if (t == List<_ihdhb6mh.ActivityItem>) {
       return (data as List)
               .map((e) => deserialize<_ihdhb6mh.ActivityItem>(e))
+              .toList()
+          as T;
+    }
+    if (t == List<_i1a6ysmx.ReminderState>) {
+      return (data as List)
+              .map((e) => deserialize<_i1a6ysmx.ReminderState>(e))
               .toList()
           as T;
     }
@@ -267,6 +304,8 @@ class Protocol extends _isc.SerializationManager {
       _ici3to49.PlatformInfo => 'PlatformInfo',
       _iijemlr5.PublishRequest => 'PublishRequest',
       _i4a9pphb.RecordPage => 'RecordPage',
+      _ifx2sflx.RecordSummary => 'RecordSummary',
+      _ipsxd53m.ReminderState => 'ReminderState',
       _ilpx295a.RuntimeRecord => 'RuntimeRecord',
       _i1ykl0x7.TemplateInfo => 'TemplateInfo',
       _ixz9batj.WorkspaceInfo => 'WorkspaceInfo',
@@ -310,6 +349,10 @@ class Protocol extends _isc.SerializationManager {
         return 'PublishRequest';
       case _i4a9pphb.RecordPage():
         return 'RecordPage';
+      case _ifx2sflx.RecordSummary():
+        return 'RecordSummary';
+      case _ipsxd53m.ReminderState():
+        return 'ReminderState';
       case _ilpx295a.RuntimeRecord():
         return 'RuntimeRecord';
       case _i1ykl0x7.TemplateInfo():
@@ -376,6 +419,12 @@ class Protocol extends _isc.SerializationManager {
     }
     if (dataClassName == 'RecordPage') {
       return deserialize<_i4a9pphb.RecordPage>(data['data']);
+    }
+    if (dataClassName == 'RecordSummary') {
+      return deserialize<_ifx2sflx.RecordSummary>(data['data']);
+    }
+    if (dataClassName == 'ReminderState') {
+      return deserialize<_ipsxd53m.ReminderState>(data['data']);
     }
     if (dataClassName == 'RuntimeRecord') {
       return deserialize<_ilpx295a.RuntimeRecord>(data['data']);
