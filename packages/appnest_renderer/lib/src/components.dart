@@ -1,0 +1,442 @@
+part of '../appnest_renderer.dart';
+
+typedef RecordAction = Future<void> Function(ActionSpec, RuntimeItem?);
+
+String _displayDate(BuildContext context, String value) {
+  final date = DateTime.parse(value).toLocal(),
+      l = MaterialLocalizations.of(context);
+  return '${l.formatMediumDate(date)} · ${l.formatTimeOfDay(TimeOfDay.fromDateTime(date))}';
+}
+
+class RecordList extends StatelessWidget {
+  final AppSpec spec;
+  final ViewSpec view;
+  final List<RuntimeItem> items;
+  final RecordAction onAction;
+  const RecordList({
+    super.key,
+    required this.spec,
+    required this.view,
+    required this.items,
+    required this.onAction,
+  });
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: items
+        .map(
+          (item) => Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: RecordDetails(
+              spec: spec,
+              view: view,
+              item: item,
+              onAction: onAction,
+            ),
+          ),
+        )
+        .toList(),
+  );
+}
+
+class RecordDetails extends StatelessWidget {
+  final AppSpec spec;
+  final ViewSpec view;
+  final RuntimeItem item;
+  final RecordAction onAction;
+  const RecordDetails({
+    super.key,
+    required this.spec,
+    required this.view,
+    required this.item,
+    required this.onAction,
+  });
+  @override
+  Widget build(BuildContext context) {
+    final col = spec.collection(item.collectionId);
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '${item.data[view.titleFieldId ?? col.fields.first.id] ?? 'Untitled'}',
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+            const SizedBox(height: 12),
+            for (final f in col.fields.where(
+              (f) =>
+                  !{'capacity', 'action'}.contains(view.type) &&
+                  f.id != view.titleFieldId &&
+                  item.data[f.id] != null,
+            ))
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Text(
+                  '${f.label}: ${f.type == FieldType.timestamp ? _displayDate(context, item.data[f.id] as String) : item.data[f.id]}',
+                ),
+              ),
+            if (item.capacity != null) CapacitySummary(item: item),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: view.actionIds
+                  .where(item.allowedActions.contains)
+                  .map(spec.action)
+                  .where(
+                    (a) =>
+                        a.capability != 'records.create.v1' &&
+                        !(a.capability == 'capacity.claim.v1' &&
+                            item.claimed) &&
+                        !(a.capability == 'capacity.release.v1' &&
+                            !item.claimed),
+                  )
+                  .map(
+                    (a) => ActionButton(
+                      action: a,
+                      onPressed: () => onAction(a, item),
+                    ),
+                  )
+                  .toList(),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class ActionButton extends StatelessWidget {
+  final ActionSpec action;
+  final VoidCallback? onPressed;
+  const ActionButton({super.key, required this.action, this.onPressed});
+  @override
+  Widget build(BuildContext context) =>
+      OutlinedButton(onPressed: onPressed, child: Text(action.label));
+}
+
+class CapacitySummary extends StatelessWidget {
+  final RuntimeItem item;
+  const CapacitySummary({super.key, required this.item});
+  @override
+  Widget build(BuildContext context) => Text(
+    '${(item.capacity ?? 0) - (item.allocated ?? 0)} of ${item.capacity} places available${item.claimed ? ' · Your place is confirmed' : ''}',
+    style: const TextStyle(fontWeight: FontWeight.w600),
+  );
+}
+
+class Summary extends StatelessWidget {
+  final List<RuntimeItem> items;
+  final int total;
+  final String? groupField;
+  const Summary({
+    super.key,
+    required this.items,
+    required this.total,
+    this.groupField,
+  });
+  @override
+  Widget build(BuildContext context) {
+    final groups = <String, int>{};
+    for (final i in items) {
+      final key = '${i.data[groupField] ?? 'Records'}';
+      groups[key] = (groups[key] ?? 0) + 1;
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          '$total records',
+          style: Theme.of(context).textTheme.headlineMedium,
+        ),
+        if (items.length < total) const Text('Groups below cover this page.'),
+        ...groups.entries.map(
+          (e) => ListTile(title: Text(e.key), trailing: Text('${e.value}')),
+        ),
+      ],
+    );
+  }
+}
+
+class StatusBoard extends StatelessWidget {
+  final AppSpec spec;
+  final ViewSpec view;
+  final List<RuntimeItem> items;
+  final RecordAction onAction;
+  const StatusBoard({
+    super.key,
+    required this.spec,
+    required this.view,
+    required this.items,
+    required this.onAction,
+  });
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, c) {
+      final statuses = spec
+          .collection(view.collectionId)
+          .field(view.groupByFieldId!)
+          .choices;
+      return Wrap(
+        spacing: 16,
+        runSpacing: 16,
+        children: statuses
+            .map(
+              (status) => SizedBox(
+                width: c.maxWidth < 700 ? c.maxWidth : (c.maxWidth - 32) / 3,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.all(8),
+                      child: Text(
+                        status,
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                    ),
+                    RecordList(
+                      spec: spec,
+                      view: view,
+                      items: items
+                          .where((r) => r.data[view.groupByFieldId] == status)
+                          .toList(),
+                      onAction: onAction,
+                    ),
+                  ],
+                ),
+              ),
+            )
+            .toList(),
+      );
+    },
+  );
+}
+
+class RecordForm extends StatefulWidget {
+  final CollectionSpec collection;
+  final Map<String, dynamic>? initial;
+  final Future<List<String>> Function() members;
+  final int? capacity;
+  const RecordForm({
+    super.key,
+    required this.collection,
+    this.initial,
+    required this.members,
+    this.capacity,
+  });
+  @override
+  State<RecordForm> createState() => _RecordFormState();
+}
+
+class _RecordFormState extends State<RecordForm> {
+  final controllers = <String, TextEditingController>{};
+  final values = <String, dynamic>{};
+  List<String> members = [];
+  String? error;
+  late final TextEditingController capacity;
+  bool get creating => widget.initial == null;
+  List<FieldSpec> get fields => widget.collection.fields
+      .where(
+        (f) =>
+            creating ||
+            !widget.collection.behaviors.any((b) => b.fieldId == f.id),
+      )
+      .toList();
+  @override
+  void initState() {
+    super.initState();
+    capacity = TextEditingController(text: '${widget.capacity ?? 1}');
+    for (final f in fields) {
+      final value = widget.initial?[f.id];
+      controllers[f.id] = TextEditingController(text: value?.toString() ?? '');
+      values[f.id] =
+          value ??
+          (f.required
+              ? (f.type == FieldType.choice
+                    ? f.choices.first
+                    : f.type == FieldType.boolean
+                    ? false
+                    : null)
+              : null);
+    }
+    widget.members().then((list) {
+      if (mounted) setState(() => members = list);
+    });
+  }
+
+  @override
+  void dispose() {
+    for (final c in controllers.values) {
+      c.dispose();
+    }
+    capacity.dispose();
+    super.dispose();
+  }
+
+  void save() {
+    try {
+      final data = <String, dynamic>{};
+      for (final f in fields) {
+        final text = controllers[f.id]!.text;
+        data[f.id] = switch (f.type) {
+          FieldType.choice ||
+          FieldType.boolean ||
+          FieldType.member => values[f.id],
+          FieldType.integer => text.isEmpty ? null : int.parse(text),
+          FieldType.number => text.isEmpty ? null : double.parse(text),
+          FieldType.timestamp =>
+            text.isEmpty
+                ? null
+                : DateTime.parse(text).toUtc().toIso8601String(),
+          _ => text.isEmpty ? null : text,
+        };
+        f.normalize(data[f.id]);
+      }
+      final input = <String, dynamic>{'data': data};
+      if (creating &&
+          widget.collection.behaviors.any((b) => b.type == 'capacity.v1'))
+        input['capacity'] = int.parse(capacity.text);
+      Navigator.pop(context, input);
+    } catch (e) {
+      setState(() => error = 'Check your values: $e');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: Text(
+      creating ? 'Add ${widget.collection.label.toLowerCase()}' : 'Edit record',
+    ),
+    content: SizedBox(
+      width: 460,
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (final f in fields)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 16),
+                child: switch (f.type) {
+                  FieldType.choice ||
+                  FieldType.member => DropdownButtonFormField<String>(
+                    initialValue: values[f.id] as String?,
+                    decoration: InputDecoration(
+                      labelText: '${f.label}${f.required ? ' *' : ''}',
+                    ),
+                    items: (f.type == FieldType.choice ? f.choices : members)
+                        .map(
+                          (v) => DropdownMenuItem(
+                            value: v,
+                            child: Text(v, overflow: TextOverflow.ellipsis),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: (v) => values[f.id] = v,
+                  ),
+                  FieldType.boolean => CheckboxListTile(
+                    title: Text(f.label),
+                    tristate: !f.required,
+                    value: values[f.id] as bool? ?? (f.required ? false : null),
+                    onChanged: (v) => setState(() => values[f.id] = v),
+                  ),
+                  _ => TextField(
+                    controller: controllers[f.id],
+                    decoration: InputDecoration(
+                      labelText: '${f.label}${f.required ? ' *' : ''}',
+                      helperText: f.type == FieldType.timestamp
+                          ? 'Local date and time: 2026-09-22 10:00'
+                          : null,
+                    ),
+                    keyboardType:
+                        {FieldType.integer, FieldType.number}.contains(f.type)
+                        ? TextInputType.number
+                        : TextInputType.text,
+                    maxLines: f.type == FieldType.text ? null : 1,
+                  ),
+                },
+              ),
+            if (creating &&
+                widget.collection.behaviors.any((b) => b.type == 'capacity.v1'))
+              TextField(
+                controller: capacity,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'Capacity *'),
+              ),
+            if (error != null)
+              Text(
+                error!,
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+          ],
+        ),
+      ),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('Cancel'),
+      ),
+      FilledButton(onPressed: save, child: const Text('Save')),
+    ],
+  );
+}
+
+class _ValueDialog extends StatefulWidget {
+  final String label, initial;
+  final bool numeric;
+  const _ValueDialog({
+    required this.label,
+    this.initial = '',
+    this.numeric = false,
+  });
+  @override
+  State<_ValueDialog> createState() => _ValueDialogState();
+}
+
+class _ValueDialogState extends State<_ValueDialog> {
+  late final controller = TextEditingController(text: widget.initial);
+  @override
+  void dispose() {
+    controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: Text(widget.label),
+    content: TextField(
+      controller: controller,
+      keyboardType: widget.numeric ? TextInputType.number : TextInputType.text,
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('Cancel'),
+      ),
+      FilledButton(
+        onPressed: () => Navigator.pop(context, {'value': controller.text}),
+        child: const Text('Save'),
+      ),
+    ],
+  );
+}
+
+class _ChoiceDialog extends StatelessWidget {
+  final String label;
+  final List<String> values;
+  const _ChoiceDialog({required this.label, required this.values});
+  @override
+  Widget build(BuildContext context) => SimpleDialog(
+    title: Text(label),
+    children: values
+        .map(
+          (v) => SimpleDialogOption(
+            onPressed: () => Navigator.pop(context, {'value': v}),
+            child: Text(v),
+          ),
+        )
+        .toList(),
+  );
+}

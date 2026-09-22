@@ -1,0 +1,44 @@
+emailIdp:
+  - login:
+  - startRegistration:
+  - verifyRegistrationCode:
+  - finishRegistration:
+  - startPasswordReset:
+  - verifyPasswordResetCode:
+  - finishPasswordReset:
+  - hasAccount:
+jwtRefresh:
+  - refreshAccessToken:
+apps:
+  - workspaces:
+  - createWorkspace:
+  - list:
+  - manifest:
+  - templates:
+  - instantiate:
+  - remix:
+  - pin:
+  - archive:
+  - invite:
+  - acceptInvitation:
+  - revokeInvitation:
+  - members:
+  - setGrant:
+  - activity:
+builder:
+  - platform:
+  - begin:
+  - get:
+  - patch:
+  - generate:
+  - publish:
+  - runs:
+runtime:
+  - query:
+  - get:
+  - execute:
+  - inbox:
+  - readNotification:
+  - events:
+greeting:
+  - hello:

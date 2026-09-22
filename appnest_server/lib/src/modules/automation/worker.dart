@@ -1,0 +1,508 @@
+import 'dart:convert';
+import 'dart:math';
+
+import 'package:appnest_spec/appnest_spec.dart';
+import 'package:serverpod/serverpod.dart';
+
+import '../../generated/protocol.dart';
+import '../../generated/future_calls.dart';
+import '../runtime/access.dart';
+import '../builder/provider.dart';
+
+class Worker {
+  static Future<bool> hasAccess(
+    Session s,
+    MiniApp app,
+    String id,
+    Transaction tx, {
+    bool builder = false,
+  }) async {
+    if (await WorkspaceMember.db.findFirstRow(
+          s,
+          where: (t) =>
+              t.workspaceId.equals(app.workspaceId) & t.actorId.equals(id),
+          transaction: tx,
+        ) ==
+        null) {
+      return false;
+    }
+    if (app.ownerId == id) return true;
+    final grant = await MiniAppGrant.db.findFirstRow(
+      s,
+      where: (t) =>
+          t.appId.equals(app.id!) &
+          t.actorId.equals(id) &
+          t.revoked.equals(false),
+      transaction: tx,
+    );
+    return grant != null && (!builder || grant.role == 'builder');
+  }
+
+  static Future<void> drain(Session s) async {
+    final events = await OutboxEvent.db.find(
+      s,
+      where: (t) =>
+          (t.planned.equals(false) | t.invalidated.equals(false)) &
+          (t.nextAttemptAt <= clock()),
+      orderBy: (t) => t.id,
+      limit: Limits.automationBatch,
+    );
+    for (final e in events) {
+      try {
+        await plan(s, e.id!);
+        // Stream clients also poll the committed control revision. This independent stage
+        // never prevents reminder planning, and reminder failures never lose invalidation.
+        e.invalidated = true;
+        await s.db.unsafeExecute(
+          'UPDATE nest_outbox SET invalidated=true WHERE id=@id',
+          parameters: QueryParameters.named({'id': e.id}),
+        );
+      } catch (_) {
+        e.attempts++;
+        e.nextAttemptAt = clock().add(
+          Duration(seconds: min(300, 1 << min(e.attempts, 8))),
+        );
+        await s.db.unsafeExecute(
+          'UPDATE nest_outbox SET attempts=@attempts,"nextAttemptAt"=@next WHERE id=@id',
+          parameters: QueryParameters.named({
+            'attempts': e.attempts,
+            'next': e.nextAttemptAt,
+            'id': e.id,
+          }),
+        );
+        s.log('outbox_retry event_id=${e.id} attempt=${e.attempts}');
+      }
+    }
+    final jobs = await GenerationJob.db.find(
+      s,
+      where: (t) =>
+          t.status.inSet({'queued', 'generating', 'validating'}) &
+          (t.nextAttemptAt <= clock()),
+      orderBy: (t) => t.id,
+      limit: 1,
+    );
+    for (final job in jobs) {
+      await generate(s, job.id!);
+    }
+    final runs = await AutomationRun.db.find(
+      s,
+      where: (t) =>
+          t.status.equals('pending') &
+          (t.nextAttemptAt <= clock().add(const Duration(minutes: 1))),
+      orderBy: (t) => t.id,
+      limit: Limits.automationBatch,
+    );
+    for (final run in runs) {
+      if (!run.dueAt.isAfter(clock())) {
+        try {
+          await execute(s, run.id!);
+        } catch (_) {
+          run.attempts++;
+          run.status = run.attempts >= 5 ? 'failed' : 'pending';
+          run.errorCategory = 'retryableFailure';
+          run.nextAttemptAt = clock().add(Duration(seconds: 1 << run.attempts));
+          await s.db.unsafeExecute(
+            'UPDATE nest_run SET attempts=@attempts,status=@status,"errorCategory"=@error,"nextAttemptAt"=@next WHERE id=@id AND status=\'pending\' AND "leaseGeneration"=@lease',
+            parameters: QueryParameters.named({
+              'attempts': run.attempts,
+              'status': run.status,
+              'error': 'retryableFailure',
+              'next': run.nextAttemptAt,
+              'id': run.id,
+              'lease': run.leaseGeneration,
+            }),
+          );
+          s.log('run_retry run_id=${run.id} attempt=${run.attempts}');
+        }
+      } else {
+        await s.serverpod.futureCalls
+            .callAtTime(run.dueAt, identifier: 'run-${run.id}')
+            .nestWorker
+            .execute(run.id!);
+      }
+    }
+    if (events.isNotEmpty || jobs.isNotEmpty || runs.isNotEmpty) {
+      s.log(
+        'reconcile outbox_batch=${events.length} generation_batch=${jobs.length} run_batch=${runs.length}',
+      );
+    }
+  }
+
+  static Future<void> plan(Session s, int eventId) => s.db.transaction((
+    tx,
+  ) async {
+    var e = await OutboxEvent.db.findById(s, eventId, transaction: tx);
+    if (e == null || e.planned) return;
+    final app = await MiniApp.db.findFirstRow(
+      s,
+      where: (t) => t.id.equals(e!.appId),
+      transaction: tx,
+      lockMode: LockMode.forUpdate,
+    );
+    if (app == null) return;
+    e = await OutboxEvent.db.findById(s, eventId, transaction: tx);
+    if (e == null || e.planned) return;
+    if (!app.archived && e.recordId != null) {
+      final record = await EntityRecord.db.findFirstRow(
+        s,
+        where: (t) =>
+            t.id.equals(e!.recordId!) &
+            t.appId.equals(app.id!) &
+            t.deleted.equals(false),
+        transaction: tx,
+      );
+      final rules = await Automation.db.find(
+        s,
+        where: (t) => t.appId.equals(app.id!) & t.enabled.equals(true),
+        transaction: tx,
+      );
+      if (record != null) {
+        for (final rule in rules) {
+          final definition = AutomationSpec.fromJson(
+            payload(jsonDecode(rule.ruleJson)),
+          );
+          if (definition.collectionId != record.collectionId) continue;
+          final date = payload(record.data)[definition.fieldId];
+          if (date == null) continue;
+          final prior = await AutomationRun.db.findFirstRow(
+            s,
+            where: (t) =>
+                t.automationId.equals(rule.id!) &
+                t.recordId.equals(record.id!) &
+                t.ruleVersion.equals(rule.ruleVersion),
+            transaction: tx,
+          );
+          if (record.createdAt.isBefore(rule.activatedAt) &&
+              e.kind != 'activateExisting:${app.activeVersionId}' &&
+              prior == null) {
+            continue;
+          }
+          final due = DateTime.parse(
+            date as String,
+          ).subtract(Duration(seconds: definition.offsetSeconds));
+          final signature = hashJson({
+            'ruleVersion': rule.ruleVersion,
+            'timestamp': date,
+            'due': due.toIso8601String(),
+          });
+          final occurrence = hashJson({
+            'app': app.id,
+            'rule': rule.id,
+            'record': record.id,
+            'signature': signature,
+          });
+          if (await AutomationRun.db.findFirstRow(
+                s,
+                where: (t) => t.occurrenceKey.equals(occurrence),
+                transaction: tx,
+              ) ==
+              null) {
+            await AutomationRun.db.insertRow(
+              s,
+              AutomationRun(
+                appId: app.id!,
+                automationId: rule.id!,
+                ruleVersion: rule.ruleVersion,
+                recordId: record.id!,
+                occurrenceKey: occurrence,
+                scheduleSignature: signature,
+                dueAt: due,
+                nextAttemptAt: due,
+                status: 'pending',
+                createdAt: clock(),
+              ),
+              transaction: tx,
+            );
+          }
+        }
+      }
+    }
+    e.planned = true;
+    await OutboxEvent.db.updateRow(s, e, transaction: tx);
+  });
+  static Future<void> execute(Session s, int runId) => s.db.transaction((
+    tx,
+  ) async {
+    var run = await AutomationRun.db.findById(s, runId, transaction: tx);
+    if (run == null || run.status != 'pending' || run.dueAt.isAfter(clock())) {
+      return;
+    }
+    final app = await MiniApp.db.findFirstRow(
+      s,
+      where: (t) => t.id.equals(run!.appId),
+      transaction: tx,
+      lockMode: LockMode.forUpdate,
+    );
+    if (app == null) return;
+    run = await AutomationRun.db.findById(s, runId, transaction: tx);
+    if (run == null || run.status != 'pending') return;
+    run.leaseGeneration++;
+    run.attempts++;
+    run.leaseUntil = clock().add(const Duration(seconds: 30));
+    final rule = await Automation.db.findById(
+          s,
+          run.automationId,
+          transaction: tx,
+        ),
+        record = await EntityRecord.db.findById(
+          s,
+          run.recordId,
+          transaction: tx,
+        );
+    var suppress =
+        app.archived ||
+        rule == null ||
+        !rule.enabled ||
+        rule.appId != app.id ||
+        record == null ||
+        record.deleted ||
+        record.appId != app.id;
+    final recipients = <String>{};
+    if (!suppress) {
+      final definition = AutomationSpec.fromJson(
+            payload(jsonDecode(rule.ruleJson)),
+          ),
+          date = payload(record.data)[definition.fieldId];
+      final due = date == null
+          ? null
+          : DateTime.parse(
+              date as String,
+            ).subtract(Duration(seconds: definition.offsetSeconds));
+      suppress =
+          hashJson({
+                'ruleVersion': rule.ruleVersion,
+                'timestamp': date,
+                'due': due?.toIso8601String(),
+              }) !=
+              run.scheduleSignature ||
+          !await hasAccess(s, app, rule.executionActorId, tx, builder: true);
+      if (!suppress) {
+        if (definition.effect == 'notifyActiveClaimants') {
+          final pools = await ResourcePool.db.find(
+            s,
+            where: (t) =>
+                t.appId.equals(app.id!) & t.recordId.equals(record.id!),
+            transaction: tx,
+          );
+          for (final pool in pools) {
+            final claims = await Claim.db.find(
+              s,
+              where: (t) => t.poolId.equals(pool.id!) & t.active.equals(true),
+              limit: Limits.notificationFanout + 1,
+              transaction: tx,
+            );
+            if (claims.length > Limits.notificationFanout) {
+              fail(
+                'quotaExceeded',
+                'Reminder fan-out exceeds the configured limit.',
+              );
+            }
+            recipients.addAll(claims.map((c) => c.actorId));
+          }
+        } else {
+          final version = await AppVersion.db.findById(
+                s,
+                app.activeVersionId!,
+                transaction: tx,
+              ),
+              spec = AppSpec.parse(version!.specJson),
+              col = spec.collection(record.collectionId);
+          for (final b in col.behaviors.where(
+            (b) => b.type == 'assignment.v1',
+          )) {
+            final id = payload(record.data)[b.fieldId];
+            if (id is String) recipients.add(id);
+          }
+        }
+      }
+    }
+    if (recipients.length > Limits.notificationFanout) {
+      fail('quotaExceeded', 'Reminder fan-out exceeds the configured limit.');
+    }
+    if (!suppress) {
+      for (final id in recipients) {
+        if (!await hasAccess(s, app, id, tx)) continue;
+        final key = hashJson({'occurrence': run.occurrenceKey, 'actor': id});
+        if (await Notification.db.findFirstRow(
+              s,
+              where: (t) => t.deliveryKey.equals(key),
+              transaction: tx,
+            ) ==
+            null) {
+          await Notification.db.insertRow(
+            s,
+            Notification(
+              appId: app.id!,
+              workspaceId: app.workspaceId,
+              actorId: id,
+              runId: run.id!,
+              deliveryKey: key,
+              title: 'A reminder from ${app.name}',
+              body: 'An upcoming item needs your attention. Open the app for current details.',
+              createdAt: clock(),
+            ),
+            transaction: tx,
+          );
+        }
+      }
+    }
+    run.status = suppress ? 'suppressed' : 'succeeded';
+    run.completedAt = clock();
+    run.leaseUntil = null;
+    await AutomationRun.db.updateRow(s, run, transaction: tx);
+    s.log(
+      'run_complete run_id=$runId status=${run.status} lag_seconds=${clock().difference(run.dueAt).inSeconds}',
+    );
+  });
+  static Future<void> generate(
+    Session s,
+    int id, {
+    AiProvider? provider,
+  }) async {
+    final claimed = await s.db.transaction((tx) async {
+      var j = await GenerationJob.db.findById(s, id, transaction: tx);
+      if (j == null) return null;
+      final app = await MiniApp.db.findFirstRow(
+        s,
+        where: (t) => t.id.equals(j!.appId),
+        transaction: tx,
+        lockMode: LockMode.forUpdate,
+      );
+      j = await GenerationJob.db.findById(s, id, transaction: tx);
+      if (j == null ||
+          !{'queued', 'generating', 'validating'}.contains(j.status) ||
+          (j.leaseUntil?.isAfter(clock()) ?? false)) {
+        return null;
+      }
+      final d = await AppDraft.db.findById(s, j.draftId, transaction: tx);
+      if (app == null ||
+          app.archived ||
+          d == null ||
+          d.activeJobId != j.id ||
+          d.mutation != j.mutation ||
+          d.baseVersionId != app.activeVersionId ||
+          !await hasAccess(s, app, j.actorId, tx, builder: true)) {
+        j.status = 'stale';
+        await GenerationJob.db.updateRow(s, j, transaction: tx);
+        return null;
+      }
+      if (j.attempts >= Limits.generationAttempts) {
+        j.status = 'failed';
+        j.diagnostics = 'Generation attempt limit reached.';
+        await GenerationJob.db.updateRow(s, j, transaction: tx);
+        return null;
+      }
+      j.status = 'generating';
+      j.attempts++;
+      j.leaseGeneration++;
+      j.leaseUntil = clock().add(const Duration(seconds: 90));
+      j.updatedAt = clock();
+      await GenerationJob.db.updateRow(s, j, transaction: tx);
+      return (j, d);
+    });
+    if (claimed == null) return;
+    final (job, draft) = claimed;
+    AppSpec? candidate;
+    AiResult? result;
+    String? error;
+    try {
+      final ai = provider ?? ChatCompletionProvider.configured(s);
+      if (ai == null) {
+        fail(
+          'providerUnavailable',
+          'AI provider is not configured. Templates remain available.',
+        );
+      }
+      final base = AppSpec.parse(draft.candidateJson);
+      result = await ai.generate(
+        job.requestText,
+        base,
+        editing: job.mode == 'edit',
+        diagnostics: job.diagnostics.isEmpty ? [] : [job.diagnostics],
+      );
+      await s.db.unsafeExecute(
+        'UPDATE nest_generation SET status=\'validating\' WHERE id=@id AND "leaseGeneration"=@lease',
+        parameters: QueryParameters.named({
+          'id': id,
+          'lease': job.leaseGeneration,
+        }),
+      );
+      if (result.text.length > Limits.definitionBytes) {
+        throw const SpecException('Generated definition is too large.');
+      }
+      final output = payload(jsonDecode(result.text));
+      if (output['unsupported'] is String) {
+        throw SpecException(
+          str(output['unsupported'], 'unsupported explanation', max: 1000),
+        );
+      }
+      if (job.mode == 'edit') {
+        keys(output, {'patches'}, 'edit output');
+        candidate = base;
+        for (final patch in array(output['patches'], 'patches', 10)) {
+          candidate = candidate!.patch(
+            payload(patch),
+            () => 'id_${randomToken().substring(0, 16).replaceAll('-', '_')}',
+          );
+        }
+        final errors = base.compatibilityErrors(candidate!);
+        if (errors.isNotEmpty) throw SpecException(errors.join(' '));
+      } else {
+        candidate = AppSpec.parse(result.text);
+      }
+    } on SpecException catch (e) {
+      error = e.message;
+    } on NestError catch (e) {
+      error = e.message;
+    } catch (_) {
+      error = 'The provider returned an invalid response or timed out.';
+    }
+    await s.db.transaction((tx) async {
+      final app = await MiniApp.db.findFirstRow(
+            s,
+            where: (t) => t.id.equals(job.appId),
+            transaction: tx,
+            lockMode: LockMode.forUpdate,
+          ),
+          j = await GenerationJob.db.findById(s, id, transaction: tx),
+          d = await AppDraft.db.findById(s, job.draftId, transaction: tx);
+      if (j == null || j.leaseGeneration != job.leaseGeneration) return;
+      final stale =
+          app == null ||
+          app.archived ||
+          d == null ||
+          d.activeJobId != id ||
+          d.mutation != job.mutation ||
+          d.baseVersionId != app.activeVersionId ||
+          !await hasAccess(s, app, job.actorId, tx, builder: true);
+      j.status = stale
+          ? 'stale'
+          : error != null
+          ? (j.attempts >= Limits.generationAttempts ? 'failed' : 'queued')
+          : 'preview ready';
+      j.diagnostics = error ?? '';
+      j.provider = result?.provider;
+      j.model = result?.model;
+      j.usageJson = jsonEncode(result?.usage ?? {});
+      j.leaseUntil = null;
+      j.nextAttemptAt = clock().add(Duration(seconds: 1 << j.attempts));
+      j.updatedAt = clock();
+      if (!stale && candidate != null && error == null) {
+        d.candidateJson = candidate.canonical;
+        d.candidateHash = candidate.hash;
+        d.updatedAt = clock();
+        await AppDraft.db.updateRow(s, d, transaction: tx);
+      }
+      await GenerationJob.db.updateRow(s, j, transaction: tx);
+      s.log(
+        'generation_result job_id=$id status=${j.status} attempt=${j.attempts}',
+      );
+    });
+  }
+}
+
+class NestWorkerFutureCall extends FutureCall {
+  Future<void> reconcile(Session session) => Worker.drain(session);
+  Future<void> execute(Session session, int runId) =>
+      Worker.execute(session, runId);
+}

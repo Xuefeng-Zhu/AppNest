@@ -1,0 +1,394 @@
+import 'dart:convert';
+
+import 'package:appnest_spec/appnest_spec.dart';
+import 'package:serverpod/serverpod.dart';
+
+import '../../generated/protocol.dart';
+import '../runtime/access.dart';
+import 'provider.dart';
+
+class Builder {
+  static Future<AppDraft> draft(Session s, int id, {Transaction? tx}) async {
+    final d = await AppDraft.db.findById(s, id, transaction: tx);
+    if (d == null) fail('notFound', 'Draft unavailable.');
+    final a = await access(s, d.appId, tx: tx);
+    a.requireBuilder();
+    return d;
+  }
+
+  static Future<BuilderSnapshot> begin(
+    Session s,
+    int workspaceId,
+    String templateKey,
+    int? appId,
+  ) => validated(
+    () => s.db.transaction((tx) async {
+      await workspaceAccess(s, workspaceId, tx: tx);
+      MiniApp app;
+      AppSpec spec;
+      if (appId != null) {
+        final a = await access(s, appId, tx: tx, lock: true);
+        a.requireBuilder();
+        a.writable();
+        app = a.app;
+        spec = await a.spec(s, tx: tx);
+      } else {
+        await reserveAppSlot(s, workspaceId, tx);
+        spec =
+            starterTemplates()[templateKey] ??
+            (throw const SpecException('Unknown template'));
+        app = await MiniApp.db.insertRow(
+          s,
+          MiniApp(
+            workspaceId: workspaceId,
+            ownerId: actor(s),
+            name: spec.name,
+            createdAt: clock(),
+          ),
+          transaction: tx,
+        );
+      }
+      final d = await AppDraft.db.insertRow(
+        s,
+        AppDraft(
+          appId: app.id!,
+          workspaceId: app.workspaceId,
+          actorId: actor(s),
+          baseVersionId: app.activeVersionId,
+          candidateJson: spec.canonical,
+          candidateHash: spec.hash,
+          updatedAt: clock(),
+        ),
+        transaction: tx,
+      );
+      return snapshot(s, d, tx: tx);
+    }),
+  );
+  static Future<BuilderSnapshot> get(Session s, int draftId) async =>
+      snapshot(s, await draft(s, draftId));
+  static Future<BuilderSnapshot> snapshot(
+    Session s,
+    AppDraft d, {
+    Transaction? tx,
+  }) async {
+    final job = d.activeJobId == null
+        ? null
+        : await GenerationJob.db.findById(s, d.activeJobId!, transaction: tx);
+    final base = d.baseVersionId == null
+        ? null
+        : await AppVersion.db.findById(s, d.baseVersionId!, transaction: tx);
+    return BuilderSnapshot(
+      appId: d.appId,
+      draftId: d.id!,
+      jobId: job?.id,
+      baseVersionId: d.baseVersionId,
+      mutation: d.mutation,
+      stage: job?.status ?? 'preview ready',
+      candidateJson: d.candidateJson,
+      candidateHash: d.candidateHash,
+      diagnostics: job == null || job.diagnostics.isEmpty
+          ? []
+          : [job.diagnostics],
+      changes: AppSpec.parse(
+        d.candidateJson,
+      ).diff(base == null ? null : AppSpec.parse(base.specJson)),
+      enabledRuleIds: (await Automation.db.find(
+        s,
+        where: (t) => t.appId.equals(d.appId) & t.enabled.equals(true),
+        transaction: tx,
+      )).map((r) => r.ruleId).toList(),
+      publishedVersionId: d.publishedVersionId,
+    );
+  }
+
+  static Future<BuilderSnapshot> patch(
+    Session s,
+    int id,
+    int mutation,
+    String patchJson,
+  ) => validated(
+    () => s.db.transaction((tx) async {
+      var d = await draft(s, id, tx: tx);
+      final a = await access(s, d.appId, tx: tx, lock: true);
+      a.writable();
+      d = await draft(s, id, tx: tx);
+      if (d.mutation != mutation || d.publishedVersionId != null) {
+        fail('recordConflict', 'This draft changed. Refresh it.');
+      }
+      final next = AppSpec.parse(d.candidateJson).patch(
+        payload(jsonDecode(patchJson)),
+        () => 'id_${randomToken().substring(0, 16).replaceAll('-', '_')}',
+      );
+      d.candidateJson = next.canonical;
+      d.candidateHash = next.hash;
+      d.mutation++;
+      d.activeJobId = null;
+      d.updatedAt = clock();
+      await AppDraft.db.updateRow(s, d, transaction: tx);
+      return snapshot(s, d, tx: tx);
+    }),
+  );
+  static Future<BuilderSnapshot> generate(
+    Session s,
+    int id,
+    int mutation,
+    String request,
+  ) => validated(
+    () => s.db.transaction((tx) async {
+      str(request, 'request', max: Limits.promptBytes);
+      if (utf8.encode(request).length > Limits.promptBytes) {
+        fail('invalidInput', 'Request exceeds the prompt byte limit.');
+      }
+      var d = await draft(s, id, tx: tx);
+      final a = await access(s, d.appId, tx: tx, lock: true);
+      a.writable();
+      d = await draft(s, id, tx: tx);
+      await s.db.unsafeQuery(
+        'SELECT pg_advisory_xact_lock(hashtextextended(@actor,1))',
+        parameters: QueryParameters.named({'actor': actor(s)}),
+        transaction: tx,
+      );
+      if (d.mutation != mutation || d.publishedVersionId != null) {
+        fail('recordConflict', 'This draft changed. Refresh it.');
+      }
+      final active = await GenerationJob.db.find(
+        s,
+        where: (t) =>
+            t.actorId.equals(actor(s)) &
+            t.status.inSet({'queued', 'generating', 'validating'}),
+        limit: 1,
+        transaction: tx,
+      );
+      if (active.isNotEmpty) {
+        fail(
+          'quotaExceeded',
+          'One generation at a time. Wait for the current request.',
+        );
+      }
+      if (await GenerationJob.db.count(
+            s,
+            where: (t) =>
+                t.actorId.equals(actor(s)) &
+                (t.createdAt >= clock().subtract(const Duration(days: 1))),
+            transaction: tx,
+          ) >=
+          Limits.generationJobsPerDay) {
+        fail(
+          'quotaExceeded',
+          'Daily generation limit reached. Templates and existing apps remain available.',
+        );
+      }
+      if (ChatCompletionProvider.configured(s) == null) {
+        fail(
+          'providerUnavailable',
+          'AI is not configured. Use templates or manual edits; ask the server operator to configure AI_BASE_URL, AI_MODEL, and AI_API_KEY.',
+        );
+      }
+      d.mutation++;
+      final job = await GenerationJob.db.insertRow(
+        s,
+        GenerationJob(
+          appId: d.appId,
+          draftId: d.id!,
+          actorId: actor(s),
+          mutation: d.mutation,
+          status: 'queued',
+          requestText: request,
+          mode: d.baseVersionId == null ? 'create' : 'edit',
+          promptVersion: 'appnest-v1',
+          nextAttemptAt: clock(),
+          diagnostics: '',
+          usageJson: '{}',
+          createdAt: clock(),
+          updatedAt: clock(),
+        ),
+        transaction: tx,
+      );
+      d.activeJobId = job.id;
+      d.updatedAt = clock();
+      await AppDraft.db.updateRow(s, d, transaction: tx);
+      return snapshot(s, d, tx: tx);
+    }),
+  );
+  static Future<int> publish(Session s, PublishRequest request) => validated(
+    () => s.db.transaction((tx) async {
+      var d = await draft(s, request.draftId, tx: tx);
+      final a = await access(s, d.appId, tx: tx, lock: true);
+      a.requireBuilder();
+      d = await draft(s, request.draftId, tx: tx);
+      final key =
+              'publish:${str(request.idempotencyKey, 'publication key', max: 100)}',
+          hash = hashJson(request.toJson());
+      final receipt = await ActionReceipt.db.findFirstRow(
+        s,
+        where: (t) =>
+            t.appId.equals(a.app.id!) &
+            t.actorId.equals(actor(s)) &
+            t.idempotencyKey.equals(key),
+        transaction: tx,
+      );
+      if (receipt != null) {
+        if (receipt.requestHash != hash) {
+          fail('invalidInput', 'Publication key already used.');
+        }
+        return jsonDecode(receipt.outcomeJson)['versionId'] as int;
+      }
+      a.writable();
+      if (d.publishedVersionId != null ||
+          d.candidateHash != request.candidateHash ||
+          a.app.activeVersionId != request.expectedCurrentVersionId ||
+          d.baseVersionId != request.expectedCurrentVersionId) {
+        fail(
+          'staleDefinition',
+          'The candidate or published app changed. Review again.',
+        );
+      }
+      if (d.activeJobId != null) {
+        final job = await GenerationJob.db.findById(
+          s,
+          d.activeJobId!,
+          transaction: tx,
+        );
+        if (job?.status != 'preview ready') {
+          fail(
+            'invalidInput',
+            'Wait for a validated preview before publishing.',
+          );
+        }
+      }
+      final spec = AppSpec.parse(d.candidateJson);
+      if (spec.hash != request.candidateHash) {
+        fail('invalidInput', 'Candidate integrity check failed.');
+      }
+      if (a.app.activeVersionId != null) {
+        final previous = await a.spec(s, tx: tx),
+            errors = previous.compatibilityErrors(spec);
+        if (errors.isNotEmpty) fail('invalidInput', errors.join(' '));
+      }
+      if (request.activateExistingRecordIds.length > Limits.activationScope) {
+        fail('quotaExceeded', 'Existing-record activation scope is too large.');
+      }
+      final ruleIds = request.enabledRuleIds.toSet();
+      if (ruleIds.any(
+        (id) => !spec.automationRequests.any((r) => r.id == id),
+      )) {
+        fail('invalidInput', 'Unknown requested reminder.');
+      }
+      final review = hashJson({
+        'candidateHash': spec.hash,
+        'enabledRuleIds': request.enabledRuleIds..sort(),
+        'activateExistingRecordIds': request.activateExistingRecordIds..sort(),
+      });
+      if (review != request.reviewHash) {
+        fail(
+          'invalidInput',
+          'Review approval does not match this publication.',
+        );
+      }
+      final versions = await AppVersion.db.count(
+        s,
+        where: (t) => t.appId.equals(a.app.id!),
+        transaction: tx,
+      );
+      final version = await AppVersion.db.insertRow(
+        s,
+        AppVersion(
+          appId: a.app.id!,
+          workspaceId: a.app.workspaceId,
+          number: versions + 1,
+          specJson: spec.canonical,
+          candidateHash: spec.hash,
+          publisherId: actor(s),
+          createdAt: clock(),
+        ),
+        transaction: tx,
+      );
+      final rules = await Automation.db.find(
+        s,
+        where: (t) => t.appId.equals(a.app.id!),
+        transaction: tx,
+      );
+      for (final old in rules) {
+        if (!ruleIds.contains(old.ruleId)) {
+          old.enabled = false;
+          await Automation.db.updateRow(s, old, transaction: tx);
+        }
+      }
+      for (final r in spec.automationRequests.where(
+        (r) => ruleIds.contains(r.id),
+      )) {
+        final text = canonicalJson(r.toJson()),
+            old = rules.where((x) => x.ruleId == r.id).firstOrNull;
+        if (old == null) {
+          await Automation.db.insertRow(
+            s,
+            Automation(
+              appId: a.app.id!,
+              workspaceId: a.app.workspaceId,
+              ruleId: r.id,
+              ruleVersion: 1,
+              ruleJson: text,
+              enabled: true,
+              executionActorId: actor(s),
+              activateExisting: false,
+              activatedAt: clock(),
+            ),
+            transaction: tx,
+          );
+        } else if (!old.enabled || old.ruleJson != text) {
+          old.ruleVersion++;
+          old.ruleJson = text;
+          old.enabled = true;
+          old.executionActorId = actor(s);
+          old.activatedAt = clock();
+          await Automation.db.updateRow(s, old, transaction: tx);
+        }
+      }
+      for (final id in request.activateExistingRecordIds.toSet()) {
+        await record(s, a, id, tx: tx);
+        await OutboxEvent.db.insertRow(
+          s,
+          OutboxEvent(
+            appId: a.app.id!,
+            recordId: id,
+            kind: 'activateExisting:${version.id}',
+            nextAttemptAt: clock(),
+            createdAt: clock(),
+          ),
+          transaction: tx,
+        );
+      }
+      a.app.activeVersionId = version.id;
+      a.app.name = spec.name;
+      d.publishedVersionId = version.id;
+      await AppDraft.db.updateRow(s, d, transaction: tx);
+      if (await AppShortcut.db.findFirstRow(
+            s,
+            where: (t) =>
+                t.appId.equals(a.app.id!) & t.actorId.equals(actor(s)),
+            transaction: tx,
+          ) ==
+          null) {
+        await AppShortcut.db.insertRow(
+          s,
+          AppShortcut(appId: a.app.id!, actorId: actor(s)),
+          transaction: tx,
+        );
+      }
+      await changed(s, a, 'publish', tx, requestId: key);
+      await ActionReceipt.db.insertRow(
+        s,
+        ActionReceipt(
+          appId: a.app.id!,
+          actorId: actor(s),
+          idempotencyKey: key,
+          requestHash: hash,
+          outcomeJson: jsonEncode({'versionId': version.id}),
+          createdAt: clock(),
+        ),
+        transaction: tx,
+      );
+      return version.id!;
+    }),
+  );
+}

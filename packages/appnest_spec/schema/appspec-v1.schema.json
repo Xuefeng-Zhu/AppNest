@@ -1,0 +1,378 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://appnest.local/schema/appspec-v1.json",
+  "title": "AppNest AppSpec v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "formatVersion": {
+      "const": 1
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80
+    },
+    "theme": {
+      "enum": [
+        "teal",
+        "amber",
+        "blue",
+        "rose",
+        "sage"
+      ]
+    },
+    "icon": {
+      "enum": [
+        "book",
+        "board",
+        "people",
+        "spark",
+        "check"
+      ]
+    },
+    "requires": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "collections.v1",
+          "views.list.v1",
+          "views.form.v1",
+          "views.details.v1",
+          "views.board.v1",
+          "views.summary.v1",
+          "views.capacity.v1",
+          "views.action.v1",
+          "capacity.v1",
+          "workflow.v1",
+          "assignment.v1",
+          "notifications.inApp.v1",
+          "records.create.v1",
+          "records.patch.v1",
+          "assignment.assign.v1",
+          "workflow.transition.v1",
+          "capacity.configure.v1",
+          "capacity.claim.v1",
+          "capacity.release.v1"
+        ]
+      },
+      "maxItems": 40
+    },
+    "collections": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$",
+            "maxLength": 64
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "fields": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$",
+                  "maxLength": 64
+                },
+                "label": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 160
+                },
+                "type": {
+                  "enum": [
+                    "text",
+                    "integer",
+                    "number",
+                    "boolean",
+                    "choice",
+                    "timestamp",
+                    "member"
+                  ]
+                },
+                "required": {
+                  "type": "boolean"
+                },
+                "choices": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 80
+                  },
+                  "maxItems": 30
+                }
+              },
+              "required": [
+                "id",
+                "label",
+                "type",
+                "required"
+              ]
+            },
+            "maxItems": 40,
+            "minItems": 1
+          },
+          "behaviors": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$",
+                  "maxLength": 64
+                },
+                "type": {
+                  "enum": [
+                    "capacity.v1",
+                    "workflow.v1",
+                    "assignment.v1"
+                  ]
+                },
+                "fieldId": {
+                  "type": "string",
+                  "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$",
+                  "maxLength": 64
+                },
+                "transitions": {
+                  "type": "object",
+                  "maxProperties": 30,
+                  "additionalProperties": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 160
+                    },
+                    "maxItems": 30
+                  }
+                }
+              },
+              "required": [
+                "id",
+                "type"
+              ]
+            },
+            "maxItems": 8
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "fields"
+        ]
+      },
+      "maxItems": 8,
+      "minItems": 1
+    },
+    "views": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$",
+            "maxLength": 64
+          },
+          "type": {
+            "enum": [
+              "list",
+              "form",
+              "details",
+              "board",
+              "summary",
+              "capacity",
+              "action"
+            ]
+          },
+          "collectionId": {
+            "type": "string",
+            "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$",
+            "maxLength": 64
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "titleFieldId": {
+            "type": "string",
+            "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$",
+            "maxLength": 64
+          },
+          "groupByFieldId": {
+            "type": "string",
+            "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$",
+            "maxLength": 64
+          },
+          "actionIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$",
+              "maxLength": 64
+            },
+            "maxItems": 32
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "collectionId"
+        ]
+      },
+      "maxItems": 16,
+      "minItems": 1
+    },
+    "actions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$",
+            "maxLength": 64
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "capability": {
+            "enum": [
+              "records.create.v1",
+              "records.patch.v1",
+              "assignment.assign.v1",
+              "workflow.transition.v1",
+              "capacity.configure.v1",
+              "capacity.claim.v1",
+              "capacity.release.v1"
+            ]
+          },
+          "collectionId": {
+            "type": "string",
+            "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$",
+            "maxLength": 64
+          },
+          "behaviorId": {
+            "type": "string",
+            "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$",
+            "maxLength": 64
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "capability",
+          "collectionId"
+        ]
+      },
+      "maxItems": 32
+    },
+    "policyPresetRequest": {
+      "enum": [
+        "personalTracker.v1",
+        "groupWorkflow.v1",
+        "groupCapacitySignup.v1"
+      ]
+    },
+    "automationRequests": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$",
+            "maxLength": 64
+          },
+          "trigger": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "type": {
+                "const": "beforeTimestamp"
+              },
+              "collectionId": {
+                "type": "string",
+                "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$",
+                "maxLength": 64
+              },
+              "fieldId": {
+                "type": "string",
+                "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$",
+                "maxLength": 64
+              },
+              "offsetSeconds": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 604800
+              }
+            },
+            "required": [
+              "type",
+              "collectionId",
+              "fieldId",
+              "offsetSeconds"
+            ]
+          },
+          "effect": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "type": {
+                "enum": [
+                  "notifyActiveClaimants",
+                  "notifyAssignee"
+                ]
+              },
+              "channel": {
+                "const": "inApp"
+              }
+            },
+            "required": [
+              "type",
+              "channel"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "trigger",
+          "effect"
+        ]
+      },
+      "maxItems": 10
+    }
+  },
+  "required": [
+    "formatVersion",
+    "name",
+    "theme",
+    "icon",
+    "requires",
+    "collections",
+    "views",
+    "actions",
+    "policyPresetRequest",
+    "automationRequests"
+  ]
+}

@@ -1,0 +1,24 @@
+# Security and operational limitations
+
+## Implemented boundary
+
+Live endpoints require Serverpod authentication. No client-supplied actor or tenant ID is trusted. Workspace and app grant checks precede data access. Mini-app definitions cannot grant rights, contain credentials or choose network destinations. Model output is parsed and validated, never executed. Capacity/claims, workflow transitions, assignment, notifications and automations are trusted handlers, not editable payload authority.
+
+Cross-app/tenant IDs, wrong invitation recipients, protected workflow/capacity edits, viewer mutations, notification access, stale definitions, revision conflicts, changed idempotency requests and invalid database relationships have regression coverage. Owners alone archive. Archive disables writes and stale effects. Invitation tokens are random, hashed, scoped, role-selected, expiring, single-use and revocable. Notification listing/read state rechecks current app access.
+
+Preview has no transport or scheduler dependency. AI prompts omit private records; operators alone control provider configuration. HTTP diagnostics do not expose provider response bodies or secrets. Framework server-side exception stacks can appear in development logs; typed client errors do not expose stacks.
+
+## Release gates / not proven
+
+- **Local-only seeded environment.** Public synthetic credentials must never be enabled on an exposed deployment. Seeding refuses non-development run modes; no production user-switcher endpoint exists.
+- **No production auth/email verification.** Real local password login is tested. Production email transport, abuse protections, account recovery and operator configuration require deployment-specific verification. The default Serverpod Cloud email configuration is not evidence that a cloud service is connected.
+- **Web tokens:** the current official scaffold client stores auth tokens using its SDK storage. Before public deployment, configure HTTPS, strict allowed origins, secure httpOnly cookie auth where supported, CSP and a reviewed host origin policy. Local development listeners must not be exposed to untrusted networks.
+- **Startup:** companion integrity guards are installed just after Serverpod starts listeners. Future production orchestration must gate readiness/traffic until setup completes and separate schema-maintenance privileges from runtime privileges.
+- **Scale:** app-level serialization, field projections and server-side revision polling are intentional MVP tradeoffs. No throughput/load benchmark or multi-instance Redis/shared-event deployment has been verified. A slow AI request can delay other work with the chosen one-worker concurrency limit; due times are persisted, and scheduling lag is logged.
+- **Retention/quotas:** chosen query/spec/job/fan-out limits are implemented, but total record storage, audit/outbox retention, database backups/restoration, orphan draft cleanup and per-organization billing/abuse controls need operator policies. Old drafts count toward the workspace app limit. Do not delete database directories as routine cleanup.
+- **AI:** the chat-completion adapter passed an operator-approved Nebius Nemotron generation test on 2026-09-22, with an unpublished validated preview after two attempts. The development key is ignored and stored in an owner-only file. This does not verify provider privacy contracts, production expense controls, every response shape or credentialed additive editing. No strict structured-output support is assumed. Saved job usage currently describes the latest attempt, not cumulative billed usage across retries; use provider billing for totals.
+- **Accessibility:** semantic controls, keyboard traversal, responsive screens and renderer tests at 150% text are checked. This is not an exhaustive screen-reader/WCAG audit or a native-device accessibility certification.
+- **UI scope:** invitation binding and member pickers currently use account IDs, not a contacts directory. Summary group breakdowns are page-local and labeled; total counts are full-query counts. Existing-record activation selection displays up to 50 rows per relevant collection, with the server enforcing a 500-record explicit maximum.
+- **Future capability limits:** no attachments/file routes, payments, general external integrations, public marketplace, executable plug-ins, recurring user-local schedules, offline writes or destructive data migrations. Definition versions do not restore deleted data or undo delivered effects.
+
+No production deployment, penetration test, external delivery, signed mobile installation or hackathon eligibility is claimed.
