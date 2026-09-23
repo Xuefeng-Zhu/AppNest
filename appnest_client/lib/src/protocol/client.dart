@@ -11,7 +11,7 @@
 
 // ignore_for_file: no_leading_underscores_for_library_prefixes
 import 'dart:async' as _ida;
-
+import 'dart:typed_data' as _idt;
 import 'package:appnest_client/src/protocol/action_outcome.dart' as _ik2rv6uc;
 import 'package:appnest_client/src/protocol/action_request.dart' as _ijhj5a9o;
 import 'package:appnest_client/src/protocol/activity_item.dart' as _ihdhb6mh;
@@ -20,7 +20,14 @@ import 'package:appnest_client/src/protocol/app_manifest.dart' as _igbv6cp9;
 import 'package:appnest_client/src/protocol/builder_snapshot.dart' as _i3ykup7f;
 import 'package:appnest_client/src/protocol/greetings/greeting.dart'
     as _ip90moho;
+import 'package:appnest_client/src/protocol/guidance_question.dart'
+    as _ir7xtg43;
 import 'package:appnest_client/src/protocol/inbox_item.dart' as _ic0zicoc;
+import 'package:appnest_client/src/protocol/media_info.dart' as _i7y3k4w3;
+import 'package:appnest_client/src/protocol/media_upload_request.dart'
+    as _iwc6jxej;
+import 'package:appnest_client/src/protocol/media_upload_ticket.dart'
+    as _if8lxgor;
 import 'package:appnest_client/src/protocol/member_info.dart' as _iqjsfrnp;
 import 'package:appnest_client/src/protocol/platform_info.dart' as _iulf0zlt;
 import 'package:appnest_client/src/protocol/publish_request.dart' as _iqanq366;
@@ -36,7 +43,6 @@ import 'package:serverpod_auth_core_client/serverpod_auth_core_client.dart'
 import 'package:serverpod_auth_idp_client/serverpod_auth_idp_client.dart'
     as _iaic;
 import 'package:serverpod_client/serverpod_client.dart' as _isc;
-
 import 'protocol.dart' as _il2as5qe;
 
 /// By extending [EmailIdpBaseEndpoint], the email identity provider endpoints
@@ -445,6 +451,20 @@ class EndpointBuilder extends _isc.EndpointRef {
         {'draftId': draftId},
       );
 
+  _ida.Future<List<_ir7xtg43.GuidanceQuestion>> suggestQuestions(
+    String idea,
+    int? workspaceId,
+    int? draftId,
+  ) => caller.callServerEndpoint<List<_ir7xtg43.GuidanceQuestion>>(
+    'builder',
+    'suggestQuestions',
+    {
+      'idea': idea,
+      'workspaceId': workspaceId,
+      'draftId': draftId,
+    },
+  );
+
   _ida.Future<_i3ykup7f.BuilderSnapshot> patch(
     int draftId,
     int mutation,
@@ -491,6 +511,48 @@ class EndpointBuilder extends _isc.EndpointRef {
 }
 
 /// {@category Endpoint}
+class EndpointMedia extends _isc.EndpointRef {
+  EndpointMedia(_isc.EndpointCaller caller) : super(caller);
+
+  @override
+  String get name => 'media';
+
+  _ida.Future<_if8lxgor.MediaUploadTicket> beginUpload(
+    _iwc6jxej.MediaUploadRequest request,
+  ) => caller.callServerEndpoint<_if8lxgor.MediaUploadTicket>(
+    'media',
+    'beginUpload',
+    {'request': request},
+  );
+
+  _ida.Future<_i7y3k4w3.MediaInfo> completeUpload(
+    int appId,
+    String assetId,
+  ) => caller.callServerEndpoint<_i7y3k4w3.MediaInfo>(
+    'media',
+    'completeUpload',
+    {
+      'appId': appId,
+      'assetId': assetId,
+    },
+  );
+
+  _ida.Future<_idt.ByteData> readImage(
+    int appId,
+    String assetId,
+    String variant,
+  ) => caller.callServerEndpoint<_idt.ByteData>(
+    'media',
+    'readImage',
+    {
+      'appId': appId,
+      'assetId': assetId,
+      'variant': variant,
+    },
+  );
+}
+
+/// {@category Endpoint}
 class EndpointRuntime extends _isc.EndpointRef {
   EndpointRuntime(_isc.EndpointCaller caller) : super(caller);
 
@@ -524,6 +586,22 @@ class EndpointRuntime extends _isc.EndpointRef {
       'collectionId': collectionId,
       'queryJson': queryJson,
       'groupFieldId': groupFieldId,
+    },
+  );
+
+  _ida.Future<String> aggregate(
+    int appId,
+    String collectionId,
+    String queryJson,
+    String aggregateJson,
+  ) => caller.callServerEndpoint<String>(
+    'runtime',
+    'aggregate',
+    {
+      'appId': appId,
+      'collectionId': collectionId,
+      'queryJson': queryJson,
+      'aggregateJson': aggregateJson,
     },
   );
 
@@ -644,6 +722,7 @@ class Client extends _isc.ServerpodClientShared {
     jwtRefresh = EndpointJwtRefresh(this);
     apps = EndpointApps(this);
     builder = EndpointBuilder(this);
+    media = EndpointMedia(this);
     runtime = EndpointRuntime(this);
     greeting = EndpointGreeting(this);
     modules = Modules(this);
@@ -657,6 +736,8 @@ class Client extends _isc.ServerpodClientShared {
 
   late final EndpointBuilder builder;
 
+  late final EndpointMedia media;
+
   late final EndpointRuntime runtime;
 
   late final EndpointGreeting greeting;
@@ -669,6 +750,7 @@ class Client extends _isc.ServerpodClientShared {
     'jwtRefresh': jwtRefresh,
     'apps': apps,
     'builder': builder,
+    'media': media,
     'runtime': runtime,
     'greeting': greeting,
   };

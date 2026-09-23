@@ -8,6 +8,7 @@ import '../../generated/protocol.dart';
 import '../../generated/future_calls.dart';
 import '../runtime/access.dart';
 import '../builder/provider.dart';
+import '../media/media.dart';
 
 class Worker {
   /// Delivery conditions deliberately do not participate in occurrence identity:
@@ -96,6 +97,7 @@ class Worker {
   }
 
   static Future<void> drain(Session s) async {
+    await Media.cleanup(s);
     final events = await OutboxEvent.db.find(
       s,
       where: (t) =>
@@ -527,6 +529,20 @@ class Worker {
           d.mutation != job.mutation ||
           d.baseVersionId != app.activeVersionId ||
           !await hasAccess(s, app, job.actorId, tx, builder: true);
+      if (!stale && candidate != null && error == null) {
+        try {
+          await Media.syncDefinition(
+            s,
+            Access(app, 'builder'),
+            candidate,
+            tx,
+            draftId: d.id,
+          );
+        } on NestError {
+          error = 'The generated definition references an unavailable image. Preserve existing image references or omit new image references.';
+          errorKind = 'media_reference';
+        }
+      }
       j.status = stale
           ? 'stale'
           : error != null

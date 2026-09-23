@@ -126,6 +126,11 @@ class __LegacyMiniAppRuntimeState extends State<_LegacyMiniAppRuntime>
   }
 
   Future<void> run(ActionSpec action, RuntimeItem? item) async {
+    final edit = _VisualEditScope.of(context);
+    if (edit != null) {
+      edit.onSelect(MiniAppEditTarget(MiniAppEditKind.section, view.id));
+      return;
+    }
     Map<String, dynamic>? input;
     final col = adapter.spec.collection(action.collectionId);
     if (action.capability == 'records.create.v1' ||
@@ -134,6 +139,8 @@ class __LegacyMiniAppRuntimeState extends State<_LegacyMiniAppRuntime>
         context: context,
         builder: (context) => RecordForm(
           collection: col,
+          adapter: adapter,
+          record: item,
           initial: item?.data,
           members: adapter.members,
           capacity: item?.capacity,
@@ -204,7 +211,7 @@ class __LegacyMiniAppRuntimeState extends State<_LegacyMiniAppRuntime>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (adapter.preview)
+        if (adapter.preview && _VisualEditScope.of(context) == null)
           const MaterialBanner(
             content: Text(
               'Preview · Synthetic records. Actions stay in this preview.',
@@ -258,7 +265,7 @@ class __LegacyMiniAppRuntimeState extends State<_LegacyMiniAppRuntime>
                   icon: const Icon(Icons.add),
                   label: Text(create.label),
                 ),
-              if (choice != null)
+              if (choice != null && _VisualEditScope.of(context) == null)
                 DropdownButton<String>(
                   hint: const Text('All statuses'),
                   value: filterChoice,
@@ -284,7 +291,8 @@ class __LegacyMiniAppRuntimeState extends State<_LegacyMiniAppRuntime>
             ],
           ),
         ),
-        if (view.titleFieldId != null &&
+        if (_VisualEditScope.of(context) == null &&
+            view.titleFieldId != null &&
             col.field(view.titleFieldId!).type == FieldType.text)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -309,77 +317,85 @@ class __LegacyMiniAppRuntimeState extends State<_LegacyMiniAppRuntime>
             ),
           ),
         Expanded(
-          child: page == null
-              ? Center(
-                  child: Text(loading ? 'Loading…' : 'Refresh to try again.'),
-                )
-              : view.type == 'form'
-              ? Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        view.label,
-                        style: Theme.of(context).textTheme.headlineSmall,
-                      ),
-                      const SizedBox(height: 16),
-                      for (final a
-                          in view.actionIds
-                              .map(adapter.spec.action)
-                              .where(
-                                (a) =>
-                                    a.capability == 'records.create.v1' &&
-                                    adapter.permits(a),
-                              ))
-                        ActionButton(
-                          action: a,
-                          onPressed: loading ? null : () => run(a, null),
-                        ),
-                    ],
-                  ),
-                )
-              : page!.items.isEmpty
-              ? const Center(
-                  child: Text('A fresh start. Add the first record.'),
-                )
-              : AbsorbPointer(
-                  absorbing: loading,
-                  child: SingleChildScrollView(
+          child: _EditTarget(
+            target: MiniAppEditTarget(MiniAppEditKind.section, view.id),
+            child: _VisualEditScope.of(context) != null && view.type == 'form'
+                ? SingleChildScrollView(
                     padding: const EdgeInsets.all(16),
+                    child: _editForm(adapter.spec, view),
+                  )
+                : page == null
+                ? Center(
+                    child: Text(loading ? 'Loading…' : 'Refresh to try again.'),
+                  )
+                : view.type == 'form'
+                ? Center(
                     child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        if (view.type == 'summary')
-                          Summary(
-                            items: page!.items,
-                            total: page!.total,
-                            groupField: view.groupByFieldId,
-                          )
-                        else if (view.type == 'board')
-                          StatusBoard(
-                            spec: adapter.spec,
-                            view: view,
-                            items: page!.items,
-                            onAction: run,
-                          )
-                        else
-                          RecordList(
-                            spec: adapter.spec,
-                            view: view,
-                            items: page!.items,
-                            onAction: run,
-                          ),
-                        const SizedBox(height: 12),
-                        Text('${page!.total} records'),
-                        if (page!.cursor != null)
-                          TextButton(
-                            onPressed: () => refresh(next: true),
-                            child: const Text('Next page'),
+                        Text(
+                          view.label,
+                          style: Theme.of(context).textTheme.headlineSmall,
+                        ),
+                        const SizedBox(height: 16),
+                        for (final a
+                            in view.actionIds
+                                .map(adapter.spec.action)
+                                .where(
+                                  (a) =>
+                                      a.capability == 'records.create.v1' &&
+                                      adapter.permits(a),
+                                ))
+                          ActionButton(
+                            action: a,
+                            onPressed: loading ? null : () => run(a, null),
                           ),
                       ],
                     ),
+                  )
+                : page!.items.isEmpty
+                ? const Center(
+                    child: Text('A fresh start. Add the first record.'),
+                  )
+                : AbsorbPointer(
+                    absorbing: loading,
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          if (view.type == 'summary')
+                            Summary(
+                              items: page!.items,
+                              total: page!.total,
+                              groupField: view.groupByFieldId,
+                            )
+                          else if (view.type == 'board')
+                            StatusBoard(
+                              spec: adapter.spec,
+                              view: view,
+                              items: page!.items,
+                              onAction: run,
+                            )
+                          else
+                            RecordList(
+                              spec: adapter.spec,
+                              view: view,
+                              items: page!.items,
+                              onAction: run,
+                            ),
+                          const SizedBox(height: 12),
+                          Text('${page!.total} records'),
+                          if (page!.cursor != null)
+                            TextButton(
+                              onPressed: () => refresh(next: true),
+                              child: const Text('Next page'),
+                            ),
+                        ],
+                      ),
+                    ),
                   ),
-                ),
+          ),
         ),
       ],
     );

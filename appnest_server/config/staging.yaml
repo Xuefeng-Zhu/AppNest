@@ -43,7 +43,7 @@ database:
   #maxConnectionCount: 10 # Defaults to 10, a negative or null value removes the limit
 
 
-maxRequestSize: 524288 # The maximum size of requests allowed in bytes
+maxRequestSize: 6291456 # Image uploads: 5 MiB maximum; RPC/spec/query limits remain separately enforced.
 
 sessionLogs:
 # persistentEnabled: true

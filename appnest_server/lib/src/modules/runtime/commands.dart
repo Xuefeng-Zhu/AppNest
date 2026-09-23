@@ -5,6 +5,7 @@ import 'package:serverpod/serverpod.dart';
 
 import '../../generated/protocol.dart';
 import 'access.dart';
+import '../media/media.dart';
 
 class Commands {
   static Future<ActionOutcome> execute(
@@ -95,6 +96,7 @@ class Commands {
           fail('invalidInput', 'This collection does not support capacity.');
         }
         await project(s, row, col, tx);
+        await Media.syncRecord(s, a, row, col, tx);
       } else {
         if (request.targetRecordId == null) {
           fail('invalidInput', 'Choose a record.');
@@ -145,6 +147,7 @@ class Commands {
           row.writtenUnderVersionId = a.app.activeVersionId!;
           await EntityRecord.db.updateRow(s, row, transaction: tx);
           await project(s, row, col, tx);
+          await Media.syncRecord(s, a, row, col, tx);
         }
       }
       final result = ActionOutcome(
@@ -315,6 +318,7 @@ class Commands {
                 FieldType.text,
                 FieldType.choice,
                 FieldType.member,
+                FieldType.image,
               }.contains(f.type)
               ? value as String
               : null,

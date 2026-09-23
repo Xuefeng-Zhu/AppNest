@@ -51,6 +51,7 @@ class MiniAppRuntime extends StatelessWidget {
   final MiniAppLocation? initialLocation;
   final ValueChanged<MiniAppLocation>? onLocationChanged;
   final DateTime Function()? clock;
+  final MiniAppEditConfiguration? editConfiguration;
   const MiniAppRuntime({
     super.key,
     required this.adapter,
@@ -58,17 +59,29 @@ class MiniAppRuntime extends StatelessWidget {
     this.initialLocation,
     this.onLocationChanged,
     this.clock,
+    this.editConfiguration,
   });
   @override
-  Widget build(BuildContext context) => adapter.spec.navigation == null
-      ? _LegacyMiniAppRuntime(adapter: adapter)
-      : _RichMiniAppRuntime(
-          adapter: adapter,
-          controller: controller,
-          initialLocation: initialLocation,
-          onLocationChanged: onLocationChanged,
-          clock: clock ?? DateTime.now,
-        );
+  Widget build(BuildContext context) => _VisualEditScope(
+    configuration: adapter.preview ? editConfiguration : null,
+    child: adapter.spec.navigation == null
+        ? Theme(
+            data: Theme.of(context).copyWith(
+              colorScheme: ColorScheme.fromSeed(
+                seedColor: _appColor(adapter.spec.theme),
+                brightness: Theme.of(context).brightness,
+              ),
+            ),
+            child: _LegacyMiniAppRuntime(adapter: adapter),
+          )
+        : _RichMiniAppRuntime(
+            adapter: adapter,
+            controller: controller,
+            initialLocation: initialLocation,
+            onLocationChanged: onLocationChanged,
+            clock: clock ?? DateTime.now,
+          ),
+  );
 }
 
 Color _appColor(String theme) => switch (theme) {

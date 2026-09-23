@@ -5,6 +5,7 @@ import 'package:serverpod/serverpod.dart';
 
 import '../../generated/protocol.dart';
 import '../runtime/access.dart';
+import '../media/media.dart';
 
 class Apps {
   static Future<List<WorkspaceInfo>> workspaces(Session s) async {
@@ -131,6 +132,13 @@ class Apps {
           ),
           transaction: tx,
         );
+        await Media.syncDefinition(
+          s,
+          Access(app, 'owner'),
+          spec,
+          tx,
+          versionId: version.id,
+        );
         app.activeVersionId = version.id;
         await MiniApp.db.updateRow(s, app, transaction: tx);
         await AppShortcut.db.insertRow(
@@ -212,7 +220,7 @@ class Apps {
 
   static Future<int> remix(Session s, int appId, int workspaceId) async {
     final a = await access(s, appId);
-    return create(s, workspaceId, await a.spec(s));
+    return create(s, workspaceId, Media.withoutAssets(await a.spec(s)));
   }
 
   static Future<void> pin(Session s, int appId, bool pinned) =>

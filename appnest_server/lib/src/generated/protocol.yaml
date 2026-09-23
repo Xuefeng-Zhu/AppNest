@@ -29,13 +29,19 @@ builder:
   - platform:
   - begin:
   - get:
+  - suggestQuestions:
   - patch:
   - generate:
   - publish:
   - runs:
+media:
+  - beginUpload:
+  - completeUpload:
+  - readImage:
 runtime:
   - query:
   - summary:
+  - aggregate:
   - reminderState:
   - get:
   - execute:

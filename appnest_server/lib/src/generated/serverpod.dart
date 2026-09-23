@@ -11,14 +11,10 @@
 
 // ignore_for_file: no_leading_underscores_for_library_prefixes
 import 'dart:io' as _idi;
-
 import 'package:serverpod/serverpod.dart' as _is;
-
 import 'endpoints.dart' as _iavctuc6;
 import 'protocol.dart' as _il2as5qe;
-
 export 'package:serverpod/serverpod.dart' hide Serverpod;
-
 export 'future_calls.dart' show ServerpodFutureCallsGetter;
 
 /// The Serverpod server for this project.

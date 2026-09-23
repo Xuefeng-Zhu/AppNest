@@ -71,6 +71,7 @@ AppSpec _template(
 }
 
 Map<String, AppSpec> starterTemplates() => {
+  ...richStarterTemplates(),
   'planner': dailyPlannerTemplate(),
   'reading': _template(
     'Reading Journal',
@@ -515,6 +516,7 @@ Object _syntheticValue(FieldSpec field, int index) => switch (field.type) {
   FieldType.choice => field.choices[index % field.choices.length],
   FieldType.timestamp => DateTime.utc(2030, 1, 5 + index, 10).toIso8601String(),
   FieldType.member => 'preview_member',
+  FieldType.image => 'preview_image_${index % 3}',
 };
 
 List<Map<String, dynamic>> syntheticRecords(CollectionSpec c, {DateTime? now}) {
@@ -571,6 +573,31 @@ List<Map<String, dynamic>> syntheticRecords(CollectionSpec c, {DateTime? now}) {
       }
       return c.normalizeRecord(data);
     }).toList();
+  }
+  if ({'projects', 'memories', 'checkins'}.contains(c.id)) {
+    final local = (now ?? DateTime.now()).toLocal();
+    final count = c.id == 'checkins' ? 14 : 6;
+    return List.generate(count, (i) {
+      final data = <String, dynamic>{};
+      for (final field in c.fields) {
+        var value = _syntheticValue(field, i);
+        if (field.type == FieldType.timestamp) {
+          value = DateTime(
+            local.year,
+            local.month,
+            local.day + (c.id == 'projects' ? i - 1 : -i),
+            10,
+          ).toUtc().toIso8601String();
+        } else if (field.type == FieldType.integer &&
+            {'rating', 'energy'}.contains(field.id)) {
+          value = i % 5 + 1;
+        } else if (field.type == FieldType.number && field.id == 'minutes') {
+          value = [20, 35, 45, 15, 60, 30, 25][i % 7];
+        }
+        data[field.id] = field.normalize(value);
+      }
+      return c.normalizeRecord(data);
+    });
   }
   return List.generate(
     3,

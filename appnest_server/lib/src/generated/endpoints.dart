@@ -12,17 +12,19 @@
 // ignore_for_file: no_leading_underscores_for_library_prefixes
 import 'package:appnest_server/src/generated/action_request.dart' as _ilhdpzxy;
 import 'package:appnest_server/src/generated/future_calls.dart' as _itt87tub;
+import 'package:appnest_server/src/generated/media_upload_request.dart'
+    as _ihi072ai;
 import 'package:appnest_server/src/generated/publish_request.dart' as _ivuulprf;
 import 'package:serverpod/serverpod.dart' as _is;
 import 'package:serverpod_auth_core_server/serverpod_auth_core_server.dart'
     as _iacs;
 import 'package:serverpod_auth_idp_server/serverpod_auth_idp_server.dart'
     as _iais;
-
 import '../auth/email_idp_endpoint.dart' as _iuc1hd5t;
 import '../auth/jwt_refresh_endpoint.dart' as _inwq3ztq;
 import '../endpoints/apps_endpoint.dart' as _iuo089a1;
 import '../endpoints/builder_endpoint.dart' as _ittyaucl;
+import '../endpoints/media_endpoint.dart' as _iaymoujt;
 import '../endpoints/runtime_endpoint.dart' as _i7rxtwkb;
 import '../greetings/greeting_endpoint.dart' as _il624ik7;
 export 'future_calls.dart' show ServerpodFutureCallsGetter;
@@ -53,6 +55,12 @@ class Endpoints extends _is.EndpointDispatch {
         ..initialize(
           server,
           'builder',
+          null,
+        ),
+      'media': _iaymoujt.MediaEndpoint()
+        ..initialize(
+          server,
+          'media',
           null,
         ),
       'runtime': _i7rxtwkb.RuntimeEndpoint()
@@ -650,6 +658,37 @@ class Endpoints extends _is.EndpointDispatch {
                     params['draftId'],
                   ),
         ),
+        'suggestQuestions': _is.MethodConnector(
+          name: 'suggestQuestions',
+          params: {
+            'idea': _is.ParameterDescription(
+              name: 'idea',
+              type: _is.getType<String>(),
+              nullable: false,
+            ),
+            'workspaceId': _is.ParameterDescription(
+              name: 'workspaceId',
+              type: _is.getType<int?>(),
+              nullable: true,
+            ),
+            'draftId': _is.ParameterDescription(
+              name: 'draftId',
+              type: _is.getType<int?>(),
+              nullable: true,
+            ),
+          },
+          call:
+              (
+                _is.Session session,
+                Map<String, dynamic> params,
+              ) async => (endpoints['builder'] as _ittyaucl.BuilderEndpoint)
+                  .suggestQuestions(
+                    session,
+                    params['idea'],
+                    params['workspaceId'],
+                    params['draftId'],
+                  ),
+        ),
         'patch': _is.MethodConnector(
           name: 'patch',
           params: {
@@ -758,6 +797,87 @@ class Endpoints extends _is.EndpointDispatch {
         ),
       },
     );
+    connectors['media'] = _is.EndpointConnector(
+      name: 'media',
+      endpoint: endpoints['media']!,
+      methodConnectors: {
+        'beginUpload': _is.MethodConnector(
+          name: 'beginUpload',
+          params: {
+            'request': _is.ParameterDescription(
+              name: 'request',
+              type: _is.getType<_ihi072ai.MediaUploadRequest>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _is.Session session,
+                Map<String, dynamic> params,
+              ) async =>
+                  (endpoints['media'] as _iaymoujt.MediaEndpoint).beginUpload(
+                    session,
+                    params['request'],
+                  ),
+        ),
+        'completeUpload': _is.MethodConnector(
+          name: 'completeUpload',
+          params: {
+            'appId': _is.ParameterDescription(
+              name: 'appId',
+              type: _is.getType<int>(),
+              nullable: false,
+            ),
+            'assetId': _is.ParameterDescription(
+              name: 'assetId',
+              type: _is.getType<String>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _is.Session session,
+                Map<String, dynamic> params,
+              ) async => (endpoints['media'] as _iaymoujt.MediaEndpoint)
+                  .completeUpload(
+                    session,
+                    params['appId'],
+                    params['assetId'],
+                  ),
+        ),
+        'readImage': _is.MethodConnector(
+          name: 'readImage',
+          params: {
+            'appId': _is.ParameterDescription(
+              name: 'appId',
+              type: _is.getType<int>(),
+              nullable: false,
+            ),
+            'assetId': _is.ParameterDescription(
+              name: 'assetId',
+              type: _is.getType<String>(),
+              nullable: false,
+            ),
+            'variant': _is.ParameterDescription(
+              name: 'variant',
+              type: _is.getType<String>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _is.Session session,
+                Map<String, dynamic> params,
+              ) async =>
+                  (endpoints['media'] as _iaymoujt.MediaEndpoint).readImage(
+                    session,
+                    params['appId'],
+                    params['assetId'],
+                    params['variant'],
+                  ),
+        ),
+      },
+    );
     connectors['runtime'] = _is.EndpointConnector(
       name: 'runtime',
       endpoint: endpoints['runtime']!,
@@ -828,6 +948,43 @@ class Endpoints extends _is.EndpointDispatch {
                     params['collectionId'],
                     params['queryJson'],
                     params['groupFieldId'],
+                  ),
+        ),
+        'aggregate': _is.MethodConnector(
+          name: 'aggregate',
+          params: {
+            'appId': _is.ParameterDescription(
+              name: 'appId',
+              type: _is.getType<int>(),
+              nullable: false,
+            ),
+            'collectionId': _is.ParameterDescription(
+              name: 'collectionId',
+              type: _is.getType<String>(),
+              nullable: false,
+            ),
+            'queryJson': _is.ParameterDescription(
+              name: 'queryJson',
+              type: _is.getType<String>(),
+              nullable: false,
+            ),
+            'aggregateJson': _is.ParameterDescription(
+              name: 'aggregateJson',
+              type: _is.getType<String>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _is.Session session,
+                Map<String, dynamic> params,
+              ) async =>
+                  (endpoints['runtime'] as _i7rxtwkb.RuntimeEndpoint).aggregate(
+                    session,
+                    params['appId'],
+                    params['collectionId'],
+                    params['queryJson'],
+                    params['aggregateJson'],
                   ),
         ),
         'reminderState': _is.MethodConnector(

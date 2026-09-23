@@ -62,16 +62,57 @@ void main() {
       const MiniAppLocation('progressPage'),
     ),
   ];
-  for (final (name, size, location) in cases) {
+  final richCases = <(String, Size, MiniAppLocation, AppSpec)>[
+    for (final size in [const Size(390, 844), const Size(1440, 1000)]) ...[
+      (
+        'rich-board-${size.width.toInt()}',
+        size,
+        const MiniAppLocation('boardPage'),
+        projectHubTemplate(),
+      ),
+      (
+        'rich-table-${size.width.toInt()}',
+        size,
+        const MiniAppLocation('tablePage'),
+        projectHubTemplate(),
+      ),
+      (
+        'rich-calendar-${size.width.toInt()}',
+        size,
+        const MiniAppLocation('calendarPage'),
+        projectHubTemplate(),
+      ),
+      (
+        'rich-charts-${size.width.toInt()}',
+        size,
+        const MiniAppLocation('patternsPage'),
+        habitTrackerTemplate(),
+      ),
+      (
+        'rich-gallery-${size.width.toInt()}',
+        size,
+        const MiniAppLocation('galleryPage'),
+        photoJournalTemplate(),
+      ),
+      (
+        'rich-form-${size.width.toInt()}',
+        size,
+        const MiniAppLocation('formPage'),
+        photoJournalTemplate(),
+      ),
+    ],
+  ];
+  for (final (name, size, location, template) in [
+    for (final (name, size, location) in cases)
+      (name, size, location, dailyPlannerTemplate()),
+    ...richCases,
+  ]) {
     testWidgets('isolated preview visual layout $name', (tester) async {
       tester.view.physicalSize = size;
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
-      final adapter = PreviewRuntimeAdapter(
-        dailyPlannerTemplate(),
-        now: moment,
-      );
+      final adapter = PreviewRuntimeAdapter(template, now: moment);
       final boundaryKey = GlobalKey();
       await tester.pumpWidget(
         RepaintBoundary(

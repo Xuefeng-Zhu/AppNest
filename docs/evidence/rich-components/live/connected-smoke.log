@@ -1,0 +1,6 @@
+Connected synthetic rich smoke 2026-09-23T053536349127Z. Template/manual path; no AI calls or reminders.
+PASS private image: 720523 input bytes, sanitized display/thumbnail, draft banner, record reference, viewer access and revocation. App 57.
+PASS workflow: member transition, repeated receipt, stale revision, protected-field rejection, and later edit preservation. App 58.
+PASS data: 106 persisted records, 100+6 cursor pages, count106, sum54, average54/105, empty average and three time buckets. App 59.
+PASS fresh logins: definitions, private image bytes/references, workflow revision, notes, metrics and revoked access persist.
+{"result":"passed","runId":"2026-09-23T053536349127Z","apps":[{"appId":57,"template":"photoJournal","name":"Rich smoke 2026-09-23T053536349127Z · Photos"},{"appId":58,"template":"projectHub","name":"Rich smoke 2026-09-23T053536349127Z · Workflow"},{"appId":59,"template":"habitTracker","name":"Rich smoke 2026-09-23T053536349127Z · Metrics"}],"photoRecordId":48,"projectRecordId":49,"metricRecords":106,"limitations":["Client reconnect verified; this script does not restart the server.","No live AI, reminder delivery, or browser UI evidence from this script."]}

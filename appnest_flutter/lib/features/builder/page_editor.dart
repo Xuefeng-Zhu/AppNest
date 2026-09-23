@@ -1,10 +1,13 @@
 import 'package:appnest_spec/appnest_spec.dart';
 import 'package:flutter/material.dart';
 
+import 'component_options_editor.dart';
+
 /// Edits semantic definitions; no widget code or executable expressions.
 class PageEditor extends StatefulWidget {
   final AppSpec spec;
-  const PageEditor({super.key, required this.spec});
+  final Future<String?> Function()? uploadImage;
+  const PageEditor({super.key, required this.spec, this.uploadImage});
   @override
   State<PageEditor> createState() => _PageEditorState();
 }
@@ -29,6 +32,7 @@ class _PageEditorState extends State<PageEditor> {
   final fieldIds = <String>[], filterIds = <String>[], actionIds = <String>[];
   final pageOrder = <String>[];
   final tabs = <Map<String, dynamic>>[];
+  Map<String, dynamic> componentOptions = {};
   bool showDate = false, ordering = false;
   String? failure;
   AppSpec get spec => widget.spec;
@@ -71,8 +75,11 @@ class _PageEditorState extends State<PageEditor> {
   void _selectView(String? id) {
     selectedView = id;
     final v = id == null ? null : spec.view(id);
-    collectionId = v?.collectionId ?? spec.collections.first.id;
+    collectionId = v == null || v.collectionId.isEmpty
+        ? spec.collections.first.id
+        : v.collectionId;
     viewType = v?.type ?? 'list';
+    componentOptions = Map<String, dynamic>.from(v?.options ?? {});
     viewLabel.text = v?.label ?? '';
     titleField = v?.titleFieldId;
     groupField = v?.groupByFieldId;
@@ -130,6 +137,92 @@ class _PageEditorState extends State<PageEditor> {
       final item = list.removeAt(index);
       list.insert(target, item);
     });
+  }
+
+  void _changeType(String value) {
+    if (value == viewType) return;
+    viewType = value;
+    componentOptions = _defaultOptions(value);
+    if (isContentComponent(value)) {
+      titleField = groupField = detailPage = formPage = dateField = sortField =
+          null;
+      fieldIds.clear();
+      filterIds.clear();
+      actionIds.clear();
+      defaultFilters.clear();
+      extraFilters.clear();
+      secondarySort.clear();
+      presentation = null;
+      filtersChanged = sortChanged = true;
+    }
+  }
+
+  Map<String, dynamic> _defaultOptions(String type) => switch (type) {
+    'chart' => {'style': 'bar', 'metric': 'count'},
+    'metric' => {'metric': 'count'},
+    'banner' => {
+      'title': viewLabel.text.isEmpty ? 'Welcome' : viewLabel.text,
+    },
+    'richText' => {'markdown': 'Write something helpful for your app.'},
+    _ => {},
+  };
+
+  void _reconcileFormFields() {
+    if (viewType != 'form') return;
+    final collection = spec.collection(collectionId);
+    final editable = collection.fields
+        .where(
+          (field) =>
+              (fieldIds.isEmpty || fieldIds.contains(field.id)) &&
+              !collection.behaviors.any(
+                (behavior) =>
+                    behavior.type == 'workflow.v1' &&
+                    behavior.fieldId == field.id,
+              ),
+        )
+        .map((field) => field.id)
+        .toSet();
+    final options = Map<String, dynamic>.from(componentOptions);
+    if (options['controls'] case final List controls) {
+      final retained = [
+        for (final control in controls)
+          if (editable.contains(control['fieldId']))
+            Map<String, dynamic>.from(control as Map),
+      ];
+      if (retained.isEmpty) {
+        options.remove('controls');
+      } else {
+        options['controls'] = retained;
+      }
+    }
+    if (options['steps'] case final List steps) {
+      final assigned = <String>{};
+      final retained = <Map<String, dynamic>>[];
+      for (final step in steps) {
+        final fields = [
+          for (final id in step['fieldIds'] as List)
+            if (editable.contains(id) && assigned.add(id as String)) id,
+        ];
+        if (fields.isNotEmpty) {
+          retained.add({
+            ...Map<String, dynamic>.from(step as Map),
+            'fieldIds': fields,
+          });
+        }
+      }
+      final added = editable.difference(assigned).toList();
+      if (retained.isEmpty && added.isNotEmpty) {
+        retained.add({'id': 'step1', 'title': 'Details', 'fieldIds': added});
+      } else if (added.isNotEmpty) {
+        (retained.last['fieldIds'] as List).addAll(added);
+      }
+      if (retained.isEmpty) {
+        options.remove('steps');
+      } else {
+        options['steps'] = retained;
+      }
+    }
+    componentOptions = options;
   }
 
   void _save() {
@@ -207,7 +300,14 @@ class _PageEditorState extends State<PageEditor> {
           if (groupField != null) 'groupByFieldId': groupField,
           if (detailPage != null) 'detailPageId': detailPage,
           if (formPage != null) 'formPageId': formPage,
+          if (componentOptions.isNotEmpty) 'options': componentOptions,
         }..remove('id');
+        if (componentOptions.isEmpty) view.remove('options');
+        if (isContentComponent(viewType)) {
+          view.removeWhere(
+            (key, _) => !{'type', 'label', 'options'}.contains(key),
+          );
+        }
         if (presentation == null) view.remove('presentation');
         if (titleField == null) view.remove('titleFieldId');
         if (groupField == null) view.remove('groupByFieldId');
@@ -498,188 +598,222 @@ class _PageEditorState extends State<PageEditor> {
           decoration: const InputDecoration(labelText: 'View label'),
         ),
         const SizedBox(height: 14),
-        _select(
-          'Collection',
-          collectionId,
-          {for (final c in spec.collections) c.id: c.label},
-          (v) {
-            collectionId = v!;
-            titleField = null;
-            groupField = null;
-            fieldIds.clear();
-            filterIds.clear();
-            actionIds.clear();
-            sortField = null;
-            dateField = null;
-            defaultFilters.clear();
-            extraFilters.clear();
-            secondarySort.clear();
-            filtersChanged = true;
-            sortChanged = true;
-          },
-        ),
-        _select('Display', viewType, {
-          for (final s in [
-            'list',
-            'details',
-            'form',
-            'summary',
-            'board',
-            'capacity',
-            'action',
-          ])
-            s: s,
-        }, (v) => viewType = v!),
-        _select(
-          'List style',
-          presentation,
-          const {
-            'compact': 'Compact rows',
-            'cards': 'Cards',
-          },
-          (v) => presentation = v,
-          nullable: true,
-          emptyLabel: 'Default',
-        ),
-        _select(
-          'Title field',
-          titleField,
-          {for (final f in col.fields) f.id: f.label},
-          (v) => titleField = v,
-          nullable: true,
-        ),
-        _select(
-          'Group by',
-          groupField,
-          {
-            for (final f in col.fields.where(
-              (f) => f.type == FieldType.choice || f.id == groupField,
-            ))
-              f.id: f.label,
-          },
-          (v) => groupField = v,
-          nullable: true,
-        ),
-        _select(
-          'Open details page',
-          detailPage,
-          pages,
-          (v) => detailPage = v,
-          nullable: true,
-        ),
-        _select(
-          'Sort by',
-          sortField,
-          {for (final f in col.fields) f.id: f.label},
-          (v) {
-            sortField = v;
-            sortChanged = true;
-            if (v == null) secondarySort.clear();
-          },
-          nullable: true,
-        ),
-        if (sortField != null)
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('Descending order'),
-            value: descending,
-            onChanged: (v) => setState(() {
-              descending = v;
-              sortChanged = true;
-            }),
-          ),
-        _select(
-          'Date window',
-          dateField,
-          {
-            for (final f in col.fields.where(
-              (f) => f.type == FieldType.timestamp,
-            ))
-              f.id: f.label,
-          },
-          (v) => dateField = v,
-          nullable: true,
-        ),
-        if (dateField != null)
-          _select('Show dates', datePeriod, const {
-            'today': 'Today in device timezone',
-            'overdue': 'Before today',
-          }, (v) => datePeriod = v!),
-        for (final f in col.fields.where((f) => f.type == FieldType.choice))
+        if (!isContentComponent(viewType))
           _select(
-            'Only ${f.label.toLowerCase()}',
-            defaultFilters[f.id],
-            {for (final choice in f.choices) choice: choice},
+            'Collection',
+            collectionId,
+            {for (final c in spec.collections) c.id: c.label},
             (v) {
+              collectionId = v!;
+              componentOptions = _defaultOptions(viewType);
+              titleField = null;
+              groupField = null;
+              detailPage = null;
+              formPage = null;
+              fieldIds.clear();
+              filterIds.clear();
+              actionIds.clear();
+              sortField = null;
+              dateField = null;
+              defaultFilters.clear();
+              extraFilters.clear();
+              secondarySort.clear();
               filtersChanged = true;
-              extraFilters.removeWhere(
-                (filter) =>
-                    filter['fieldId'] == f.id && filter['operator'] == 'eq',
-              );
-              if (v == null) {
-                defaultFilters.remove(f.id);
-              } else {
-                defaultFilters[f.id] = v;
-              }
+              sortChanged = true;
+            },
+          ),
+        _select('Display', viewType, {
+          for (final group in componentGroups.values) ...group,
+        }, (v) => _changeType(v!)),
+        OutlinedButton.icon(
+          onPressed: () async {
+            final type = await chooseComponent(context);
+            if (type != null && mounted) setState(() => _changeType(type));
+          },
+          icon: const Icon(Icons.widgets_outlined),
+          label: const Text('Choose component'),
+        ),
+        const SizedBox(height: 14),
+        ComponentOptionsEditor(
+          key: ValueKey(
+            'component-options-$selectedView-$viewType-$collectionId',
+          ),
+          spec: spec,
+          type: viewType,
+          collectionId: collectionId,
+          fieldIds: fieldIds,
+          options: componentOptions,
+          uploadImage: widget.uploadImage,
+          onChanged: (value) => setState(() {
+            componentOptions = value;
+            final interactiveAction = viewType == 'checklist'
+                ? value['actionId']
+                : viewType == 'board'
+                ? value['moveActionId']
+                : null;
+            if (interactiveAction is String &&
+                !actionIds.contains(interactiveAction)) {
+              actionIds.add(interactiveAction);
+            }
+            if (viewType == 'chart' &&
+                (value['dateFieldId'] != null || value['style'] == 'line')) {
+              groupField = null;
+            }
+          }),
+        ),
+        if (!isContentComponent(viewType)) ...[
+          _select(
+            'List style',
+            presentation,
+            const {
+              'compact': 'Compact rows',
+              'cards': 'Cards',
+            },
+            (v) => presentation = v,
+            nullable: true,
+            emptyLabel: 'Default',
+          ),
+          _select(
+            'Title field',
+            titleField,
+            {for (final f in col.fields) f.id: f.label},
+            (v) => titleField = v,
+            nullable: true,
+          ),
+          _select(
+            'Group by',
+            groupField,
+            {
+              for (final f in col.fields.where(
+                (f) => f.type == FieldType.choice || f.id == groupField,
+              ))
+                f.id: f.label,
+            },
+            (v) => groupField = v,
+            nullable: true,
+          ),
+          _select(
+            'Open details page',
+            detailPage,
+            pages,
+            (v) => detailPage = v,
+            nullable: true,
+          ),
+          _select(
+            'Sort by',
+            sortField,
+            {for (final f in col.fields) f.id: f.label},
+            (v) {
+              sortField = v;
+              sortChanged = true;
+              if (v == null) secondarySort.clear();
             },
             nullable: true,
           ),
-        _select(
-          'Open editor page',
-          formPage,
-          pages,
-          (v) => formPage = v,
-          nullable: true,
-        ),
-        const Text('Visible fields (empty uses the default)'),
-        Wrap(
-          spacing: 6,
-          children: col.fields
-              .map(
-                (f) => FilterChip(
-                  label: Text(f.label),
-                  selected: fieldIds.contains(f.id),
-                  onSelected: (v) => setState(
-                    () => v ? fieldIds.add(f.id) : fieldIds.remove(f.id),
+          if (sortField != null)
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Descending order'),
+              value: descending,
+              onChanged: (v) => setState(() {
+                descending = v;
+                sortChanged = true;
+              }),
+            ),
+          _select(
+            'Date window',
+            dateField,
+            {
+              for (final f in col.fields.where(
+                (f) => f.type == FieldType.timestamp,
+              ))
+                f.id: f.label,
+            },
+            (v) => dateField = v,
+            nullable: true,
+          ),
+          if (dateField != null)
+            _select('Show dates', datePeriod, const {
+              'today': 'Today in device timezone',
+              'overdue': 'Before today',
+            }, (v) => datePeriod = v!),
+          for (final f in col.fields.where((f) => f.type == FieldType.choice))
+            _select(
+              'Only ${f.label.toLowerCase()}',
+              defaultFilters[f.id],
+              {for (final choice in f.choices) choice: choice},
+              (v) {
+                filtersChanged = true;
+                extraFilters.removeWhere(
+                  (filter) =>
+                      filter['fieldId'] == f.id && filter['operator'] == 'eq',
+                );
+                if (v == null) {
+                  defaultFilters.remove(f.id);
+                } else {
+                  defaultFilters[f.id] = v;
+                }
+              },
+              nullable: true,
+            ),
+          _select(
+            'Open editor page',
+            formPage,
+            pages,
+            (v) => formPage = v,
+            nullable: true,
+          ),
+          const Text('Visible fields (empty uses the default)'),
+          Wrap(
+            spacing: 6,
+            children: col.fields
+                .map(
+                  (f) => FilterChip(
+                    label: Text(f.label),
+                    selected: fieldIds.contains(f.id),
+                    onSelected: (v) => setState(() {
+                      v ? fieldIds.add(f.id) : fieldIds.remove(f.id);
+                      _reconcileFormFields();
+                    }),
                   ),
-                ),
-              )
-              .toList(),
-        ),
-        const SizedBox(height: 14),
-        const Text('Filter controls'),
-        Wrap(
-          spacing: 6,
-          children: col.fields
-              .where((f) => f.type == FieldType.choice)
-              .map(
-                (f) => FilterChip(
-                  label: Text(f.label),
-                  selected: filterIds.contains(f.id),
-                  onSelected: (v) => setState(
-                    () => v ? filterIds.add(f.id) : filterIds.remove(f.id),
+                )
+                .toList(),
+          ),
+          const SizedBox(height: 14),
+          const Text('Filter controls'),
+          Wrap(
+            spacing: 6,
+            children: col.fields
+                .where((f) => f.type == FieldType.choice)
+                .map(
+                  (f) => FilterChip(
+                    label: Text(f.label),
+                    selected: filterIds.contains(f.id),
+                    onSelected: (v) => setState(
+                      () => v ? filterIds.add(f.id) : filterIds.remove(f.id),
+                    ),
                   ),
-                ),
-              )
-              .toList(),
-        ),
-        const SizedBox(height: 14),
-        const Text('Available actions'),
-        Wrap(
-          spacing: 6,
-          children: spec.actions
-              .where((a) => a.collectionId == collectionId)
-              .map(
-                (a) => FilterChip(
-                  label: Text(a.label),
-                  selected: actionIds.contains(a.id),
-                  onSelected: (v) => setState(
-                    () => v ? actionIds.add(a.id) : actionIds.remove(a.id),
+                )
+                .toList(),
+          ),
+          const SizedBox(height: 14),
+          const Text('Available actions'),
+          Wrap(
+            spacing: 6,
+            children: spec.actions
+                .where((a) => a.collectionId == collectionId)
+                .map(
+                  (a) => FilterChip(
+                    label: Text(a.label),
+                    selected: actionIds.contains(a.id),
+                    onSelected: (v) => setState(
+                      () => v ? actionIds.add(a.id) : actionIds.remove(a.id),
+                    ),
                   ),
-                ),
-              )
-              .toList(),
-        ),
+                )
+                .toList(),
+          ),
+        ],
       ],
     );
   }

@@ -16,7 +16,25 @@ Navigation distinguishes forward, return and external route changes. The host st
 
 `RuntimeAdapter` supplies record lookup, typed navigation, grouped summaries and reminder states to both isolated preview and authenticated live implementations. `runtime.summary` compiles the same validated predicates as queries and returns database-wide totals/choice counts in one app-locked transaction. Rich summary components use this operation rather than counting a loaded page. Relative-day predicates independently convert each local-midnight boundary to UTC; timestamp storage remains UTC.
 
-Workspace, WorkspaceMember, MiniApp, MiniAppGrant, AppShortcut, Invitation, AppDraft, AppVersion, Template, GenerationJob, EntityRecord, FieldValue, ResourcePool, Claim, ActionReceipt, OutboxEvent, AuditEntry, Automation, AutomationRun and Notification are stable platform models.
+The rich component library adds bounded `ViewSpec.options`, collection-free
+banner/text views, and an opaque image field. `runtime.aggregate` computes
+database-wide count/sum/average metrics, choice groups, and explicit UTC date
+buckets using the same filter compiler and app lock. Calendar agendas retain
+bounded record pagination. Both runtime adapters implement the same contract;
+new capabilities preserve legacy canonical hashes and rendering. See
+[rich components](docs/RICH_COMPONENTS.md) for the authoring and API contracts.
+
+MediaAsset and MediaReference track private Serverpod image storage and its
+draft/version/record owners. Upload authorization uses an editable draft or
+approved record action. Only validated same-app ready assets can be referenced.
+Authenticated byte reads recheck grants; no bearer download URL is persisted or
+rendered. Reference updates share their owner's transaction. Sanitization runs
+outside app locks, with processing leases and recoverable original/deletion
+cleanup. Retained immutable versions protect media but do not grant readers
+access to old images. Preview uploads stay in memory; the host can inject
+authorized static images without exposing network clients to the preview.
+
+Workspace, WorkspaceMember, MiniApp, MiniAppGrant, AppShortcut, Invitation, AppDraft, AppVersion, Template, GenerationJob, GuidanceRequest, EntityRecord, FieldValue, ResourcePool, Claim, ActionReceipt, OutboxEvent, AuditEntry, Automation, AutomationRun and Notification are stable platform models.
 
 `EntityRecord.data` uses Serverpod's `dynamic, serializationDataType=jsonb`. The persisted representation is framework-owned; the serialization spike verifies round-trip values through the generated ORM. Queries **do not assume that dynamic JSONB is raw external JSON**. Validated fields are projected transactionally into typed FieldValue rows. Query compilation resolves field IDs against the active definition and uses fixed SQL/parameterized values, with up to eight filters, two sorts, 100 rows/page and deterministic ID tie-breaking. Cursor identity includes the validated query; a missing cursor anchor is an explicit stale-query failure. Summary counts are database-wide, not post-filtered pages. Grouped renderer summaries explicitly label page-local groups when pagination applies.
 
@@ -49,6 +67,8 @@ Invitations are 256-bit unpredictable tokens stored only as hashes, seven-day ex
 
 Durable jobs are persisted before returning an ID. A recurring reconciler claims jobs with an expiring generation lease, calls the configured provider outside locks, validates and normalizes output, then conditionally publishes the candidate only if lease, draft mutation and base version are current. Three attempts, bounded diagnostics and retries, one active job per actor, 30 jobs/day. Provider request bodies are stored only in the job's access-controlled database field; they are not routinely logged. No private records are included.
 
+On Create or Send, conditional clarification checks the selected workspace or draft before generation. The provider returns no questions for an actionable request or two or three questions with bounded, selectable choices when missing details materially affect the app. The check reserves one of 20 requests per actor per rolling day under a separate advisory lock, then calls the provider outside the transaction. Draft clarification sends only its declarative candidate definition, never records. The client keeps selections local and inserts a reviewable prompt into the existing composer; the check itself does not begin a draft or enqueue generation. Assessment failures expose built-in choices and an explicit continue path rather than trapping creation.
+
 New definitions are untrusted complete specs; edits are bounded semantic patches. Trusted code allocates new patch IDs. Manual edits supersede old jobs. Exact-candidate publication checks candidate hash, expected current version and a review hash covering selected rules and existing-record scope. One transaction creates the immutable version, moves the active pointer, reconciles approved rules and records audit/outbox/receipt. Optional additions/presentation changes preserve existing data; destructive/type/required-field migrations are rejected. Definition history is not a data/effect backup.
 
 Fresh AI creation sends no starter template or placeholder definition to the provider. Template-first requests explicitly edit their selected definition; a successful AI candidate establishes edit context for later requests, including after failures or manual edits. Published drafts always use edits. One optional outer JSON fence is accepted before strict schema validation; prose and arbitrary JSON extraction remain rejected. Safe provider telemetry distinguishes transport, truncation, JSON and validation failures without logging prompt or output bodies.
@@ -67,6 +87,6 @@ Redis is intentionally optional/unused in this single-process local configuratio
 
 Personal reminders add the trusted `notifyOwner` effect and a bounded choice equality condition. The planner uses `status == Open`; its reminder timestamp is independent of its due timestamp. Reopening can affect eligibility of pending work but cannot revive a terminal occurrence. Manifests include approved rule IDs, typed reminder-state responses distinguish enrollment and execution state, and inbox record targets are derived from authorized automation runs. These additions reuse existing persistence, app locks, receipts, outbox and scheduler infrastructure.
 
-`packages/appnest_spec/lib/appnest_spec.dart:Limits` centralizes definition 128 KiB/depth 12, 8 collections, 40 fields/collection, 16 views, 32 actions, 10 rules, 100 query rows, 8 filters, 16 KiB request text, 3 generation attempts, 100 worker rows/batch, 500 activation records/notification recipients, 50 invitations/day, 30 generation jobs/day and 100 apps/workspace (including unpublished). Provider max output tokens 8000, total request duration 45 seconds; framework request body limit 512 KiB. Future Calls concurrency is one locally. Capacity upper bound is 10,000, but notification fan-out is deliberately lower. These are conservative configurable source guardrails, not measured throughput promises.
+`packages/appnest_spec/lib/appnest_spec.dart:Limits` centralizes definition 128 KiB/depth 12, 8 collections, 40 fields/collection, 16 views, 32 actions, 10 rules, 100 query rows, 8 filters, 16 KiB request text, 3 generation attempts, 100 worker rows/batch, 500 activation records/notification recipients, 50 invitations/day, 30 generation jobs/day and 100 apps/workspace (including unpublished). Provider max output tokens 8000, total request duration 45 seconds; the framework request body limit is 6 MiB for bounded image uploads while endpoint-specific input limits remain enforced. Media is limited to 5 MiB per input, 500 assets and 250 MiB per app; aggregate requests allow at most 366 buckets. Future Calls concurrency is one locally. Capacity upper bound is 10,000, but notification fan-out is deliberately lower. These are conservative configurable source guardrails, not measured throughput promises.
 
 Structured framework request IDs and service action/run/job IDs accompany logs for reconciliation batches, scheduling lag, retries and generation failures. Raw private record/prompt bodies and provider secrets are not routine log fields. Production telemetry retention, alerting, external auth/email/storage and operational capacity are release gates, not implied by dependencies.

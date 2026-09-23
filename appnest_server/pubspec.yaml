@@ -13,6 +13,7 @@ dependencies:
     path: ../packages/appnest_spec
   crypto: ^3.0.7
   http: ^1.6.0
+  image: 4.10.1
   serverpod: 4.0.0
   serverpod_auth_idp_server: 4.0.0
   serverpod_cloud_storage: 4.0.0

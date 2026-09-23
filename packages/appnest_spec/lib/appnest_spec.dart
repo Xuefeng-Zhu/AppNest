@@ -7,6 +7,8 @@ import 'package:crypto/crypto.dart';
 part 'src/spec.dart';
 part 'src/templates.dart';
 part 'src/schema.dart';
+part 'src/rich_spec.dart';
+part 'src/rich_templates.dart';
 
 class SpecException implements Exception {
   final String message;

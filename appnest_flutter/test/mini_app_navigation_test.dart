@@ -458,7 +458,7 @@ void main() {
       await tester.tap(find.byTooltip('Close mini-app'));
       await tester.pumpAndSettle();
       expect(router.currentConfiguration.appId, isNull);
-      expect(find.text('A little app. A lot together.'), findsOneWidget);
+      expect(find.text('What would you like to build?'), findsOneWidget);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
     },
@@ -564,6 +564,8 @@ void main() {
       );
       await tester.tap(find.text('Build'));
       await tester.pumpAndSettle();
+      await tester.tap(find.text('Publish'));
+      await tester.pumpAndSettle();
       expect(
         tester.widget<CheckboxListTile>(find.byType(CheckboxListTile)).value,
         false,
@@ -581,17 +583,29 @@ void main() {
       final dynamic state = tester.state(find.byType(BuilderScreen));
       state.update(snapshot(changed, 1));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Publish'));
+      await tester.tap(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.text('Publish'),
+        ),
+      );
       await tester.pumpAndSettle();
       expect(client.publications, isEmpty);
       expect(
         find.textContaining('The preview changed during review'),
         findsOneWidget,
       );
+      await tester.tap(find.text('Publish'));
+      await tester.pumpAndSettle();
       await tester.ensureVisible(find.text('Review & publish'));
       await tester.tap(find.text('Review & publish'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Publish'));
+      await tester.tap(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.text('Publish'),
+        ),
+      );
       await tester.pumpAndSettle();
       expect(published, 1);
       expect(client.publications.single.candidateHash, changed.hash);

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:appnest_server/src/generated/guidance_question.dart';
 import 'package:appnest_server/src/modules/builder/provider.dart';
 import 'package:appnest_spec/appnest_spec.dart';
 import 'package:http/http.dart' as http;
@@ -14,6 +15,347 @@ void main() {
     'kind',
     kind,
   );
+
+  test(
+    'guidance assesses with only idea and optional declarative definition',
+    () {
+      for (final definition in <AppSpec?>[null, current]) {
+        final body = buildGuidanceRequest(
+          'test-model',
+          'A small library',
+          definition: definition,
+        );
+        expect(body['max_tokens'], 2048);
+        final messages = body['messages'] as List;
+        expect(messages.first['content'], contains('needsClarification'));
+        expect(messages.first['content'], contains('current definition'));
+        expect(messages.first['content'], contains('options'));
+        final user = jsonDecode(messages.last['content'] as String) as Map;
+        expect(
+          user.keys,
+          unorderedEquals([
+            'idea',
+            if (definition != null) 'currentDefinition',
+          ]),
+        );
+        expect(user['idea'], 'A small library');
+        if (definition != null) {
+          expect(user['currentDefinition'], current.toJson());
+        }
+        expect(
+          messages.last['content'],
+          isNot(contains('private record text')),
+        );
+      }
+    },
+  );
+
+  test('guidance accepts clear decisions or focused selectable options', () {
+    const q1 = {
+      'question': 'Who will use this app?',
+      'options': ['Club members', 'Organizers', 'Both groups'],
+    };
+    const q2 = {
+      'question': 'What should they track?',
+      'options': ['Events', 'Membership', 'Shared tasks'],
+    };
+    final valid = jsonEncode({
+      'needsClarification': true,
+      'questions': [q1, q2],
+    });
+    final parsed = parseGuidanceOutput(valid);
+    expect(parsed.map((q) => q.question), [
+      'Who will use this app?',
+      'What should they track?',
+    ]);
+    expect(parsed.first.options, ['Club members', 'Organizers', 'Both groups']);
+    expect(
+      parseGuidanceOutput('```json\n$valid\n```').last.options,
+      ['Events', 'Membership', 'Shared tasks'],
+    );
+    expect(
+      parseGuidanceOutput(
+        jsonEncode({
+          'needsClarification': true,
+          'questions': [
+            q1,
+            q2,
+            {
+              'question': 'How should members collaborate?',
+              'options': [
+                'Shared calendar',
+                'Task assignments',
+                'Discussion posts',
+                'No collaboration',
+              ],
+            },
+          ],
+        }),
+      ).last.options,
+      hasLength(4),
+    );
+    expect(
+      parseGuidanceOutput('{"needsClarification":false,"questions":[]}'),
+      isEmpty,
+    );
+    expect(
+      parseGuidanceOutput(
+        '```json\n{"needsClarification":false,"questions":[]}\n```',
+      ),
+      isEmpty,
+    );
+    for (final response in [
+      'Not JSON',
+      'Here are questions: $valid',
+      '```json\n```json\n$valid\n```\n```',
+      '["Who will use it?","What should they track?"]',
+      '{"questions":[]}',
+      '{"needsClarification":true,"questions":[]}',
+      jsonEncode({
+        'needsClarification': false,
+        'questions': [q1],
+      }),
+      jsonEncode({
+        'needsClarification': true,
+        'questions': [q1],
+      }),
+      jsonEncode({
+        'needsClarification': true,
+        'questions': [q1, q1],
+      }),
+      jsonEncode({
+        'needsClarification': true,
+        'questions': [q1, q2, q1, q2],
+      }),
+      jsonEncode({
+        'needsClarification': true,
+        'questions': [
+          q1,
+          {...q1, 'question': 'WHO WILL USE THIS APP?'},
+        ],
+      }),
+      jsonEncode({
+        'needsClarification': true,
+        'questions': [q1, q2],
+        'extra': 1,
+      }),
+      jsonEncode({
+        'needsClarification': 'true',
+        'questions': [q1, q2],
+      }),
+      jsonEncode({
+        'needsClarification': true,
+        'questions': [
+          q1,
+          {...q2, 'question': 'No question mark'},
+        ],
+      }),
+      jsonEncode({
+        'needsClarification': true,
+        'questions': [
+          q1,
+          {...q2, 'question': 'What\nshould they track?'},
+        ],
+      }),
+      jsonEncode({
+        'needsClarification': true,
+        'questions': [
+          q1,
+          {...q2, 'question': 'X' * 121},
+        ],
+      }),
+      jsonEncode({
+        'needsClarification': true,
+        'questions': [
+          q1,
+          {
+            ...q2,
+            'options': ['Events', 'Membership'],
+          },
+        ],
+      }),
+      jsonEncode({
+        'needsClarification': true,
+        'questions': [
+          q1,
+          {
+            ...q2,
+            'options': [
+              'Events',
+              'Membership',
+              'Shared tasks',
+              'Another',
+              'Extra',
+            ],
+          },
+        ],
+      }),
+      jsonEncode({
+        'needsClarification': true,
+        'questions': [
+          q1,
+          {
+            ...q2,
+            'options': ['Events', 'EVENTS', 'Shared tasks'],
+          },
+        ],
+      }),
+      jsonEncode({
+        'needsClarification': true,
+        'questions': [
+          q1,
+          {
+            ...q2,
+            'options': ['Events', 'Events ', 'Shared tasks'],
+          },
+        ],
+      }),
+      jsonEncode({
+        'needsClarification': true,
+        'questions': [
+          q1,
+          {
+            ...q2,
+            'options': ['Events', 4, 'Shared tasks'],
+          },
+        ],
+      }),
+      jsonEncode({
+        'needsClarification': true,
+        'questions': [
+          q1,
+          {
+            ...q2,
+            'options': ['Events', '', 'Shared tasks'],
+          },
+        ],
+      }),
+      jsonEncode({
+        'needsClarification': true,
+        'questions': [
+          q1,
+          {
+            ...q2,
+            'options': ['Events', 'Membership', 'Shared\ntasks'],
+          },
+        ],
+      }),
+      jsonEncode({
+        'needsClarification': true,
+        'questions': [
+          q1,
+          {
+            ...q2,
+            'options': ['Events', 'Membership', 'X' * 81],
+          },
+        ],
+      }),
+      jsonEncode({
+        'needsClarification': true,
+        'questions': [
+          q1,
+          {...q2, 'extra': 'invalid'},
+        ],
+      }),
+      ' ' * 4097,
+    ]) {
+      expect(
+        () => parseGuidanceOutput(response),
+        throwsA(isA<AiResponseException>()),
+      );
+    }
+  });
+
+  test('guidance transport logs metadata only and bounds completion', () async {
+    final logs = <String>[];
+    Future<List<GuidanceQuestion>> ask(
+      Object? completion, {
+      String finishReason = 'stop',
+      Map<String, dynamic> usage = const {},
+    }) => ChatCompletionProvider(
+      Uri.parse('https://example.test/v1'),
+      'test-model',
+      'private-key',
+      log: logs.add,
+      clientFactory: () => MockClient((request) async {
+        expect(request.headers['Authorization'], 'Bearer private-key');
+        expect(request.body, contains('private-idea'));
+        return http.Response(
+          jsonEncode({
+            'choices': [
+              {
+                'finish_reason': finishReason,
+                'message': {'content': completion},
+              },
+            ],
+            'usage': usage,
+          }),
+          200,
+        );
+      }),
+    ).suggestQuestions('private-idea');
+
+    const valid =
+        '{"needsClarification":true,"questions":[{"question":"Who will use it?","options":["Members","Organizers","Both groups"]},{"question":"What should it track?","options":["Events","Membership","Shared tasks"]}]}';
+    final result = await ask(valid);
+    expect(result.map((q) => q.question), [
+      'Who will use it?',
+      'What should it track?',
+    ]);
+    expect(result.first.options, ['Members', 'Organizers', 'Both groups']);
+    expect(logs.single, contains('guidance_provider outcome=received'));
+    expect(logs.single, contains('content_format=object_candidate'));
+    for (final secret in ['private-key', 'private-idea', 'Who will use it?']) {
+      expect(logs.single, isNot(contains(secret)));
+    }
+    expect(
+      await ask('{"needsClarification":false,"questions":[]}'),
+      isEmpty,
+    );
+    expect(logs.last, contains('guidance_provider outcome=received'));
+    await expectLater(
+      ask('{"needsClarification":true,"questions":[]}'),
+      throwsA(failure('guidance_shape')),
+    );
+    expect(logs.last, contains('outcome=guidance_shape'));
+    expect(
+      (await ask('```json\n$valid\n```')).length,
+      2,
+    );
+    expect(logs.last, contains('content_format=fence_candidate'));
+    await expectLater(
+      ask(
+        null,
+        finishReason: 'length',
+        usage: {
+          'completion_tokens': 2048,
+          'completion_tokens_details': {'reasoning_tokens': 2048},
+        },
+      ),
+      throwsA(failure('guidance_truncated')),
+    );
+    expect(logs.last, contains('outcome=guidance_truncated'));
+    expect(logs.last, contains('finish_reason=length'));
+    expect(logs.last, contains('content_chars=0'));
+    expect(
+      logs.last,
+      contains('completion_tokens=2048 reasoning_tokens=2048'),
+    );
+    await expectLater(
+      ask(null, finishReason: 'content_filter'),
+      throwsA(failure('guidance_completion')),
+    );
+    expect(logs.last, contains('finish_reason=content_filter'));
+    for (final log in logs) {
+      for (final secret in [
+        'private-key',
+        'private-idea',
+        'Who will use it?',
+      ]) {
+        expect(log, isNot(contains(secret)));
+      }
+    }
+  });
 
   test(
     'create sends only the request and diagnostics, edit includes definition',

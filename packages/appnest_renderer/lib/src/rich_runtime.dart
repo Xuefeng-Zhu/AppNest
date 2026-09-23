@@ -22,6 +22,10 @@ class _ViewState {
   final Map<String, String> filters = {};
   RuntimePage? records;
   RuntimeSummary? summary;
+  Map<String, dynamic>? aggregate;
+  String? sortField;
+  bool descending = false, undated = false;
+  DateTime? month, day;
 }
 
 class _RichMiniAppRuntimeState extends State<_RichMiniAppRuntime>
@@ -47,6 +51,7 @@ class _RichMiniAppRuntimeState extends State<_RichMiniAppRuntime>
   AppSpec get spec => adapter.spec;
   PageSpec get page => spec.page(_location.pageId);
   DateTime get now => widget.clock();
+  void _update(VoidCallback callback) => setState(callback);
   bool get _formPage => page.viewIds.any((id) => spec.view(id).type == 'form');
   _ViewState state(ViewSpec view) =>
       _views.putIfAbsent(view.id, _ViewState.new);
@@ -153,6 +158,17 @@ class _RichMiniAppRuntimeState extends State<_RichMiniAppRuntime>
     return result;
   }
 
+  bool _editingPresentation = false;
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final editing = _VisualEditScope.of(context) != null;
+    // The host guards entry through controller.canLeave(). Once the record
+    // editor is replaced, do not retain a phantom unsaved-form flag.
+    if (editing && !_editingPresentation) _formDirty = false;
+    _editingPresentation = editing;
+  }
+
   Future<bool> _canLeave() async {
     if (_saving) return false;
     if (!_formDirty) return true;
@@ -246,6 +262,14 @@ class _RichMiniAppRuntimeState extends State<_RichMiniAppRuntime>
         for (final filter in stored.filters.entries)
           {'fieldId': filter.key, 'operator': 'eq', 'value': filter.value},
       ],
+      if (stored.sortField != null)
+        'sort': [
+          {'fieldId': stored.sortField, 'descending': stored.descending},
+        ],
+      if (view.type == 'timeline')
+        'sort': [
+          {'fieldId': view.options['dateFieldId'], 'descending': false},
+        ],
       if (cursor != null) 'cursor': cursor,
     };
   }
@@ -281,14 +305,23 @@ class _RichMiniAppRuntimeState extends State<_RichMiniAppRuntime>
         final results = await Future.wait(
           page.viewIds.map((id) async {
             final view = spec.view(id), stored = state(spec.view(id));
-            if (view.type == 'form' || view.type == 'details')
+            if (view.type == 'form' ||
+                view.type == 'details' ||
+                view.contentOnly)
               return (id, null);
             if (nextView != null && id != nextView) return (id, null);
             final query = _query(
               view,
               cursor: nextView == id ? stored.records?.cursor : null,
             );
-            final Object result = view.type == 'summary'
+            final Object result =
+                {'chart', 'metric', 'calendar', 'timeline'}.contains(view.type)
+                ? await _loadRichData(
+                    view,
+                    query,
+                    nextView == id ? 0 : stored.records?.items.length ?? 0,
+                  )
+                : view.type == 'summary'
                 ? view.groupByFieldId == null
                       ? RuntimeSummary(
                           (await adapter.query(view.collectionId, query)).total,
@@ -311,6 +344,17 @@ class _RichMiniAppRuntimeState extends State<_RichMiniAppRuntime>
         setState(() {
           for (final (id, result) in results) {
             final stored = state(spec.view(id));
+            if (result is _RichData) {
+              stored.aggregate = result.aggregate;
+              if (result.records != null)
+                stored.records = nextView == id && stored.records != null
+                    ? RuntimePage(
+                        [...stored.records!.items, ...result.records!.items],
+                        result.records!.total,
+                        result.records!.cursor,
+                      )
+                    : result.records;
+            }
             if (result is RuntimeSummary) stored.summary = result;
             if (result is RuntimePage) {
               stored.records = nextView == id && stored.records != null
@@ -368,6 +412,19 @@ class _RichMiniAppRuntimeState extends State<_RichMiniAppRuntime>
     ViewSpec? source,
   }) async {
     if (!_permitted(action, item) || _saving) return;
+    final edit = _VisualEditScope.of(context);
+    if (edit != null) {
+      edit.onSelect(
+        source == null
+            ? MiniAppEditTarget(MiniAppEditKind.page, page.id)
+            : MiniAppEditTarget(
+                MiniAppEditKind.section,
+                source.id,
+                pageId: page.id,
+              ),
+      );
+      return;
+    }
     if (action.capability == 'records.create.v1' ||
         action.capability == 'records.patch.v1') {
       final destination =
@@ -451,6 +508,8 @@ class _RichMiniAppRuntimeState extends State<_RichMiniAppRuntime>
                   members: adapter.members,
                   clock: widget.clock,
                   fieldIds: const [],
+                  adapter: adapter,
+                  record: item,
                   onDirtyChanged: (dirty) => _formDirty = dirty,
                   onCancel: () async {
                     if (!await _canLeave() || !dialogContext.mounted)
@@ -481,6 +540,7 @@ class _RichMiniAppRuntimeState extends State<_RichMiniAppRuntime>
     bool editor = false,
     bool propagateError = false,
   }) async {
+    if (_VisualEditScope.of(context) != null) return;
     if (!_permitted(action, item))
       throw const SpecException('This action is unavailable.');
     setState(() => _saving = true);
@@ -730,10 +790,16 @@ class _RichMiniAppRuntimeState extends State<_RichMiniAppRuntime>
                                   ),
                             ),
                           ),
-                        Text(
-                          page.title,
-                          style: Theme.of(context).textTheme.headlineMedium
-                              ?.copyWith(fontWeight: FontWeight.w700),
+                        _EditTarget(
+                          target: MiniAppEditTarget(
+                            MiniAppEditKind.page,
+                            page.id,
+                          ),
+                          child: Text(
+                            page.title,
+                            style: Theme.of(context).textTheme.headlineMedium
+                                ?.copyWith(fontWeight: FontWeight.w700),
+                          ),
                         ),
                       ],
                     ),
@@ -784,7 +850,14 @@ class _RichMiniAppRuntimeState extends State<_RichMiniAppRuntime>
                   for (final id in page.viewIds)
                     Padding(
                       padding: const EdgeInsets.only(bottom: 24),
-                      child: _section(context, spec.view(id)),
+                      child: _EditTarget(
+                        target: MiniAppEditTarget(
+                          MiniAppEditKind.section,
+                          id,
+                          pageId: page.id,
+                        ),
+                        child: _section(context, spec.view(id)),
+                      ),
                     ),
               ],
             ),
@@ -796,6 +869,8 @@ class _RichMiniAppRuntimeState extends State<_RichMiniAppRuntime>
 
   Widget _section(BuildContext context, ViewSpec view) {
     if (view.type == 'form') {
+      if (_VisualEditScope.of(context) != null)
+        return _editForm(spec, view, pageId: page.id);
       final capability = _location.recordId == null
           ? 'records.create.v1'
           : 'records.patch.v1';
@@ -813,6 +888,9 @@ class _RichMiniAppRuntimeState extends State<_RichMiniAppRuntime>
         members: adapter.members,
         clock: widget.clock,
         fieldIds: view.fieldIds,
+        options: view.options,
+        adapter: adapter,
+        record: _record,
         onDirtyChanged: (value) => _formDirty = value,
         onSave: (input) => _execute(action, _record, input, editor: true),
         onCancel: _back,
@@ -823,6 +901,18 @@ class _RichMiniAppRuntimeState extends State<_RichMiniAppRuntime>
         return const Text('Choose a record to open its details.');
       return _details(context, view, _record!);
     }
+    if (view.contentOnly) return _contentSection(context, view);
+    if ({
+      'table',
+      'calendar',
+      'timeline',
+      'chart',
+      'metric',
+      'imageCards',
+      'gallery',
+      'checklist',
+    }.contains(view.type))
+      return _richSection(context, view);
     final stored = state(view);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -998,47 +1088,49 @@ class _RichMiniAppRuntimeState extends State<_RichMiniAppRuntime>
   }
 
   Widget _board(BuildContext context, ViewSpec view, List<RuntimeItem> items) =>
-      LayoutBuilder(
-        builder: (context, constraints) {
-          final choices = spec
-              .collection(view.collectionId)
-              .field(view.groupByFieldId!)
-              .choices;
-          final columns = constraints.maxWidth < 700
-              ? 1
-              : choices.length.clamp(1, 3);
-          final width = (constraints.maxWidth - (columns - 1) * 16) / columns;
-          return Wrap(
-            spacing: 16,
-            runSpacing: 20,
-            children: [
-              for (final choice in choices)
-                SizedBox(
-                  width: width,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 10),
-                        child: Text(
-                          choice,
-                          style: Theme.of(context).textTheme.titleSmall,
-                        ),
-                      ),
-                      for (final item in items.where(
-                        (r) => r.data[view.groupByFieldId] == choice,
-                      ))
+      view.options['draggable'] == true
+      ? _movableBoard(context, view, items)
+      : LayoutBuilder(
+          builder: (context, constraints) {
+            final choices = spec
+                .collection(view.collectionId)
+                .field(view.groupByFieldId!)
+                .choices;
+            final columns = constraints.maxWidth < 700
+                ? 1
+                : choices.length.clamp(1, 3);
+            final width = (constraints.maxWidth - (columns - 1) * 16) / columns;
+            return Wrap(
+              spacing: 16,
+              runSpacing: 20,
+              children: [
+                for (final choice in choices)
+                  SizedBox(
+                    width: width,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
                         Padding(
                           padding: const EdgeInsets.only(bottom: 10),
-                          child: Card(child: _row(context, view, item)),
+                          child: Text(
+                            choice,
+                            style: Theme.of(context).textTheme.titleSmall,
+                          ),
                         ),
-                    ],
+                        for (final item in items.where(
+                          (r) => r.data[view.groupByFieldId] == choice,
+                        ))
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 10),
+                            child: Card(child: _row(context, view, item)),
+                          ),
+                      ],
+                    ),
                   ),
-                ),
-            ],
-          );
-        },
-      );
+              ],
+            );
+          },
+        );
 
   Iterable<ActionSpec> _recordActions(ViewSpec view, RuntimeItem item) => view
       .actionIds
@@ -1127,7 +1219,13 @@ class _RichMiniAppRuntimeState extends State<_RichMiniAppRuntime>
         (view.fieldIds.isEmpty && !{'capacity', 'action'}.contains(view.type)
                 ? collection.fields.map((field) => field.id)
                 : view.fieldIds)
-            .where((id) => id != view.titleFieldId && item.data[id] != null)
+            .where(
+              (id) =>
+                  id != view.titleFieldId &&
+                  item.data[id] != null &&
+                  (!{'gallery', 'imageCards'}.contains(view.type) ||
+                      id != view.options['imageFieldId']),
+            )
             .map(collection.field);
     final inlineActions = actions
         .where(
@@ -1138,7 +1236,15 @@ class _RichMiniAppRuntimeState extends State<_RichMiniAppRuntime>
         )
         .toList();
     return InkWell(
-      onTap: view.detailPageId == null
+      onTap: _VisualEditScope.of(context) != null
+          ? () => _VisualEditScope.of(context)!.onSelect(
+              MiniAppEditTarget(
+                MiniAppEditKind.section,
+                view.id,
+                pageId: page.id,
+              ),
+            )
+          : view.detailPageId == null
           ? null
           : () => _navigate(
               MiniAppLocation(view.detailPageId!, recordId: item.id),
@@ -1164,9 +1270,23 @@ class _RichMiniAppRuntimeState extends State<_RichMiniAppRuntime>
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    '${item.data[view.titleFieldId ?? collection.fields.first.id] ?? 'Untitled'}',
-                    style: Theme.of(context).textTheme.titleMedium,
+                  _editableField(
+                    context,
+                    view,
+                    view.titleFieldId ?? collection.fields.first.id,
+                    Text(
+                      collection
+                                  .field(
+                                    view.titleFieldId ??
+                                        collection.fields.first.id,
+                                  )
+                                  .type ==
+                              FieldType.image
+                          ? 'Image record'
+                          : '${item.data[view.titleFieldId ?? collection.fields.first.id] ?? 'Untitled'}',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    pageId: page.id,
                   ),
                   if (item.capacity != null)
                     Padding(
@@ -1180,14 +1300,32 @@ class _RichMiniAppRuntimeState extends State<_RichMiniAppRuntime>
                       runSpacing: 6,
                       children: [
                         for (final field in fields)
-                          Text(
-                            field.type == FieldType.timestamp
-                                ? _displayDate(
-                                    context,
-                                    '${item.data[field.id]}',
+                          _editableField(
+                            context,
+                            view,
+                            field.id,
+                            field.type == FieldType.image
+                                ? SizedBox(
+                                    width: 80,
+                                    child: _PrivateImage(
+                                      adapter: adapter,
+                                      assetId: '${item.data[field.id]}',
+                                      label: field.label,
+                                      height: 64,
+                                    ),
                                   )
-                                : '${item.data[field.id]}',
-                            style: Theme.of(context).textTheme.bodySmall,
+                                : Text(
+                                    field.type == FieldType.timestamp
+                                        ? _displayDate(
+                                            context,
+                                            '${item.data[field.id]}',
+                                          )
+                                        : '${item.data[field.id]}',
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .bodySmall,
+                                  ),
+                            pageId: page.id,
                           ),
                       ],
                     ),
@@ -1234,9 +1372,22 @@ class _RichMiniAppRuntimeState extends State<_RichMiniAppRuntime>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text(
-              '${item.data[view.titleFieldId ?? collection.fields.first.id] ?? 'Untitled'}',
-              style: Theme.of(context).textTheme.headlineSmall,
+            _editableField(
+              context,
+              view,
+              view.titleFieldId ?? collection.fields.first.id,
+              Text(
+                collection
+                            .field(
+                              view.titleFieldId ?? collection.fields.first.id,
+                            )
+                            .type ==
+                        FieldType.image
+                    ? 'Image record'
+                    : '${item.data[view.titleFieldId ?? collection.fields.first.id] ?? 'Untitled'}',
+                style: Theme.of(context).textTheme.headlineSmall,
+              ),
+              pageId: page.id,
             ),
             const SizedBox(height: 24),
             if (item.capacity != null)
@@ -1247,22 +1398,37 @@ class _RichMiniAppRuntimeState extends State<_RichMiniAppRuntime>
             for (final field in fields.where((f) => f.id != view.titleFieldId))
               Padding(
                 padding: const EdgeInsets.only(bottom: 20),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      field.label,
-                      style: Theme.of(context).textTheme.labelMedium,
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      item.data[field.id] == null
-                          ? 'Not set'
-                          : field.type == FieldType.timestamp
-                          ? _displayDate(context, '${item.data[field.id]}')
-                          : '${item.data[field.id]}',
-                    ),
-                  ],
+                child: _editableField(
+                  context,
+                  view,
+                  field.id,
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        field.label,
+                        style: Theme.of(context).textTheme.labelMedium,
+                      ),
+                      const SizedBox(height: 4),
+                      if (field.type == FieldType.image &&
+                          item.data[field.id] != null)
+                        _PrivateImage(
+                          adapter: adapter,
+                          assetId: '${item.data[field.id]}',
+                          label: field.label,
+                          thumbnail: false,
+                        )
+                      else
+                        Text(
+                          item.data[field.id] == null
+                              ? 'Not set'
+                              : field.type == FieldType.timestamp
+                              ? _displayDate(context, '${item.data[field.id]}')
+                              : '${item.data[field.id]}',
+                        ),
+                    ],
+                  ),
+                  pageId: page.id,
                 ),
               ),
             if (_reminder != null)

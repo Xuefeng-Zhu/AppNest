@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:appnest_client/appnest_client.dart';
 import 'package:appnest_spec/appnest_spec.dart';
 import 'package:flutter/material.dart';
@@ -5,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:serverpod_auth_idp_flutter/serverpod_auth_idp_flutter.dart';
 
 import '../../client.dart';
+import '../builder/idea_guidance.dart';
 import '../builder/builder_screen.dart';
 import '../mini_app/mini_app_screen.dart';
 import 'home_load_failure.dart';
@@ -25,16 +28,61 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   int? workspaceId;
   int page = 0;
   bool loading = true;
+  bool creating = false;
   Object? error;
   PlatformInfo? platform;
   final prompt = TextEditingController();
+  final guidancePanelKey = GlobalKey();
+  List<GuidanceQuestion>? guidanceQuestions;
+  String? guidanceSource;
+  int? guidanceWorkspace;
+  bool guidanceFallback = false;
+  String? guidanceNotice;
+  int? preparedGuidanceWorkspace;
+  String? preparedGuidanceText;
+  String? assessedIdea;
+  int? assessedWorkspace;
+  ({int workspaceId, BuilderSnapshot draft, String request})? pendingCreation;
   bool invitationHandled = false;
   int loadGeneration = 0;
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    prompt.addListener(onPromptChanged);
     load();
+  }
+
+  void onPromptChanged() {
+    if (guidanceQuestions != null && prompt.text.trim() != guidanceSource) {
+      setState(() => guidanceQuestions = null);
+    }
+  }
+
+  void showGuidance(
+    List<GuidanceQuestion> questions,
+    String source,
+    int selectedWorkspace, {
+    required bool fallback,
+    String? notice,
+  }) {
+    setState(() {
+      guidanceQuestions = questions;
+      guidanceSource = source;
+      guidanceWorkspace = selectedWorkspace;
+      guidanceFallback = fallback;
+      guidanceNotice = notice;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final panelContext = guidancePanelKey.currentContext;
+      if (mounted && panelContext != null) {
+        Scrollable.ensureVisible(
+          panelContext,
+          alignment: 0,
+          duration: const Duration(milliseconds: 200),
+        );
+      }
+    });
   }
 
   @override
@@ -78,6 +126,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       if (!mounted || generation != loadGeneration) return;
       if (mounted) {
         setState(() {
+          if (workspaceId != selectedWorkspace) {
+            guidanceQuestions = null;
+            preparedGuidanceWorkspace = null;
+            preparedGuidanceText = null;
+          }
           workspaceId = selectedWorkspace;
           workspaces = ws;
           platform = p;
@@ -125,26 +178,122 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Future<void> builder(String templateKey, {bool generate = false}) async {
+    final request = prompt.text.trim();
+    if (creating || workspaceId == null) return;
+    if (generate && (platform?.aiAvailable != true || request.isEmpty)) return;
+    final selectedWorkspace = workspaceId!;
+    setState(() => creating = true);
     try {
-      var d = await client.builder.begin(workspaceId!, templateKey, null);
-      if (generate) {
+      final pending = pendingCreation;
+      BuilderSnapshot? d;
+      var submittedRequest = request;
+      var alreadyAccepted = false;
+      if (generate &&
+          pending != null &&
+          pending.workspaceId == selectedWorkspace) {
+        d = await client.builder.get(pending.draft.draftId);
+        // A lost response may hide a successful enqueue. Recover that request
+        // instead of creating another app or submitting the same idea twice.
+        alreadyAccepted =
+            d.jobId != null && d.mutation > pending.draft.mutation;
+        if (alreadyAccepted) submittedRequest = pending.request;
+      }
+      if (generate && !alreadyAccepted) {
+        final prepared =
+            preparedGuidanceWorkspace == selectedWorkspace &&
+            preparedGuidanceText != null &&
+            request.startsWith(preparedGuidanceText!);
+        final assessed =
+            assessedWorkspace == selectedWorkspace && assessedIdea == request;
+        if (!prepared && !assessed && canAssessIdea(request)) {
+          try {
+            final questions = cleanGuidanceQuestions(
+              await client.builder.suggestQuestions(
+                request,
+                selectedWorkspace,
+                null,
+              ),
+            );
+            if (!mounted ||
+                workspaceId != selectedWorkspace ||
+                prompt.text.trim() != request) {
+              return;
+            }
+            if (questions == null || questions.isNotEmpty) {
+              showGuidance(
+                questions ?? builtInGuidanceQuestions,
+                request,
+                selectedWorkspace,
+                fallback: questions == null,
+                notice: questions == null
+                    ? 'AI questions were incomplete. Try these built-in questions.'
+                    : null,
+              );
+              return;
+            }
+            assessedIdea = request;
+            assessedWorkspace = selectedWorkspace;
+          } catch (e) {
+            if (!mounted ||
+                workspaceId != selectedWorkspace ||
+                prompt.text.trim() != request) {
+              return;
+            }
+            if (!canOfferBuiltInGuidance(e)) rethrow;
+            showGuidance(
+              builtInGuidanceQuestions,
+              request,
+              selectedWorkspace,
+              fallback: true,
+              notice: 'AI questions are unavailable. Try these built-in questions, or continue with your original idea.',
+            );
+            return;
+          }
+        }
+        if (pending == null || pending.workspaceId != selectedWorkspace) {
+          d = await client.builder.begin(selectedWorkspace, templateKey, null);
+        }
+      }
+      if (!generate) {
+        d = await client.builder.begin(selectedWorkspace, templateKey, null);
+      }
+      if (generate && !alreadyAccepted) {
+        final startingDraft = d!;
+        pendingCreation = (
+          workspaceId: selectedWorkspace,
+          draft: startingDraft,
+          request: request,
+        );
         d = await client.builder.generate(
-          d.draftId,
-          d.mutation,
-          prompt.text,
+          startingDraft.draftId,
+          startingDraft.mutation,
+          request,
           startFromScratch: true,
         );
       }
       if (mounted) {
-        final published = await Navigator.push<int>(
+        preparedGuidanceWorkspace = null;
+        preparedGuidanceText = null;
+        guidanceQuestions = null;
+        final navigation = Navigator.push<int>(
           context,
-          MaterialPageRoute<int>(builder: (_) => BuilderScreen(initial: d)),
+          MaterialPageRoute<int>(
+            builder: (_) => BuilderScreen(
+              initial: d!,
+              initialPrompt: generate ? submittedRequest : null,
+              startFromScratch: generate,
+            ),
+          ),
         );
+        pendingCreation = null;
+        final published = await navigation;
         if (published != null && mounted) await open(published);
       }
       load();
     } catch (e) {
       showError(e);
+    } finally {
+      if (mounted) setState(() => creating = false);
     }
   }
 
@@ -207,7 +356,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     text.dispose();
     if (name != null) {
       try {
-        workspaceId = await client.apps.createWorkspace(name);
+        final createdWorkspace = await client.apps.createWorkspace(name);
+        if (!mounted) return;
+        setState(() {
+          workspaceId = createdWorkspace;
+          guidanceQuestions = null;
+          preparedGuidanceWorkspace = null;
+          preparedGuidanceText = null;
+        });
         load();
       } catch (e) {
         showError(e);
@@ -227,10 +383,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           ),
         )
         .toList(),
-    onChanged: (v) {
-      setState(() => workspaceId = v);
-      load();
-    },
+    onChanged: creating
+        ? null
+        : (v) {
+            setState(() {
+              workspaceId = v;
+              guidanceQuestions = null;
+              preparedGuidanceWorkspace = null;
+              preparedGuidanceText = null;
+            });
+            load();
+          },
   );
   Widget navigation(bool wide) => wide
       ? Column(
@@ -391,7 +554,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                           child: Text(t.description),
                         ),
                       OutlinedButton(
-                        onPressed: () => builder(t.key),
+                        onPressed: creating ? null : () => builder(t.key),
                         child: const Text('Use template'),
                       ),
                     ],
@@ -403,122 +566,324 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         )
         .toList(),
   );
+  Widget creationEntry() => Center(
+    child: ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 820),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final compact = constraints.maxWidth < 560;
+          final canGenerate = platform?.aiAvailable == true;
+          final selectedWorkspace = workspaceId;
+          final theme = Theme.of(context);
+          final createButton = ValueListenableBuilder<TextEditingValue>(
+            valueListenable: prompt,
+            builder: (context, value, _) => FilledButton.icon(
+              key: const ValueKey('create-app'),
+              onPressed:
+                  creating ||
+                      guidanceQuestions != null ||
+                      (canGenerate && value.text.trim().isEmpty)
+                  ? null
+                  : () {
+                      if (canGenerate) {
+                        builder('volunteer', generate: true);
+                      } else {
+                        setState(() => page = 1);
+                      }
+                    },
+              icon: creating
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : Icon(canGenerate ? Icons.arrow_upward : Icons.grid_view),
+              label: Text(
+                creating
+                    ? 'Checking your idea…'
+                    : canGenerate
+                    ? 'Create app'
+                    : 'Browse templates',
+              ),
+            ),
+          );
+          return Column(
+            children: [
+              SizedBox(height: compact ? 12 : 36),
+              const Icon(
+                Icons.spa_outlined,
+                color: Color(0xff276c61),
+                size: 34,
+              ),
+              const SizedBox(height: 20),
+              Text(
+                'What would you like to build?',
+                textAlign: TextAlign.center,
+                style: theme.textTheme.displaySmall?.copyWith(
+                  fontSize: compact ? 34 : 46,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Describe your idea. Bring it to life, then make it your own.',
+                textAlign: TextAlign.center,
+                style: theme.textTheme.titleMedium?.copyWith(
+                  color: const Color(0xff617069),
+                  height: 1.5,
+                ),
+              ),
+              const SizedBox(height: 32),
+              Container(
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(22),
+                  border: Border.all(color: const Color(0xffd7ddd7)),
+                  boxShadow: const [
+                    BoxShadow(
+                      color: Color(0x0825332e),
+                      blurRadius: 28,
+                      offset: Offset(0, 8),
+                    ),
+                  ],
+                ),
+                child: Padding(
+                  padding: EdgeInsets.all(compact ? 16 : 24),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      TextField(
+                        key: const ValueKey('app-idea'),
+                        controller: prompt,
+                        enabled: !creating,
+                        minLines: 3,
+                        maxLines: 7,
+                        textCapitalization: TextCapitalization.sentences,
+                        decoration: const InputDecoration(
+                          hintText: 'An app for my book club to track books, share notes, and plan our next read…',
+                          hintMaxLines: 4,
+                          semanticCounterText:
+                              'Describe the app you want to build',
+                          border: InputBorder.none,
+                          enabledBorder: InputBorder.none,
+                          focusedBorder: InputBorder.none,
+                          disabledBorder: InputBorder.none,
+                          filled: false,
+                          contentPadding: EdgeInsets.zero,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      if (guidanceQuestions != null &&
+                          guidanceWorkspace == selectedWorkspace)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 16),
+                          child: IdeaGuidancePanel(
+                            key: guidancePanelKey,
+                            composer: prompt,
+                            sourceText: guidanceSource!,
+                            contextId: 'workspace:$guidanceWorkspace',
+                            currentContext: () => 'workspace:$workspaceId',
+                            questions: guidanceQuestions!,
+                            usedFallback: guidanceFallback,
+                            notice: guidanceNotice,
+                            onUseAnswers: (combined) {
+                              setState(() {
+                                guidanceQuestions = null;
+                                preparedGuidanceWorkspace = selectedWorkspace;
+                                preparedGuidanceText = combined;
+                              });
+                              prompt.value = TextEditingValue(
+                                text: combined,
+                                selection: TextSelection.collapsed(
+                                  offset: combined.length,
+                                ),
+                              );
+                            },
+                            onContinueOriginal: () {
+                              setState(() {
+                                guidanceQuestions = null;
+                                preparedGuidanceWorkspace = selectedWorkspace;
+                                preparedGuidanceText = prompt.text.trim();
+                              });
+                              unawaited(builder('volunteer', generate: true));
+                            },
+                            onEditIdea: () =>
+                                setState(() => guidanceQuestions = null),
+                          ),
+                        ),
+                      if (compact)
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: createButton,
+                        )
+                      else
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                'Start with an idea. Refine it together.',
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: const Color(0xff617069),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 16),
+                            createButton,
+                          ],
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+              Wrap(
+                alignment: WrapAlignment.center,
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final starter in const [
+                    (
+                      'Daily planner',
+                      Icons.today_outlined,
+                      'Build a daily planner where I can organize tasks by day, set priorities, and track what I finish.',
+                    ),
+                    (
+                      'Reading journal',
+                      Icons.menu_book_outlined,
+                      'Build a reading journal to track books I want to read, what I am reading, and my notes and ratings.',
+                    ),
+                    (
+                      'Shared chores',
+                      Icons.home_outlined,
+                      'Build a shared chores app for my household with assigned tasks, due dates, and a view of what still needs doing.',
+                    ),
+                    (
+                      'Volunteer shifts',
+                      Icons.people_outline,
+                      'Build an app for volunteers to browse upcoming shifts, see available places, and sign up together.',
+                    ),
+                  ])
+                    ActionChip(
+                      avatar: Icon(starter.$2, size: 16),
+                      label: Text(starter.$1),
+                      onPressed: creating
+                          ? null
+                          : () {
+                              prompt.value = TextEditingValue(
+                                text: starter.$3,
+                                selection: TextSelection.collapsed(
+                                  offset: starter.$3.length,
+                                ),
+                              );
+                            },
+                      backgroundColor: const Color(0xfff7f6f2),
+                      side: const BorderSide(color: Color(0xffdfe4dc)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              if (!canGenerate)
+                Text(
+                  '${platform?.aiMode ?? 'AI creation is unavailable'}. Choose a template to start building.',
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodySmall,
+                )
+              else
+                TextButton(
+                  onPressed: creating ? null : () => setState(() => page = 1),
+                  child: const Text('Or start with a template'),
+                ),
+            ],
+          );
+        },
+      ),
+    ),
+  );
+
+  Widget appCard(AppManifest app) => Card(
+    child: InkWell(
+      borderRadius: BorderRadius.circular(12),
+      onTap: () => open(app.appId),
+      child: Padding(
+        padding: const EdgeInsets.all(22),
+        child: Row(
+          children: [
+            icon(app.specJson),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    app.name,
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    app.archived
+                        ? 'Archived'
+                        : AppSpec.parse(app.specJson!).requires.contains(
+                            'capacity.v1',
+                          )
+                        ? '${app.availablePlaces} places available'
+                        : '${app.recordCount} ${app.recordCount == 1 ? 'record' : 'records'}',
+                  ),
+                ],
+              ),
+            ),
+            const Icon(Icons.chevron_right),
+          ],
+        ),
+      ),
+    ),
+  );
+
   Widget home() => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
-      Text(
-        'A little app. A lot together.',
-        style: Theme.of(context).textTheme.displaySmall,
-      ),
-      const SizedBox(height: 16),
-      Text(
-        'Describe the tool your group needs.',
-        style: Theme.of(context).textTheme.titleLarge,
-      ),
-      const SizedBox(height: 32),
-      LayoutBuilder(
-        builder: (context, c) {
-          final input = TextField(
-            controller: prompt,
-            minLines: 1,
-            maxLines: 3,
-            decoration: const InputDecoration(
-              hintText: 'Describe an app…',
-              contentPadding: EdgeInsets.all(24),
-            ),
-          );
-          final button = FilledButton.icon(
-            onPressed: () {
-              if (platform?.aiAvailable == true &&
-                  prompt.text.trim().isNotEmpty) {
-                builder('volunteer', generate: true);
-              } else {
-                setState(() => page = 1);
-              }
-            },
-            icon: const Icon(Icons.arrow_forward),
-            label: const Text('Create preview'),
-          );
-          return c.maxWidth < 600
-              ? Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [input, const SizedBox(height: 12), button],
-                )
-              : Row(
-                  children: [
-                    Expanded(child: input),
-                    const SizedBox(width: 16),
-                    button,
-                  ],
-                );
-        },
-      ),
-      if (platform?.aiAvailable == false) ...[
-        const SizedBox(height: 10),
-        Text(
-          platform!.aiMode,
-          style: Theme.of(context).textTheme.bodyMedium,
-        ),
-      ],
-      const SizedBox(height: 48),
+      creationEntry(),
+      const SizedBox(height: 56),
       Text('Your apps', style: Theme.of(context).textTheme.headlineSmall),
       const SizedBox(height: 20),
       if (apps.where((a) => a.pinned).isEmpty)
         const Padding(
           padding: EdgeInsets.symmetric(vertical: 20),
-          child: Text('Your workspace is ready. Start with a template below.'),
+          child: Text(
+            'Your next idea belongs here. Create an app to get started.',
+          ),
         ),
       LayoutBuilder(
-        builder: (context, c) => Wrap(
-          spacing: 16,
-          runSpacing: 16,
-          children: apps
-              .where((a) => a.pinned)
-              .map(
-                (a) => SizedBox(
-                  width: c.maxWidth < 650 ? c.maxWidth : (c.maxWidth - 32) / 3,
-                  child: Card(
-                    child: InkWell(
-                      borderRadius: BorderRadius.circular(12),
-                      onTap: () => open(a.appId),
-                      child: Padding(
-                        padding: const EdgeInsets.all(22),
-                        child: Row(
-                          children: [
-                            icon(a.specJson),
-                            const SizedBox(width: 16),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    a.name,
-                                    style: Theme.of(
-                                      context,
-                                    ).textTheme.titleMedium,
-                                  ),
-                                  const SizedBox(height: 6),
-                                  Text(
-                                    a.archived
-                                        ? 'Archived'
-                                        : AppSpec.parse(a.specJson!).requires
-                                              .contains('capacity.v1')
-                                        ? '${a.availablePlaces} places available'
-                                        : '${a.recordCount} ${a.recordCount == 1 ? 'record' : 'records'}',
-                                  ),
-                                ],
-                              ),
-                            ),
-                            const Icon(Icons.chevron_right),
-                          ],
-                        ),
-                      ),
+        builder: (context, c) {
+          final pinned = apps.where((a) => a.pinned).toList();
+          final columns = c.maxWidth < 650 ? 1 : 3;
+          return Column(
+            children: [
+              for (var start = 0; start < pinned.length; start += columns)
+                Padding(
+                  padding: EdgeInsets.only(
+                    bottom: start + columns < pinned.length ? 16 : 0,
+                  ),
+                  child: IntrinsicHeight(
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        for (var column = 0; column < columns; column++) ...[
+                          if (column > 0) const SizedBox(width: 16),
+                          Expanded(
+                            child: start + column < pinned.length
+                                ? appCard(pinned[start + column])
+                                : const SizedBox.shrink(),
+                          ),
+                        ],
+                      ],
                     ),
                   ),
                 ),
-              )
-              .toList(),
-        ),
+            ],
+          );
+        },
       ),
       if (apps.any((a) => !a.pinned))
         ExpansionTile(

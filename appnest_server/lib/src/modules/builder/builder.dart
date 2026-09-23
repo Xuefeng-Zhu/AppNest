@@ -6,9 +6,76 @@ import 'package:serverpod/serverpod.dart';
 import '../../generated/protocol.dart';
 import '../runtime/access.dart';
 import '../automation/worker.dart';
+import '../media/media.dart';
 import 'provider.dart';
 
 class Builder {
+  /// Guidance is a read-only definition operation. An empty result means the
+  /// request can proceed as written. The reservation is committed before the
+  /// provider request so concurrent calls share a strict rolling cap.
+  static Future<List<GuidanceQuestion>> suggestQuestions(
+    Session s,
+    String idea,
+    int? workspaceId,
+    int? draftId, {
+    GuidanceProvider? provider,
+  }) => validated(() async {
+    final request = str(idea, 'idea', max: 2000).trim();
+    if (utf8.encode(request).length > 4000) {
+      fail('invalidInput', 'Idea exceeds the guidance byte limit.');
+    }
+    if ((workspaceId == null) == (draftId == null)) {
+      fail('invalidInput', 'Choose a workspace or a draft for guidance.');
+    }
+    final ai = provider ?? ChatCompletionProvider.configured(s);
+    final definition = await s.db.transaction<AppSpec?>((tx) async {
+      AppSpec? current;
+      if (workspaceId != null) {
+        await workspaceAccess(s, workspaceId, tx: tx);
+      } else {
+        final d = await draft(s, draftId!, tx: tx);
+        if (d.publishedVersionId != null) {
+          fail('recordConflict', 'This draft is already published.');
+        }
+        current = AppSpec.parse(d.candidateJson);
+      }
+      if (ai == null) {
+        fail(
+          'providerUnavailable',
+          'AI guidance is unavailable. Try the built-in questions.',
+        );
+      }
+      final id = actor(s);
+      await s.db.unsafeQuery(
+        'SELECT pg_advisory_xact_lock(hashtextextended(@actor, 37))',
+        parameters: QueryParameters.named({'actor': id}),
+        transaction: tx,
+      );
+      final now = clock();
+      final used = await GuidanceRequest.db.count(
+        s,
+        where: (t) =>
+            t.actorId.equals(id) &
+            (t.createdAt >= now.subtract(const Duration(days: 1))),
+        transaction: tx,
+      );
+      if (used >= 20) {
+        fail('quotaExceeded', 'Daily guidance limit reached.');
+      }
+      await GuidanceRequest.db.insertRow(
+        s,
+        GuidanceRequest(actorId: id, createdAt: now),
+        transaction: tx,
+      );
+      return current;
+    });
+    try {
+      return await ai!.suggestQuestions(request, definition: definition);
+    } on AiResponseException {
+      fail('providerUnavailable', 'AI guidance is unavailable. Try again.');
+    }
+  });
+
   static Future<AppDraft> draft(Session s, int id, {Transaction? tx}) async {
     final d = await AppDraft.db.findById(s, id, transaction: tx);
     if (d == null) fail('notFound', 'Draft unavailable.');
@@ -61,6 +128,13 @@ class Builder {
           updatedAt: clock(),
         ),
         transaction: tx,
+      );
+      await Media.syncDefinition(
+        s,
+        Access(app, 'builder'),
+        spec,
+        tx,
+        draftId: d.id,
       );
       return snapshot(s, d, tx: tx);
     }),
@@ -126,6 +200,7 @@ class Builder {
       d.activeJobId = null;
       d.updatedAt = clock();
       await AppDraft.db.updateRow(s, d, transaction: tx);
+      await Media.syncDefinition(s, a, next, tx, draftId: d.id);
       return snapshot(s, d, tx: tx);
     }),
   );
@@ -334,6 +409,7 @@ class Builder {
         ),
         transaction: tx,
       );
+      await Media.syncDefinition(s, a, spec, tx, versionId: version.id);
       final rules = await Automation.db.find(
         s,
         where: (t) => t.appId.equals(a.app.id!),

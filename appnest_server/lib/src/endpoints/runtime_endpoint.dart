@@ -4,6 +4,7 @@ import '../generated/protocol.dart';
 import '../modules/runtime/access.dart';
 import '../modules/runtime/commands.dart';
 import '../modules/runtime/queries.dart';
+import '../modules/runtime/aggregates.dart';
 import '../modules/collaboration/sharing.dart';
 
 class RuntimeEndpoint extends Endpoint {
@@ -22,6 +23,19 @@ class RuntimeEndpoint extends Endpoint {
     String queryJson,
     String groupFieldId,
   ) => Queries.summary(session, appId, collectionId, queryJson, groupFieldId);
+  Future<String> aggregate(
+    Session session,
+    int appId,
+    String collectionId,
+    String queryJson,
+    String aggregateJson,
+  ) => Aggregates.aggregate(
+    session,
+    appId,
+    collectionId,
+    queryJson,
+    aggregateJson,
+  );
   Future<List<ReminderState>> reminderState(
     Session session,
     int appId,

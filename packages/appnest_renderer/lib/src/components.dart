@@ -60,9 +60,17 @@ class RecordDetails extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              '${item.data[view.titleFieldId ?? col.fields.first.id] ?? 'Untitled'}',
-              style: Theme.of(context).textTheme.titleLarge,
+            _editableField(
+              context,
+              view,
+              view.titleFieldId ?? col.fields.first.id,
+              Text(
+                col.field(view.titleFieldId ?? col.fields.first.id).type ==
+                        FieldType.image
+                    ? 'Image record'
+                    : '${item.data[view.titleFieldId ?? col.fields.first.id] ?? 'Untitled'}',
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
             ),
             const SizedBox(height: 12),
             for (final f in col.fields.where(
@@ -73,8 +81,17 @@ class RecordDetails extends StatelessWidget {
             ))
               Padding(
                 padding: const EdgeInsets.only(bottom: 6),
-                child: Text(
-                  '${f.label}: ${f.type == FieldType.timestamp ? _displayDate(context, item.data[f.id] as String) : item.data[f.id]}',
+                child: _editableField(
+                  context,
+                  view,
+                  f.id,
+                  Text(
+                    '${f.label}: ${f.type == FieldType.image
+                        ? 'Image attached'
+                        : f.type == FieldType.timestamp
+                        ? _displayDate(context, item.data[f.id] as String)
+                        : item.data[f.id]}',
+                  ),
                 ),
               ),
             if (item.capacity != null) CapacitySummary(item: item),
@@ -219,12 +236,16 @@ class RecordForm extends StatefulWidget {
   final Map<String, dynamic>? initial;
   final Future<List<String>> Function() members;
   final int? capacity;
+  final RuntimeAdapter? adapter;
+  final RuntimeItem? record;
   const RecordForm({
     super.key,
     required this.collection,
     this.initial,
     required this.members,
     this.capacity,
+    this.adapter,
+    this.record,
   });
   @override
   State<RecordForm> createState() => _RecordFormState();
@@ -235,6 +256,7 @@ class _RecordFormState extends State<RecordForm> {
   final values = <String, dynamic>{};
   List<String> members = [];
   String? error;
+  bool _uploading = false;
   late final TextEditingController capacity;
   bool get creating => widget.initial == null;
   List<FieldSpec> get fields => widget.collection.fields
@@ -276,6 +298,7 @@ class _RecordFormState extends State<RecordForm> {
   }
 
   void save() {
+    if (_uploading) return;
     try {
       final data = <String, dynamic>{};
       for (final f in fields) {
@@ -283,7 +306,8 @@ class _RecordFormState extends State<RecordForm> {
         data[f.id] = switch (f.type) {
           FieldType.choice ||
           FieldType.boolean ||
-          FieldType.member => values[f.id],
+          FieldType.member ||
+          FieldType.image => values[f.id],
           FieldType.integer => text.isEmpty ? null : int.parse(text),
           FieldType.number => text.isEmpty ? null : double.parse(text),
           FieldType.timestamp =>
@@ -319,6 +343,7 @@ class _RecordFormState extends State<RecordForm> {
               Padding(
                 padding: const EdgeInsets.only(bottom: 16),
                 child: switch (f.type) {
+                  FieldType.image => _imageField(f),
                   FieldType.choice ||
                   FieldType.member => DropdownButtonFormField<String>(
                     initialValue: values[f.id] as String?,
@@ -369,6 +394,8 @@ class _RecordFormState extends State<RecordForm> {
                 error!,
                 style: TextStyle(color: Theme.of(context).colorScheme.error),
               ),
+            if (_uploading)
+              const LinearProgressIndicator(semanticsLabel: 'Uploading image'),
           ],
         ),
       ),
@@ -378,9 +405,81 @@ class _RecordFormState extends State<RecordForm> {
         onPressed: () => Navigator.pop(context),
         child: const Text('Cancel'),
       ),
-      FilledButton(onPressed: save, child: const Text('Save')),
+      FilledButton(
+        onPressed: _uploading ? null : save,
+        child: const Text('Save'),
+      ),
     ],
   );
+
+  Widget _imageField(FieldSpec field) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text('${field.label}${field.required ? ' *' : ''}'),
+      const SizedBox(height: 8),
+      if (values[field.id] != null && widget.adapter != null)
+        _PrivateImage(
+          adapter: widget.adapter!,
+          assetId: values[field.id] as String,
+          label: field.label,
+        ),
+      if (values[field.id] == null) const Text('Not set'),
+      Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: [
+          OutlinedButton.icon(
+            onPressed: widget.adapter == null || _uploading
+                ? null
+                : () => _chooseImage(field),
+            icon: const Icon(Icons.add_photo_alternate_outlined),
+            label: Text(
+              values[field.id] == null ? 'Choose image' : 'Replace image',
+            ),
+          ),
+          if (!field.required && values[field.id] != null)
+            TextButton(
+              onPressed: _uploading
+                  ? null
+                  : () => setState(() => values[field.id] = null),
+              child: const Text('Remove image'),
+            ),
+        ],
+      ),
+      Text(
+        'JPEG, PNG or WebP · up to 5 MiB',
+        style: Theme.of(context).textTheme.bodySmall,
+      ),
+    ],
+  );
+
+  Future<void> _chooseImage(FieldSpec field) async {
+    try {
+      final bytes = await widget.adapter!.pickImage();
+      if (bytes == null || !mounted) return;
+      setState(() {
+        _uploading = true;
+        error = null;
+      });
+      final assetId = await widget.adapter!.uploadImage(
+        bytes,
+        collectionId: widget.collection.id,
+        fieldId: field.id,
+        record: widget.record,
+      );
+      if (!mounted) return;
+      setState(() {
+        values[field.id] = assetId;
+        _uploading = false;
+      });
+    } catch (e) {
+      if (mounted)
+        setState(() {
+          _uploading = false;
+          error = 'Could not upload image. $e';
+        });
+    }
+  }
 }
 
 class _ValueDialog extends StatefulWidget {

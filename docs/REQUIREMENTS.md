@@ -5,7 +5,7 @@ Status meanings: **tested** = locally executed evidence; **implemented** = sourc
 | Acceptance requirement | Status | Evidence / qualification |
 | --- | --- | --- |
 | 1. Same engine, separate definitions, reload persistence | Tested | Three templates plus relabeled fourth definition in PostgreSQL tests; browser-created shift survived web/server reload |
-| 2. App/record/invitation/notification tenant isolation | Tested | Real-DB authorization + bound invitation tests; file endpoints absent |
+| 2. App/record/invitation/notification/media tenant isolation | Tested locally | Real-DB authorization, bound invitations, private-media authorization and cross-app reference rejection |
 | 3. Member cannot grant rights, edit counters/protected workflow | Tested | Policy tests and typed action handlers; generic patch rejects protected input |
 | 4. 20 concurrent final-place attempts → one allocation | Tested | Independent committed sessions/transactions, not a single rollback wrapper |
 | 5. Identical command retry returns stored outcome; changed input fails | Tested | Receipt regression including retry after publication |
@@ -35,8 +35,33 @@ Implemented: Daily Planner Today/Tasks/Progress, dedicated detail/editor pages, 
 
 Automated acceptance covers legacy hashes and records; invalid navigation/action references; semantic page edits; preview/live query parity; rapid navigation, unavailable records, stale responses, revoked access and read-only roles; local midnight/DST boundaries and undated tasks; reminder status transitions, rescheduling/clearing, explicit enrollment, deduplication, archive suppression and restart recovery. Exact executed results and remaining live browser checks are recorded in [VERIFICATION.md](VERIFICATION.md). Isolated rendered screenshots do not prove connected end-to-end delivery. See [MINI_APPS.md](MINI_APPS.md) for the implemented contract.
 
-Typed endpoints cover manifests/list/templates/instantiate/remix/archive/pin; builder begin/get/patch/generate/publish; record query/get and create/patch through the uniform action endpoint; invitations/grants; event streams; inbox/read and run history. Notification effects have no arbitrary client-callable endpoint. All seven semantic components exist; approved view tokens compose list/detail/action/capacity cards, forms, boards and summaries rather than arbitrary widgets.
+Typed endpoints cover manifests/list/templates/instantiate/remix/archive/pin; builder begin/get/patch/generate/publish; record query/get/aggregate and create/patch through the uniform action endpoint; private image upload/read; invitations/grants; event streams; inbox/read and run history. Notification effects have no arbitrary client-callable endpoint. The semantic component library uses approved view tokens and validated bindings rather than arbitrary widgets.
 
-Generated source and migrations are delivered. The JSONB adapter and custom database guards are documented and tested. Operational request/job/run logs and local guardrails are present. External production auth/email/Redis/storage, cloud deployment, attachments, comprehensive performance/retention operations and full accessibility certification remain deferred as documented in SECURITY.md.
+Generated source and migrations are delivered. The JSONB adapter and custom database guards are documented and tested. Operational request/job/run logs and local guardrails are present. External production auth/email/Redis/storage, cloud deployment, arbitrary file/video attachments, comprehensive performance/retention operations and full accessibility certification remain deferred as documented in SECURITY.md.
+
+### Rich component library (2026-09-23)
+
+Implemented: tables, local-date calendars/agendas and timelines, database-wide
+numeric and time-series charts, metric/target cards, private images and galleries,
+static banners/formatted text, typed controls, multi-step forms, checklists and
+workflow drag/move controls. AI, manual editing, visual editing, preview and live
+adapters use the same capability-gated definitions. Three new templates provide
+examples without changing existing published definitions.
+
+Automated coverage includes canonical compatibility, component bindings, more
+than 100-record aggregation, DST buckets, form submission and conflict behavior,
+private-media quotas/references/revocation/cleanup, actual HTTP upload transport,
+and concurrent media requests against ephemeral PostgreSQL. Renderer captures
+are isolated synthetic evidence. The development database has the media
+migrations, and the updated server and release web app were activated locally.
+Connected checks passed for authenticated creation/publication, browser image
+upload, final-only multi-step submission, image/record reload persistence,
+keyboard workflow movement, checklists, calendar agendas and charts. A separate
+authenticated client smoke verified 106 persisted records, authorization,
+revision/receipt behavior, private-image revocation and fresh-login persistence.
+See [component behavior](RICH_COMPONENTS.md) and the
+[dated connected verification record](RICH_COMPONENTS_LIVE_CHECK.md). These
+checks do not establish native-device, rich-component live-AI, or production
+acceptance.
 
 The central **template/manual** demo is verified end to end. Real natural-language generation through Nebius Nemotron also created and published Plant Corner and Trip Kit, with authenticated live record editing, workflow transitions and summary counts. A credentialed semantic label edit preserved the rest of the definition exactly. See [the AI creation check](AI_CREATION_CHECK.md). AI-authored additive field changes and the complete AI sharing/reminder sequence remain separate unverified layers.

@@ -43,6 +43,18 @@
           "views.summary.v1",
           "views.capacity.v1",
           "views.action.v1",
+          "views.table.v1",
+          "views.calendar.v1",
+          "views.timeline.v1",
+          "views.chart.v1",
+          "views.metric.v1",
+          "views.imageCards.v1",
+          "views.gallery.v1",
+          "views.richText.v1",
+          "views.banner.v1",
+          "views.checklist.v1",
+          "fields.image.v1",
+          "views.interactive.v1",
           "capacity.v1",
           "workflow.v1",
           "assignment.v1",
@@ -102,7 +114,8 @@
                     "boolean",
                     "choice",
                     "timestamp",
-                    "member"
+                    "member",
+                    "image"
                   ]
                 },
                 "required": {
@@ -201,7 +214,17 @@
               "board",
               "summary",
               "capacity",
-              "action"
+              "action",
+              "table",
+              "calendar",
+              "timeline",
+              "chart",
+              "metric",
+              "imageCards",
+              "gallery",
+              "richText",
+              "banner",
+              "checklist"
             ]
           },
           "collectionId": {
@@ -352,12 +375,660 @@
             "type": "string",
             "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$",
             "maxLength": 64
+          },
+          "options": {
+            "type": "object"
           }
         },
         "required": [
           "id",
-          "type",
-          "collectionId"
+          "type"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "type": {
+                  "enum": [
+                    "richText",
+                    "banner"
+                  ]
+                }
+              }
+            },
+            "then": {
+              "not": {
+                "required": [
+                  "collectionId"
+                ]
+              }
+            },
+            "else": {
+              "required": [
+                "collectionId"
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "type": {
+                  "const": "list"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "options": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {}
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "type": {
+                  "const": "form"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "options": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "controls": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "fieldId": {
+                            "type": "string",
+                            "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$",
+                            "maxLength": 64
+                          },
+                          "control": {
+                            "enum": [
+                              "text",
+                              "multiline",
+                              "switch",
+                              "checkbox",
+                              "select",
+                              "segmented",
+                              "slider",
+                              "stepper",
+                              "rating",
+                              "dateTime",
+                              "imageUpload"
+                            ]
+                          },
+                          "hint": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 500
+                          },
+                          "min": {
+                            "type": "number"
+                          },
+                          "max": {
+                            "type": "number"
+                          },
+                          "step": {
+                            "type": "number",
+                            "exclusiveMinimum": 0
+                          }
+                        },
+                        "required": [
+                          "fieldId",
+                          "control"
+                        ]
+                      },
+                      "minItems": 0,
+                      "maxItems": 40
+                    },
+                    "steps": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$",
+                            "maxLength": 64
+                          },
+                          "title": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 160
+                          },
+                          "fieldIds": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$",
+                              "maxLength": 64
+                            },
+                            "minItems": 1,
+                            "maxItems": 40
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "title",
+                          "fieldIds"
+                        ]
+                      },
+                      "minItems": 1,
+                      "maxItems": 8
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "type": {
+                  "const": "details"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "options": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {}
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "type": {
+                  "const": "board"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "options": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {}
+                    },
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "draggable": {
+                          "const": true
+                        },
+                        "moveActionId": {
+                          "type": "string",
+                          "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$",
+                          "maxLength": 64
+                        }
+                      },
+                      "required": [
+                        "draggable",
+                        "moveActionId"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "type": {
+                  "const": "summary"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "options": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {}
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "type": {
+                  "const": "capacity"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "options": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {}
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "type": {
+                  "const": "action"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "options": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {}
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "type": {
+                  "const": "table"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "options": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {}
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "type": {
+                  "const": "calendar"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "options": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "dateFieldId": {
+                      "type": "string",
+                      "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$",
+                      "maxLength": 64
+                    }
+                  },
+                  "required": [
+                    "dateFieldId"
+                  ]
+                }
+              },
+              "required": [
+                "options"
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "type": {
+                  "const": "timeline"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "options": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "dateFieldId": {
+                      "type": "string",
+                      "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$",
+                      "maxLength": 64
+                    }
+                  },
+                  "required": [
+                    "dateFieldId"
+                  ]
+                }
+              },
+              "required": [
+                "options"
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "type": {
+                  "const": "chart"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "options": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "style": {
+                      "enum": [
+                        "bar",
+                        "donut",
+                        "line"
+                      ]
+                    },
+                    "metric": {
+                      "enum": [
+                        "count",
+                        "sum",
+                        "average"
+                      ]
+                    },
+                    "valueFieldId": {
+                      "type": "string",
+                      "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$",
+                      "maxLength": 64
+                    },
+                    "dateFieldId": {
+                      "type": "string",
+                      "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$",
+                      "maxLength": 64
+                    },
+                    "bucket": {
+                      "enum": [
+                        "day",
+                        "week",
+                        "month"
+                      ]
+                    },
+                    "periods": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 366
+                    }
+                  },
+                  "required": [
+                    "style",
+                    "metric"
+                  ]
+                }
+              },
+              "required": [
+                "options"
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "type": {
+                  "const": "metric"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "options": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "metric": {
+                      "enum": [
+                        "count",
+                        "sum",
+                        "average"
+                      ]
+                    },
+                    "valueFieldId": {
+                      "type": "string",
+                      "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$",
+                      "maxLength": 64
+                    },
+                    "target": {
+                      "type": "number",
+                      "exclusiveMinimum": 0
+                    }
+                  },
+                  "required": [
+                    "metric"
+                  ]
+                }
+              },
+              "required": [
+                "options"
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "type": {
+                  "const": "imageCards"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "options": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "imageFieldId": {
+                      "type": "string",
+                      "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$",
+                      "maxLength": 64
+                    },
+                    "captionFieldId": {
+                      "type": "string",
+                      "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$",
+                      "maxLength": 64
+                    }
+                  },
+                  "required": [
+                    "imageFieldId"
+                  ]
+                }
+              },
+              "required": [
+                "options"
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "type": {
+                  "const": "gallery"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "options": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "imageFieldId": {
+                      "type": "string",
+                      "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$",
+                      "maxLength": 64
+                    },
+                    "captionFieldId": {
+                      "type": "string",
+                      "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$",
+                      "maxLength": 64
+                    }
+                  },
+                  "required": [
+                    "imageFieldId"
+                  ]
+                }
+              },
+              "required": [
+                "options"
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "type": {
+                  "const": "richText"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "options": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "markdown": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 8192
+                    }
+                  },
+                  "required": [
+                    "markdown"
+                  ]
+                }
+              },
+              "required": [
+                "options"
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "type": {
+                  "const": "banner"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "options": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "title": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 160
+                    },
+                    "body": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2048
+                    },
+                    "imageAssetId": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9_-]{1,128}$"
+                    },
+                    "imageAlt": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 500
+                    },
+                    "tone": {
+                      "enum": [
+                        "neutral",
+                        "accent",
+                        "info",
+                        "success",
+                        "warning"
+                      ]
+                    },
+                    "targetPageId": {
+                      "type": "string",
+                      "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$",
+                      "maxLength": 64
+                    }
+                  },
+                  "required": [
+                    "title"
+                  ]
+                }
+              },
+              "required": [
+                "options"
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "type": {
+                  "const": "checklist"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "options": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "fieldId": {
+                      "type": "string",
+                      "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$",
+                      "maxLength": 64
+                    },
+                    "actionId": {
+                      "type": "string",
+                      "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$",
+                      "maxLength": 64
+                    },
+                    "checkedValue": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 80
+                    },
+                    "uncheckedValue": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 80
+                    }
+                  },
+                  "required": [
+                    "fieldId",
+                    "actionId"
+                  ]
+                }
+              },
+              "required": [
+                "options"
+              ]
+            }
+          }
         ]
       },
       "maxItems": 16,

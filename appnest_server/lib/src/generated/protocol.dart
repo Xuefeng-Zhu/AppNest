@@ -13,6 +13,8 @@
 // ignore_for_file: no_leading_underscores_for_library_prefixes
 import 'package:appnest_server/src/generated/activity_item.dart' as _irfbx1ex;
 import 'package:appnest_server/src/generated/app_manifest.dart' as _i5x0vch8;
+import 'package:appnest_server/src/generated/guidance_question.dart'
+    as _i42yij2w;
 import 'package:appnest_server/src/generated/inbox_item.dart' as _iofnszjt;
 import 'package:appnest_server/src/generated/member_info.dart' as _ii9ccrrn;
 import 'package:appnest_server/src/generated/reminder_state.dart' as _ihdyt6mq;
@@ -24,7 +26,6 @@ import 'package:serverpod_auth_core_server/serverpod_auth_core_server.dart'
     as _iacs;
 import 'package:serverpod_auth_idp_server/serverpod_auth_idp_server.dart'
     as _iais;
-
 import 'action_outcome.dart' as _isykbnbw;
 import 'action_receipt.dart' as _izkbb96g;
 import 'action_request.dart' as _ii1w3lxm;
@@ -45,8 +46,15 @@ import 'future_calls_generated_models/nest_worker_future_call_execute_model.dart
     as _i2npzse7;
 import 'generation_job.dart' as _ig17l95t;
 import 'greetings/greeting.dart' as _izw8z7ou;
+import 'guidance_question.dart' as _istc82cm;
+import 'guidance_request.dart' as _i3j1yq52;
 import 'inbox_item.dart' as _iv6iq8qv;
 import 'invitation.dart' as _ix00wubs;
+import 'media_asset.dart' as _ivzdqkik;
+import 'media_info.dart' as _iyb2dgte;
+import 'media_reference.dart' as _il7l0uyh;
+import 'media_upload_request.dart' as _i6mex4av;
+import 'media_upload_ticket.dart' as _iu821fma;
 import 'member_info.dart' as _i2slp771;
 import 'mini_app.dart' as _ivniu53p;
 import 'mini_app_grant.dart' as _iurwb5gp;
@@ -83,8 +91,15 @@ export 'entity_record.dart';
 export 'field_value.dart';
 export 'generation_job.dart';
 export 'greetings/greeting.dart';
+export 'guidance_question.dart';
+export 'guidance_request.dart';
 export 'inbox_item.dart';
 export 'invitation.dart';
+export 'media_asset.dart';
+export 'media_info.dart';
+export 'media_reference.dart';
+export 'media_upload_request.dart';
+export 'media_upload_ticket.dart';
 export 'member_info.dart';
 export 'mini_app.dart';
 export 'mini_app_grant.dart';
@@ -984,6 +999,54 @@ class Protocol extends _is.DatabaseSerializationManager {
       managed: true,
     ),
     _isp.TableDefinition(
+      name: 'nest_guidance_request',
+      dartName: 'GuidanceRequest',
+      schema: 'public',
+      module: 'appnest',
+      columns: [
+        _isp.ColumnDefinition(
+          name: 'id',
+          columnType: _isp.ColumnType.bigint,
+          isNullable: false,
+          dartType: 'int?',
+          columnDefault: 'serial',
+        ),
+        _isp.ColumnDefinition(
+          name: 'actorId',
+          columnType: _isp.ColumnType.text,
+          isNullable: false,
+          dartType: 'String',
+        ),
+        _isp.ColumnDefinition(
+          name: 'createdAt',
+          columnType: _isp.ColumnType.timestampWithoutTimeZone,
+          isNullable: false,
+          dartType: 'DateTime',
+        ),
+      ],
+      foreignKeys: [],
+      indexes: [
+        _isp.IndexDefinition(
+          indexName: 'guidance_actor_created',
+          tableSpace: null,
+          elements: [
+            _isp.IndexElementDefinition(
+              type: _isp.IndexElementDefinitionType.column,
+              definition: 'actorId',
+            ),
+            _isp.IndexElementDefinition(
+              type: _isp.IndexElementDefinitionType.column,
+              definition: 'createdAt',
+            ),
+          ],
+          type: 'btree',
+          isUnique: false,
+          isPrimary: false,
+        ),
+      ],
+      managed: true,
+    ),
+    _isp.TableDefinition(
       name: 'nest_invitation',
       dartName: 'Invitation',
       schema: 'public',
@@ -1092,6 +1155,366 @@ class Protocol extends _is.DatabaseSerializationManager {
           ],
           type: 'btree',
           isUnique: true,
+          isPrimary: false,
+        ),
+      ],
+      managed: true,
+    ),
+    _isp.TableDefinition(
+      name: 'nest_media_asset',
+      dartName: 'MediaAsset',
+      schema: 'public',
+      module: 'appnest',
+      columns: [
+        _isp.ColumnDefinition(
+          name: 'id',
+          columnType: _isp.ColumnType.bigint,
+          isNullable: false,
+          dartType: 'int?',
+          columnDefault: 'serial',
+        ),
+        _isp.ColumnDefinition(
+          name: 'assetId',
+          columnType: _isp.ColumnType.text,
+          isNullable: false,
+          dartType: 'String',
+        ),
+        _isp.ColumnDefinition(
+          name: 'appId',
+          columnType: _isp.ColumnType.bigint,
+          isNullable: false,
+          dartType: 'int',
+        ),
+        _isp.ColumnDefinition(
+          name: 'workspaceId',
+          columnType: _isp.ColumnType.bigint,
+          isNullable: false,
+          dartType: 'int',
+        ),
+        _isp.ColumnDefinition(
+          name: 'uploaderId',
+          columnType: _isp.ColumnType.text,
+          isNullable: false,
+          dartType: 'String',
+        ),
+        _isp.ColumnDefinition(
+          name: 'idempotencyKey',
+          columnType: _isp.ColumnType.text,
+          isNullable: false,
+          dartType: 'String',
+        ),
+        _isp.ColumnDefinition(
+          name: 'requestHash',
+          columnType: _isp.ColumnType.text,
+          isNullable: false,
+          dartType: 'String',
+        ),
+        _isp.ColumnDefinition(
+          name: 'requestJson',
+          columnType: _isp.ColumnType.text,
+          isNullable: false,
+          dartType: 'String',
+        ),
+        _isp.ColumnDefinition(
+          name: 'uploadDescription',
+          columnType: _isp.ColumnType.text,
+          isNullable: true,
+          dartType: 'String?',
+        ),
+        _isp.ColumnDefinition(
+          name: 'status',
+          columnType: _isp.ColumnType.text,
+          isNullable: false,
+          dartType: 'String',
+        ),
+        _isp.ColumnDefinition(
+          name: 'contentType',
+          columnType: _isp.ColumnType.text,
+          isNullable: false,
+          dartType: 'String',
+        ),
+        _isp.ColumnDefinition(
+          name: 'byteLength',
+          columnType: _isp.ColumnType.bigint,
+          isNullable: false,
+          dartType: 'int',
+        ),
+        _isp.ColumnDefinition(
+          name: 'storedBytes',
+          columnType: _isp.ColumnType.bigint,
+          isNullable: false,
+          dartType: 'int',
+        ),
+        _isp.ColumnDefinition(
+          name: 'originalRemoved',
+          columnType: _isp.ColumnType.boolean,
+          isNullable: false,
+          dartType: 'bool',
+          columnDefault: 'false',
+        ),
+        _isp.ColumnDefinition(
+          name: 'width',
+          columnType: _isp.ColumnType.bigint,
+          isNullable: false,
+          dartType: 'int',
+          columnDefault: '0',
+        ),
+        _isp.ColumnDefinition(
+          name: 'height',
+          columnType: _isp.ColumnType.bigint,
+          isNullable: false,
+          dartType: 'int',
+          columnDefault: '0',
+        ),
+        _isp.ColumnDefinition(
+          name: 'expiresAt',
+          columnType: _isp.ColumnType.timestampWithoutTimeZone,
+          isNullable: false,
+          dartType: 'DateTime',
+        ),
+        _isp.ColumnDefinition(
+          name: 'leaseUntil',
+          columnType: _isp.ColumnType.timestampWithoutTimeZone,
+          isNullable: true,
+          dartType: 'DateTime?',
+        ),
+        _isp.ColumnDefinition(
+          name: 'createdAt',
+          columnType: _isp.ColumnType.timestampWithoutTimeZone,
+          isNullable: false,
+          dartType: 'DateTime',
+        ),
+        _isp.ColumnDefinition(
+          name: 'updatedAt',
+          columnType: _isp.ColumnType.timestampWithoutTimeZone,
+          isNullable: false,
+          dartType: 'DateTime',
+        ),
+      ],
+      foreignKeys: [
+        _isp.ForeignKeyDefinition(
+          constraintName: 'nest_media_asset_fk_0',
+          columns: ['appId'],
+          referenceTable: 'nest_app',
+          referenceTableSchema: 'public',
+          referenceColumns: ['id'],
+          onUpdate: _isp.ForeignKeyAction.noAction,
+          onDelete: _isp.ForeignKeyAction.noAction,
+          matchType: null,
+        ),
+        _isp.ForeignKeyDefinition(
+          constraintName: 'nest_media_asset_fk_1',
+          columns: ['workspaceId'],
+          referenceTable: 'nest_workspace',
+          referenceTableSchema: 'public',
+          referenceColumns: ['id'],
+          onUpdate: _isp.ForeignKeyAction.noAction,
+          onDelete: _isp.ForeignKeyAction.noAction,
+          matchType: null,
+        ),
+      ],
+      indexes: [
+        _isp.IndexDefinition(
+          indexName: 'media_asset_identity',
+          tableSpace: null,
+          elements: [
+            _isp.IndexElementDefinition(
+              type: _isp.IndexElementDefinitionType.column,
+              definition: 'assetId',
+            ),
+          ],
+          type: 'btree',
+          isUnique: true,
+          isPrimary: false,
+        ),
+        _isp.IndexDefinition(
+          indexName: 'media_upload_receipt',
+          tableSpace: null,
+          elements: [
+            _isp.IndexElementDefinition(
+              type: _isp.IndexElementDefinitionType.column,
+              definition: 'appId',
+            ),
+            _isp.IndexElementDefinition(
+              type: _isp.IndexElementDefinitionType.column,
+              definition: 'uploaderId',
+            ),
+            _isp.IndexElementDefinition(
+              type: _isp.IndexElementDefinitionType.column,
+              definition: 'idempotencyKey',
+            ),
+          ],
+          type: 'btree',
+          isUnique: true,
+          isPrimary: false,
+        ),
+        _isp.IndexDefinition(
+          indexName: 'media_cleanup',
+          tableSpace: null,
+          elements: [
+            _isp.IndexElementDefinition(
+              type: _isp.IndexElementDefinitionType.column,
+              definition: 'status',
+            ),
+            _isp.IndexElementDefinition(
+              type: _isp.IndexElementDefinitionType.column,
+              definition: 'updatedAt',
+            ),
+          ],
+          type: 'btree',
+          isUnique: false,
+          isPrimary: false,
+        ),
+      ],
+      managed: true,
+    ),
+    _isp.TableDefinition(
+      name: 'nest_media_reference',
+      dartName: 'MediaReference',
+      schema: 'public',
+      module: 'appnest',
+      columns: [
+        _isp.ColumnDefinition(
+          name: 'id',
+          columnType: _isp.ColumnType.bigint,
+          isNullable: false,
+          dartType: 'int?',
+          columnDefault: 'serial',
+        ),
+        _isp.ColumnDefinition(
+          name: 'appId',
+          columnType: _isp.ColumnType.bigint,
+          isNullable: false,
+          dartType: 'int',
+        ),
+        _isp.ColumnDefinition(
+          name: 'assetRowId',
+          columnType: _isp.ColumnType.bigint,
+          isNullable: false,
+          dartType: 'int',
+        ),
+        _isp.ColumnDefinition(
+          name: 'draftId',
+          columnType: _isp.ColumnType.bigint,
+          isNullable: true,
+          dartType: 'int?',
+        ),
+        _isp.ColumnDefinition(
+          name: 'versionId',
+          columnType: _isp.ColumnType.bigint,
+          isNullable: true,
+          dartType: 'int?',
+        ),
+        _isp.ColumnDefinition(
+          name: 'recordId',
+          columnType: _isp.ColumnType.bigint,
+          isNullable: true,
+          dartType: 'int?',
+        ),
+      ],
+      foreignKeys: [
+        _isp.ForeignKeyDefinition(
+          constraintName: 'nest_media_reference_fk_0',
+          columns: ['appId'],
+          referenceTable: 'nest_app',
+          referenceTableSchema: 'public',
+          referenceColumns: ['id'],
+          onUpdate: _isp.ForeignKeyAction.noAction,
+          onDelete: _isp.ForeignKeyAction.noAction,
+          matchType: null,
+        ),
+        _isp.ForeignKeyDefinition(
+          constraintName: 'nest_media_reference_fk_1',
+          columns: ['assetRowId'],
+          referenceTable: 'nest_media_asset',
+          referenceTableSchema: 'public',
+          referenceColumns: ['id'],
+          onUpdate: _isp.ForeignKeyAction.noAction,
+          onDelete: _isp.ForeignKeyAction.noAction,
+          matchType: null,
+        ),
+        _isp.ForeignKeyDefinition(
+          constraintName: 'nest_media_reference_fk_2',
+          columns: ['draftId'],
+          referenceTable: 'nest_draft',
+          referenceTableSchema: 'public',
+          referenceColumns: ['id'],
+          onUpdate: _isp.ForeignKeyAction.noAction,
+          onDelete: _isp.ForeignKeyAction.noAction,
+          matchType: null,
+        ),
+        _isp.ForeignKeyDefinition(
+          constraintName: 'nest_media_reference_fk_3',
+          columns: ['versionId'],
+          referenceTable: 'nest_version',
+          referenceTableSchema: 'public',
+          referenceColumns: ['id'],
+          onUpdate: _isp.ForeignKeyAction.noAction,
+          onDelete: _isp.ForeignKeyAction.noAction,
+          matchType: null,
+        ),
+        _isp.ForeignKeyDefinition(
+          constraintName: 'nest_media_reference_fk_4',
+          columns: ['recordId'],
+          referenceTable: 'nest_record',
+          referenceTableSchema: 'public',
+          referenceColumns: ['id'],
+          onUpdate: _isp.ForeignKeyAction.noAction,
+          onDelete: _isp.ForeignKeyAction.noAction,
+          matchType: null,
+        ),
+      ],
+      indexes: [
+        _isp.IndexDefinition(
+          indexName: 'media_reference_asset',
+          tableSpace: null,
+          elements: [
+            _isp.IndexElementDefinition(
+              type: _isp.IndexElementDefinitionType.column,
+              definition: 'assetRowId',
+            ),
+          ],
+          type: 'btree',
+          isUnique: false,
+          isPrimary: false,
+        ),
+        _isp.IndexDefinition(
+          indexName: 'media_reference_draft',
+          tableSpace: null,
+          elements: [
+            _isp.IndexElementDefinition(
+              type: _isp.IndexElementDefinitionType.column,
+              definition: 'draftId',
+            ),
+          ],
+          type: 'btree',
+          isUnique: false,
+          isPrimary: false,
+        ),
+        _isp.IndexDefinition(
+          indexName: 'media_reference_version',
+          tableSpace: null,
+          elements: [
+            _isp.IndexElementDefinition(
+              type: _isp.IndexElementDefinitionType.column,
+              definition: 'versionId',
+            ),
+          ],
+          type: 'btree',
+          isUnique: false,
+          isPrimary: false,
+        ),
+        _isp.IndexDefinition(
+          indexName: 'media_reference_record',
+          tableSpace: null,
+          elements: [
+            _isp.IndexElementDefinition(
+              type: _isp.IndexElementDefinitionType.column,
+              definition: 'recordId',
+            ),
+          ],
+          type: 'btree',
+          isUnique: false,
           isPrimary: false,
         ),
       ],
@@ -2226,11 +2649,32 @@ class Protocol extends _is.DatabaseSerializationManager {
     if (t == _izw8z7ou.Greeting) {
       return _izw8z7ou.Greeting.fromJson(data) as T;
     }
+    if (t == _istc82cm.GuidanceQuestion) {
+      return _istc82cm.GuidanceQuestion.fromJson(data) as T;
+    }
+    if (t == _i3j1yq52.GuidanceRequest) {
+      return _i3j1yq52.GuidanceRequest.fromJson(data) as T;
+    }
     if (t == _iv6iq8qv.InboxItem) {
       return _iv6iq8qv.InboxItem.fromJson(data) as T;
     }
     if (t == _ix00wubs.Invitation) {
       return _ix00wubs.Invitation.fromJson(data) as T;
+    }
+    if (t == _ivzdqkik.MediaAsset) {
+      return _ivzdqkik.MediaAsset.fromJson(data) as T;
+    }
+    if (t == _iyb2dgte.MediaInfo) {
+      return _iyb2dgte.MediaInfo.fromJson(data) as T;
+    }
+    if (t == _il7l0uyh.MediaReference) {
+      return _il7l0uyh.MediaReference.fromJson(data) as T;
+    }
+    if (t == _i6mex4av.MediaUploadRequest) {
+      return _i6mex4av.MediaUploadRequest.fromJson(data) as T;
+    }
+    if (t == _iu821fma.MediaUploadTicket) {
+      return _iu821fma.MediaUploadTicket.fromJson(data) as T;
     }
     if (t == _i2slp771.MemberInfo) {
       return _i2slp771.MemberInfo.fromJson(data) as T;
@@ -2352,11 +2796,37 @@ class Protocol extends _is.DatabaseSerializationManager {
     if (t == _is.getType<_izw8z7ou.Greeting?>()) {
       return (data != null ? _izw8z7ou.Greeting.fromJson(data) : null) as T;
     }
+    if (t == _is.getType<_istc82cm.GuidanceQuestion?>()) {
+      return (data != null ? _istc82cm.GuidanceQuestion.fromJson(data) : null)
+          as T;
+    }
+    if (t == _is.getType<_i3j1yq52.GuidanceRequest?>()) {
+      return (data != null ? _i3j1yq52.GuidanceRequest.fromJson(data) : null)
+          as T;
+    }
     if (t == _is.getType<_iv6iq8qv.InboxItem?>()) {
       return (data != null ? _iv6iq8qv.InboxItem.fromJson(data) : null) as T;
     }
     if (t == _is.getType<_ix00wubs.Invitation?>()) {
       return (data != null ? _ix00wubs.Invitation.fromJson(data) : null) as T;
+    }
+    if (t == _is.getType<_ivzdqkik.MediaAsset?>()) {
+      return (data != null ? _ivzdqkik.MediaAsset.fromJson(data) : null) as T;
+    }
+    if (t == _is.getType<_iyb2dgte.MediaInfo?>()) {
+      return (data != null ? _iyb2dgte.MediaInfo.fromJson(data) : null) as T;
+    }
+    if (t == _is.getType<_il7l0uyh.MediaReference?>()) {
+      return (data != null ? _il7l0uyh.MediaReference.fromJson(data) : null)
+          as T;
+    }
+    if (t == _is.getType<_i6mex4av.MediaUploadRequest?>()) {
+      return (data != null ? _i6mex4av.MediaUploadRequest.fromJson(data) : null)
+          as T;
+    }
+    if (t == _is.getType<_iu821fma.MediaUploadTicket?>()) {
+      return (data != null ? _iu821fma.MediaUploadTicket.fromJson(data) : null)
+          as T;
     }
     if (t == _is.getType<_i2slp771.MemberInfo?>()) {
       return (data != null ? _i2slp771.MemberInfo.fromJson(data) : null) as T;
@@ -2441,8 +2911,9 @@ class Protocol extends _is.DatabaseSerializationManager {
     }
     if (t == Map<String, int>) {
       return (data as Map).map(
-        (k, v) => MapEntry(deserialize<String>(k), deserialize<int>(v)),
-      ) as T;
+            (k, v) => MapEntry(deserialize<String>(k), deserialize<int>(v)),
+          )
+          as T;
     }
     if (t == List<_i829frra.WorkspaceInfo>) {
       return (data as List)
@@ -2471,6 +2942,12 @@ class Protocol extends _is.DatabaseSerializationManager {
     if (t == List<_irfbx1ex.ActivityItem>) {
       return (data as List)
               .map((e) => deserialize<_irfbx1ex.ActivityItem>(e))
+              .toList()
+          as T;
+    }
+    if (t == List<_i42yij2w.GuidanceQuestion>) {
+      return (data as List)
+              .map((e) => deserialize<_i42yij2w.GuidanceQuestion>(e))
               .toList()
           as T;
     }
@@ -2520,8 +2997,15 @@ class Protocol extends _is.DatabaseSerializationManager {
         'NestWorkerFutureCallExecuteModel',
       _ig17l95t.GenerationJob => 'GenerationJob',
       _izw8z7ou.Greeting => 'Greeting',
+      _istc82cm.GuidanceQuestion => 'GuidanceQuestion',
+      _i3j1yq52.GuidanceRequest => 'GuidanceRequest',
       _iv6iq8qv.InboxItem => 'InboxItem',
       _ix00wubs.Invitation => 'Invitation',
+      _ivzdqkik.MediaAsset => 'MediaAsset',
+      _iyb2dgte.MediaInfo => 'MediaInfo',
+      _il7l0uyh.MediaReference => 'MediaReference',
+      _i6mex4av.MediaUploadRequest => 'MediaUploadRequest',
+      _iu821fma.MediaUploadTicket => 'MediaUploadTicket',
       _i2slp771.MemberInfo => 'MemberInfo',
       _ivniu53p.MiniApp => 'MiniApp',
       _iurwb5gp.MiniAppGrant => 'MiniAppGrant',
@@ -2592,10 +3076,24 @@ class Protocol extends _is.DatabaseSerializationManager {
         return 'GenerationJob';
       case _izw8z7ou.Greeting():
         return 'Greeting';
+      case _istc82cm.GuidanceQuestion():
+        return 'GuidanceQuestion';
+      case _i3j1yq52.GuidanceRequest():
+        return 'GuidanceRequest';
       case _iv6iq8qv.InboxItem():
         return 'InboxItem';
       case _ix00wubs.Invitation():
         return 'Invitation';
+      case _ivzdqkik.MediaAsset():
+        return 'MediaAsset';
+      case _iyb2dgte.MediaInfo():
+        return 'MediaInfo';
+      case _il7l0uyh.MediaReference():
+        return 'MediaReference';
+      case _i6mex4av.MediaUploadRequest():
+        return 'MediaUploadRequest';
+      case _iu821fma.MediaUploadTicket():
+        return 'MediaUploadTicket';
       case _i2slp771.MemberInfo():
         return 'MemberInfo';
       case _ivniu53p.MiniApp():
@@ -2717,11 +3215,32 @@ class Protocol extends _is.DatabaseSerializationManager {
     if (dataClassName == 'Greeting') {
       return deserialize<_izw8z7ou.Greeting>(data['data']);
     }
+    if (dataClassName == 'GuidanceQuestion') {
+      return deserialize<_istc82cm.GuidanceQuestion>(data['data']);
+    }
+    if (dataClassName == 'GuidanceRequest') {
+      return deserialize<_i3j1yq52.GuidanceRequest>(data['data']);
+    }
     if (dataClassName == 'InboxItem') {
       return deserialize<_iv6iq8qv.InboxItem>(data['data']);
     }
     if (dataClassName == 'Invitation') {
       return deserialize<_ix00wubs.Invitation>(data['data']);
+    }
+    if (dataClassName == 'MediaAsset') {
+      return deserialize<_ivzdqkik.MediaAsset>(data['data']);
+    }
+    if (dataClassName == 'MediaInfo') {
+      return deserialize<_iyb2dgte.MediaInfo>(data['data']);
+    }
+    if (dataClassName == 'MediaReference') {
+      return deserialize<_il7l0uyh.MediaReference>(data['data']);
+    }
+    if (dataClassName == 'MediaUploadRequest') {
+      return deserialize<_i6mex4av.MediaUploadRequest>(data['data']);
+    }
+    if (dataClassName == 'MediaUploadTicket') {
+      return deserialize<_iu821fma.MediaUploadTicket>(data['data']);
     }
     if (dataClassName == 'MemberInfo') {
       return deserialize<_i2slp771.MemberInfo>(data['data']);
@@ -2840,8 +3359,14 @@ class Protocol extends _is.DatabaseSerializationManager {
         return _iyrqavho.FieldValue.t;
       case _ig17l95t.GenerationJob:
         return _ig17l95t.GenerationJob.t;
+      case _i3j1yq52.GuidanceRequest:
+        return _i3j1yq52.GuidanceRequest.t;
       case _ix00wubs.Invitation:
         return _ix00wubs.Invitation.t;
+      case _ivzdqkik.MediaAsset:
+        return _ivzdqkik.MediaAsset.t;
+      case _il7l0uyh.MediaReference:
+        return _il7l0uyh.MediaReference.t;
       case _ivniu53p.MiniApp:
         return _ivniu53p.MiniApp.t;
       case _iurwb5gp.MiniAppGrant:

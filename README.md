@@ -10,6 +10,16 @@ A working local Flutter web + Serverpod modular monolith. Mini apps are validate
 
 The builder's **Pages & navigation** editor controls pages, sections, tabs, field presentation, filters, sorting, destinations and approved themes. The AI builder receives the same validated schema and semantic operations. Existing published definitions keep their canonical hashes and legacy rendering until explicitly republished with navigation. See [mini-app behavior and authoring](docs/MINI_APPS.md) and [dated verification evidence](docs/VERIFICATION.md).
 
+## Rich component library
+
+Mini-apps can use tables, calendars, timelines, bar/donut/line charts, numeric
+metrics and progress, private image cards/galleries/banners, formatted text,
+multi-step forms, richer inputs, checklists and draggable workflow boards.
+Choose components in **Pages & navigation → Views**, edit their settings in the
+visual inspector, or ask the AI builder. Project Hub, Photo Journal and Habit
+Tracker demonstrate the additions. See the [component contract, image limits,
+and runtime activation steps](docs/RICH_COMPONENTS.md).
+
 ## Run locally
 
 Verified toolchain: **Flutter 3.47.0 · Dart 3.13.0 · Serverpod CLI/server/client/auth 4.0.0**. Package resolution is committed in `pubspec.lock`. Use the matching CLI (`dart pub global activate serverpod_cli 4.0.0`) if yours differs. Do not independently upgrade one Serverpod package.
@@ -38,6 +48,8 @@ If the server is already running, do not start a second listener. Stop that AppN
 cd appnest_flutter
 flutter build web --dart-define=SERVER_URL=http://localhost:8180/ --output ../appnest_server/web/app
 ```
+
+After adding or removing Flutter plugins, run `flutter clean` and then `flutter pub get` from `appnest_flutter` before rebuilding the release web app. This refreshes generated web plugin registration; an existing build cache can otherwise omit a newly added plugin.
 
 ### Local server lifetime and connection recovery
 
@@ -87,8 +99,8 @@ Executed locally: clean static analysis; spec tests; responsive renderer tests a
 - `appnest_flutter`: authentication, launcher/workspaces, builder, mini-app shell and inbox.
 - `packages/appnest_spec`: pure-Dart parser, strict JSON schema, fixtures, semantic patches, compatibility and query validation.
 - `packages/appnest_renderer`: shared semantic components; separate preview/live adapter contract.
-- [Architecture](ARCHITECTURE.md), [Serverpod feature map](docs/SERVERPOD_FEATURE_MAP.md), [demo guide](docs/DEMO.md), [security limits](docs/SECURITY.md), [requirements checklist](docs/REQUIREMENTS.md).
+- [Architecture](ARCHITECTURE.md), [Serverpod feature map](docs/SERVERPOD_FEATURE_MAP.md), [Serverpod feedback](docs/SERVERPOD_FEEDBACK.md), [demo guide](docs/DEMO.md), [security limits](docs/SECURITY.md), [requirements checklist](docs/REQUIREMENTS.md).
 
 For source changes, regenerate from `.spy.yaml` and endpoint source with `serverpod generate` in `appnest_server`; create a migration with `serverpod create-migration` when table models change. Never hand-edit generated protocol/client files. See the companion database-integrity discussion in ARCHITECTURE.md before schema repair.
 
-No cloud deployment, external delivery, attachments, offline writes, payments or arbitrary plug-ins are included. This is a verified local MVP, **not a production-readiness claim**.
+No cloud deployment, external delivery, arbitrary file/video attachments, offline writes, payments or arbitrary plug-ins are included. Private still images are supported through the authenticated media service. This is a local MVP, **not a production-readiness claim**.

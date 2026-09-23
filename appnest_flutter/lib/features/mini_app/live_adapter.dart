@@ -3,12 +3,17 @@ import 'package:appnest_spec/appnest_spec.dart';
 import 'package:appnest_renderer/appnest_renderer.dart';
 
 import 'dart:convert';
+import 'dart:async';
+import 'dart:typed_data';
+
+import '../media/image_upload.dart';
 
 class LiveRuntimeAdapter extends RuntimeAdapter {
   final Client client;
   final AppManifest manifest;
   @override
   final AppSpec spec;
+  Stream<void>? _events;
   LiveRuntimeAdapter(this.client, this.manifest)
     : spec = AppSpec.parse(manifest.specJson!);
   @override
@@ -92,6 +97,71 @@ class LiveRuntimeAdapter extends RuntimeAdapter {
   }
 
   @override
+  Future<Map<String, dynamic>> aggregate(
+    String collectionId,
+    Map<String, dynamic> query,
+    Map<String, dynamic> aggregate,
+  ) async {
+    await _checkDefinition();
+    return Map<String, dynamic>.from(
+      jsonDecode(
+        await client.runtime.aggregate(
+          manifest.appId,
+          collectionId,
+          jsonEncode(query),
+          jsonEncode(aggregate),
+        ),
+      ) as Map,
+    );
+  }
+
+  @override
+  Future<Uint8List?> pickImage() => pickAppImage();
+
+  @override
+  Future<Uint8List> readImage(String assetId, {bool thumbnail = true}) async {
+    await _checkDefinition();
+    final bytes = await client.media.readImage(
+      manifest.appId,
+      assetId,
+      thumbnail ? 'thumbnail' : 'display',
+    );
+    return Uint8List.sublistView(bytes);
+  }
+
+  @override
+  Future<String> uploadImage(
+    Uint8List imageBytes, {
+    required String collectionId,
+    required String fieldId,
+    RuntimeItem? record,
+  }) async {
+    await _checkDefinition();
+    final capability = record == null
+        ? 'records.create.v1'
+        : 'records.patch.v1';
+    final action = spec.actions
+        .where(
+          (action) =>
+              action.collectionId == collectionId &&
+              action.capability == capability &&
+              permits(action) &&
+              (record == null || record.allowedActions.contains(action.id)),
+        )
+        .firstOrNull;
+    if (action == null) throw StateError('You cannot upload an image here.');
+    return uploadAppImage(
+      client,
+      imageBytes,
+      appId: manifest.appId,
+      actionId: action.id,
+      targetRecordId: record?.id,
+      fieldId: fieldId,
+      expectedDefinitionVersionId: manifest.versionId,
+    );
+  }
+
+  @override
   Future<List<RuntimeReminderState>> reminderState(int recordId) async {
     await _checkDefinition();
     return (await client.runtime.reminderState(manifest.appId, recordId))
@@ -149,5 +219,22 @@ class LiveRuntimeAdapter extends RuntimeAdapter {
     manifest.appId,
   )).map((m) => m.actorId).toList();
   @override
-  Stream<void> watch() => client.runtime.events(manifest.appId).map((event) {});
+  Stream<void> watch() {
+    final existing = _events;
+    if (existing != null) return existing;
+    late final Stream<void> events;
+    events = client.runtime
+        .events(manifest.appId)
+        .map<void>((event) {})
+        .asBroadcastStream(
+          onCancel: (subscription) {
+            // Images and the page share one authorized upstream subscription.
+            // Stop the server-side poll when the last consumer leaves.
+            unawaited(subscription.cancel());
+            if (identical(_events, events)) _events = null;
+          },
+        );
+    _events = events;
+    return events;
+  }
 }

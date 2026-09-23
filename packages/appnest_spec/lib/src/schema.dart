@@ -67,6 +67,7 @@ Map<String, dynamic> appSpecSchema() {
           'summary',
           'capacity',
           'action',
+          ...richViewTypes,
         ],
       },
       'collectionId': id,
@@ -116,9 +117,51 @@ Map<String, dynamic> appSpecSchema() {
       ),
       'detailPageId': id,
       'formPageId': id,
+      'options': {'type': 'object'},
     },
-    ['id', 'type', 'collectionId'],
+    ['id', 'type'],
   );
+  view['allOf'] = [
+    {
+      'if': {
+        'properties': {
+          'type': {
+            'enum': ['richText', 'banner'],
+          },
+        },
+      },
+      'then': {
+        'not': {
+          'required': ['collectionId'],
+        },
+      },
+      'else': {
+        'required': ['collectionId'],
+      },
+    },
+    for (final type in [
+      'list',
+      'form',
+      'details',
+      'board',
+      'summary',
+      'capacity',
+      'action',
+      ...richViewTypes,
+    ])
+      {
+        'if': {
+          'properties': {
+            'type': {'const': type},
+          },
+        },
+        'then': {
+          'properties': {'options': _richOptionsSchema(type)},
+          if (richViewTypes.contains(type) && type != 'table')
+            'required': ['options'],
+        },
+      },
+  ];
   final action = obj(
     {
       'id': id,

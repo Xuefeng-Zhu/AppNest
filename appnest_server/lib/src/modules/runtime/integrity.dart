@@ -25,6 +25,7 @@ class Integrity {
         'nest_claim',
         'nest_automation',
         'nest_notification',
+        'nest_media_asset',
       ])
         table: (
           ['appId', 'workspaceId'],
@@ -42,6 +43,16 @@ class Integrity {
         ['appId', 'draftId'],
         [
           'EXISTS (SELECT 1 FROM nest_draft d WHERE d.id=NEW."draftId" AND d."appId"=NEW."appId")',
+        ],
+      ),
+      'nest_media_reference': (
+        ['appId', 'assetRowId'],
+        [
+          'EXISTS (SELECT 1 FROM nest_media_asset a WHERE a.id=NEW."assetRowId" AND a."appId"=NEW."appId")',
+          'num_nonnulls(NEW."draftId",NEW."versionId",NEW."recordId")=1',
+          'NEW."draftId" IS NULL OR EXISTS (SELECT 1 FROM nest_draft d WHERE d.id=NEW."draftId" AND d."appId"=NEW."appId")',
+          'NEW."versionId" IS NULL OR EXISTS (SELECT 1 FROM nest_version v WHERE v.id=NEW."versionId" AND v."appId"=NEW."appId")',
+          'NEW."recordId" IS NULL OR EXISTS (SELECT 1 FROM nest_record r WHERE r.id=NEW."recordId" AND r."appId"=NEW."appId")',
         ],
       ),
       'nest_field_value': (

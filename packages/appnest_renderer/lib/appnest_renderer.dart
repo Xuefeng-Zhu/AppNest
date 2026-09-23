@@ -1,6 +1,9 @@
 library;
 
 import 'dart:async';
+import 'dart:math' as math;
+import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:appnest_spec/appnest_spec.dart';
@@ -9,6 +12,8 @@ part 'src/components.dart';
 part 'src/navigation.dart';
 part 'src/rich_runtime.dart';
 part 'src/editor.dart';
+part 'src/visual_edit.dart';
+part 'src/rich_components.dart';
 
 class RuntimeItem {
   final int id, revision;
@@ -61,6 +66,20 @@ abstract class RuntimeAdapter {
   ) => Future.error(UnsupportedError('Grouped summaries are unavailable.'));
   Future<List<RuntimeReminderState>> reminderState(int recordId) =>
       Future.error(UnsupportedError('Reminder state is unavailable.'));
+  Future<Map<String, dynamic>> aggregate(
+    String collectionId,
+    Map<String, dynamic> query,
+    Map<String, dynamic> aggregate,
+  ) => Future.error(UnsupportedError('Aggregates are unavailable.'));
+  Future<Uint8List> readImage(String assetId, {bool thumbnail = true}) =>
+      Future.error(UnsupportedError('Images are unavailable.'));
+  Future<Uint8List?> pickImage() async => null;
+  Future<String> uploadImage(
+    Uint8List imageBytes, {
+    required String collectionId,
+    required String fieldId,
+    RuntimeItem? record,
+  }) => Future.error(UnsupportedError('Image uploads are unavailable.'));
 }
 
 class RuntimeSummary {
@@ -84,11 +103,22 @@ class RuntimeReminderState {
 /// Deliberately has no Client, HTTP, invitations, storage, or scheduler dependency.
 class PreviewRuntimeAdapter extends RuntimeAdapter {
   @override
-  final AppSpec spec;
+  AppSpec get spec => _spec;
+  AppSpec _spec;
   final _changes = StreamController<void>.broadcast();
   final _items = <RuntimeItem>[];
   final _receipts = <String, String>{};
-  PreviewRuntimeAdapter(this.spec, {DateTime? now}) {
+  final Future<Uint8List?> Function()? _pickImage;
+  final Map<String, Uint8List> _imageAssets;
+  int _imageSequence = 0;
+  PreviewRuntimeAdapter(
+    AppSpec spec, {
+    DateTime? now,
+    Future<Uint8List?> Function()? pickImage,
+    Map<String, Uint8List> imageAssets = const {},
+  }) : _spec = spec,
+       _pickImage = pickImage,
+       _imageAssets = Map.of(imageAssets) {
     for (final col in spec.collections) {
       for (final data in syntheticRecords(col, now: now)) {
         _items.add(
@@ -247,6 +277,136 @@ class PreviewRuntimeAdapter extends RuntimeAdapter {
   }
 
   @override
+  Future<Map<String, dynamic>> aggregate(
+    String collectionId,
+    Map<String, dynamic> query,
+    Map<String, dynamic> aggregate,
+  ) async {
+    final collection = spec.collection(collectionId);
+    AggregateQuery.parse(collection, aggregate);
+    final items = _matchingItems(
+      collection,
+      RecordQuery.parse(collection, query),
+    );
+    num? value(List<RuntimeItem> records) {
+      if (aggregate['metric'] == 'count') return records.length;
+      final values = records
+          .map((r) => r.data[aggregate['fieldId']])
+          .whereType<num>()
+          .toList();
+      final sum = values.fold<num>(0, (a, b) => a + b);
+      return aggregate['metric'] == 'average'
+          ? (values.isEmpty ? null : sum / values.length)
+          : sum;
+    }
+
+    final groups = <Map<String, dynamic>>[];
+    if (aggregate['groupFieldId'] case final String fieldId) {
+      for (final choice in collection.field(fieldId).choices) {
+        final group = items.where((r) => r.data[fieldId] == choice).toList();
+        groups.add({
+          'key': choice,
+          'count': group.length,
+          'value': value(group),
+        });
+      }
+      final missing = items.where((r) => r.data[fieldId] == null).toList();
+      if (missing.isNotEmpty)
+        groups.add({
+          'key': '',
+          'count': missing.length,
+          'value': value(missing),
+        });
+    }
+    if (aggregate['dateFieldId'] case final String fieldId) {
+      for (final raw in aggregate['buckets'] as List) {
+        final bucket = Map<String, dynamic>.from(raw);
+        final start = DateTime.parse(bucket['start'] as String);
+        final end = DateTime.parse(bucket['end'] as String);
+        final group = items.where((r) {
+          final date = DateTime.tryParse('${r.data[fieldId]}');
+          return date != null && !date.isBefore(start) && date.isBefore(end);
+        }).toList();
+        groups.add({
+          'key': bucket['key'],
+          'count': group.length,
+          'value': value(group),
+        });
+      }
+    }
+    return {'total': items.length, 'value': value(items), 'groups': groups};
+  }
+
+  @override
+  Future<Uint8List?> pickImage() async =>
+      _pickImage == null ? null : await _pickImage();
+
+  @override
+  Future<Uint8List> readImage(String assetId, {bool thumbnail = true}) async =>
+      _imageAssets[assetId] ??
+      (throw const SpecException('Preview image unavailable.'));
+
+  /// The builder may supply already-authorized images without giving this
+  /// isolated adapter a network or storage dependency.
+  void setImageAsset(String assetId, Uint8List bytes) =>
+      setImageAssets({assetId: bytes});
+
+  void setImageAssets(Map<String, Uint8List> images) {
+    _imageAssets.addAll(images);
+    _changes.add(null);
+  }
+
+  @override
+  Future<String> uploadImage(
+    Uint8List imageBytes, {
+    required String collectionId,
+    required String fieldId,
+    RuntimeItem? record,
+  }) async {
+    if (spec.collection(collectionId).field(fieldId).type != FieldType.image ||
+        imageBytes.isEmpty ||
+        imageBytes.length > 5 * 1024 * 1024) {
+      throw const SpecException('Choose an image of at most 5 MiB.');
+    }
+    final jpeg =
+        imageBytes.length >= 3 &&
+        imageBytes[0] == 255 &&
+        imageBytes[1] == 216 &&
+        imageBytes[2] == 255;
+    final png =
+        imageBytes.length >= 8 &&
+        imageBytes[0] == 137 &&
+        String.fromCharCodes(imageBytes.sublist(1, 4)) == 'PNG';
+    final webp =
+        imageBytes.length >= 12 &&
+        String.fromCharCodes(imageBytes.sublist(0, 4)) == 'RIFF' &&
+        String.fromCharCodes(imageBytes.sublist(8, 12)) == 'WEBP';
+    if (!jpeg && !png && !webp)
+      throw const SpecException('Choose a JPEG, PNG or WebP image.');
+    final buffer = await ui.ImmutableBuffer.fromUint8List(imageBytes);
+    ui.ImageDescriptor? descriptor;
+    ui.Codec? codec;
+    try {
+      descriptor = await ui.ImageDescriptor.encoded(buffer);
+      if (descriptor.width * descriptor.height > 16000000)
+        throw const SpecException('Images must be at most 16 megapixels.');
+      codec = await descriptor.instantiateCodec(
+        targetWidth: 1,
+        targetHeight: 1,
+      );
+      if (codec.frameCount != 1)
+        throw const SpecException('Choose a single-frame image.');
+    } finally {
+      codec?.dispose();
+      descriptor?.dispose();
+      buffer.dispose();
+    }
+    final id = 'preview_upload_${++_imageSequence}';
+    _imageAssets[id] = Uint8List.fromList(imageBytes);
+    return id;
+  }
+
+  @override
   Future<List<RuntimeReminderState>> reminderState(int recordId) async {
     final item = await get(recordId);
     return [
@@ -394,5 +554,91 @@ class PreviewRuntimeAdapter extends RuntimeAdapter {
     _changes.add(null);
   }
 
-  void dispose() => _changes.close();
+  /// Applies a validated presentation patch without replacing sample records.
+  void applyPresentationPatch(Map<String, dynamic> patch) {
+    if (!{
+      'RenameLabel',
+      'RenameField',
+      'SetTheme',
+      'UpdatePage',
+      'UpdateView',
+      'ReorderView',
+    }.contains(patch['type'])) {
+      throw ArgumentError('Not a presentation patch');
+    }
+    final next = spec.patch(patch, () => throw StateError('No new IDs'));
+    // Callers may update labels/layout only, never behavior or data bindings.
+    final before = spec.toJson(), after = next.toJson();
+    Map<String, dynamic> behavior(Map<String, dynamic> value) {
+      final result = Map<String, dynamic>.from(value)
+        ..remove('name')
+        ..remove('theme')
+        ..remove('icon');
+      result['collections'] = [
+        for (final c in value['collections'])
+          {
+            ...c as Map<String, dynamic>,
+            'label': '',
+            'fields': [
+              for (final f in c['fields'])
+                {...f as Map<String, dynamic>, 'label': ''},
+            ],
+          },
+      ];
+      result['views'] = [
+        for (final v in value['views'])
+          {
+            ...v as Map<String, dynamic>,
+            'label': '',
+            'presentation': null,
+            'options': _bindingOptions(v),
+          },
+      ]..sort((a, b) => (a['id'] as String).compareTo(b['id'] as String));
+      if (value['navigation'] != null)
+        result['navigation'] = {
+          ...value['navigation'] as Map<String, dynamic>,
+          'pages': [
+            for (final p in value['navigation']['pages'])
+              {
+                ...p as Map<String, dynamic>,
+                'title': '',
+                'showDate': false,
+                'viewIds': [...p['viewIds'] as List]..sort(),
+              },
+          ],
+        };
+      // Presentation may opt into configured-view capability.
+      result['requires'] = [...value['requires'] as List]
+        ..remove('views.configured.v1')
+        ..remove('views.interactive.v1');
+      return result;
+    }
+
+    if (canonicalJson(behavior(before)) != canonicalJson(behavior(after))) {
+      throw ArgumentError('Patch changes preview behavior');
+    }
+    _spec = next;
+    _changes.add(null);
+  }
+
+  Map<String, dynamic> _bindingOptions(Map<String, dynamic> view) {
+    final options = Map<String, dynamic>.from(view['options'] as Map? ?? {});
+    final presentationKeys = switch (view['type']) {
+      'chart' => ['style'],
+      'metric' => ['target'],
+      'richText' => ['markdown'],
+      'banner' => ['title', 'body', 'imageAssetId', 'imageAlt', 'tone'],
+      'form' => ['controls', 'steps'],
+      _ => <String>[],
+    };
+    for (final key in presentationKeys) {
+      options.remove(key);
+    }
+    return options;
+  }
+
+  void dispose() {
+    _imageAssets.clear();
+    _changes.close();
+  }
 }

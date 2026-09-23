@@ -24,6 +24,12 @@ class BuilderEndpoint extends Endpoint {
   ) => Builder.begin(session, workspaceId, templateKey, appId);
   Future<BuilderSnapshot> get(Session session, int draftId) =>
       Builder.get(session, draftId);
+  Future<List<GuidanceQuestion>> suggestQuestions(
+    Session session,
+    String idea,
+    int? workspaceId,
+    int? draftId,
+  ) => Builder.suggestQuestions(session, idea, workspaceId, draftId);
   Future<BuilderSnapshot> patch(
     Session session,
     int draftId,

@@ -13,6 +13,8 @@
 // ignore_for_file: no_leading_underscores_for_library_prefixes
 import 'package:appnest_client/src/protocol/activity_item.dart' as _ihdhb6mh;
 import 'package:appnest_client/src/protocol/app_manifest.dart' as _igbv6cp9;
+import 'package:appnest_client/src/protocol/guidance_question.dart'
+    as _ir7xtg43;
 import 'package:appnest_client/src/protocol/inbox_item.dart' as _ic0zicoc;
 import 'package:appnest_client/src/protocol/member_info.dart' as _iqjsfrnp;
 import 'package:appnest_client/src/protocol/reminder_state.dart' as _i1a6ysmx;
@@ -23,7 +25,6 @@ import 'package:serverpod_auth_core_client/serverpod_auth_core_client.dart'
 import 'package:serverpod_auth_idp_client/serverpod_auth_idp_client.dart'
     as _iaic;
 import 'package:serverpod_client/serverpod_client.dart' as _isc;
-
 import 'action_outcome.dart' as _isykbnbw;
 import 'action_request.dart' as _ii1w3lxm;
 import 'activity_item.dart' as _irh51hj1;
@@ -31,7 +32,11 @@ import 'app_event.dart' as _iwn9176r;
 import 'app_manifest.dart' as _i65w4jw3;
 import 'builder_snapshot.dart' as _i4n6ivgk;
 import 'greetings/greeting.dart' as _izw8z7ou;
+import 'guidance_question.dart' as _istc82cm;
 import 'inbox_item.dart' as _iv6iq8qv;
+import 'media_info.dart' as _iyb2dgte;
+import 'media_upload_request.dart' as _i6mex4av;
+import 'media_upload_ticket.dart' as _iu821fma;
 import 'member_info.dart' as _i2slp771;
 import 'nest_error.dart' as _i0tc2cek;
 import 'platform_info.dart' as _ici3to49;
@@ -49,7 +54,11 @@ export 'app_event.dart';
 export 'app_manifest.dart';
 export 'builder_snapshot.dart';
 export 'greetings/greeting.dart';
+export 'guidance_question.dart';
 export 'inbox_item.dart';
+export 'media_info.dart';
+export 'media_upload_request.dart';
+export 'media_upload_ticket.dart';
 export 'member_info.dart';
 export 'nest_error.dart';
 export 'platform_info.dart';
@@ -117,8 +126,20 @@ class Protocol extends _isc.SerializationManager {
     if (t == _izw8z7ou.Greeting) {
       return _izw8z7ou.Greeting.fromJson(data) as T;
     }
+    if (t == _istc82cm.GuidanceQuestion) {
+      return _istc82cm.GuidanceQuestion.fromJson(data) as T;
+    }
     if (t == _iv6iq8qv.InboxItem) {
       return _iv6iq8qv.InboxItem.fromJson(data) as T;
+    }
+    if (t == _iyb2dgte.MediaInfo) {
+      return _iyb2dgte.MediaInfo.fromJson(data) as T;
+    }
+    if (t == _i6mex4av.MediaUploadRequest) {
+      return _i6mex4av.MediaUploadRequest.fromJson(data) as T;
+    }
+    if (t == _iu821fma.MediaUploadTicket) {
+      return _iu821fma.MediaUploadTicket.fromJson(data) as T;
     }
     if (t == _i2slp771.MemberInfo) {
       return _i2slp771.MemberInfo.fromJson(data) as T;
@@ -174,8 +195,23 @@ class Protocol extends _isc.SerializationManager {
     if (t == _isc.getType<_izw8z7ou.Greeting?>()) {
       return (data != null ? _izw8z7ou.Greeting.fromJson(data) : null) as T;
     }
+    if (t == _isc.getType<_istc82cm.GuidanceQuestion?>()) {
+      return (data != null ? _istc82cm.GuidanceQuestion.fromJson(data) : null)
+          as T;
+    }
     if (t == _isc.getType<_iv6iq8qv.InboxItem?>()) {
       return (data != null ? _iv6iq8qv.InboxItem.fromJson(data) : null) as T;
+    }
+    if (t == _isc.getType<_iyb2dgte.MediaInfo?>()) {
+      return (data != null ? _iyb2dgte.MediaInfo.fromJson(data) : null) as T;
+    }
+    if (t == _isc.getType<_i6mex4av.MediaUploadRequest?>()) {
+      return (data != null ? _i6mex4av.MediaUploadRequest.fromJson(data) : null)
+          as T;
+    }
+    if (t == _isc.getType<_iu821fma.MediaUploadTicket?>()) {
+      return (data != null ? _iu821fma.MediaUploadTicket.fromJson(data) : null)
+          as T;
     }
     if (t == _isc.getType<_i2slp771.MemberInfo?>()) {
       return (data != null ? _i2slp771.MemberInfo.fromJson(data) : null) as T;
@@ -235,8 +271,9 @@ class Protocol extends _isc.SerializationManager {
     }
     if (t == Map<String, int>) {
       return (data as Map).map(
-        (k, v) => MapEntry(deserialize<String>(k), deserialize<int>(v)),
-      ) as T;
+            (k, v) => MapEntry(deserialize<String>(k), deserialize<int>(v)),
+          )
+          as T;
     }
     if (t == List<_i1i173ve.WorkspaceInfo>) {
       return (data as List)
@@ -265,6 +302,12 @@ class Protocol extends _isc.SerializationManager {
     if (t == List<_ihdhb6mh.ActivityItem>) {
       return (data as List)
               .map((e) => deserialize<_ihdhb6mh.ActivityItem>(e))
+              .toList()
+          as T;
+    }
+    if (t == List<_ir7xtg43.GuidanceQuestion>) {
+      return (data as List)
+              .map((e) => deserialize<_ir7xtg43.GuidanceQuestion>(e))
               .toList()
           as T;
     }
@@ -298,7 +341,11 @@ class Protocol extends _isc.SerializationManager {
       _i65w4jw3.AppManifest => 'AppManifest',
       _i4n6ivgk.BuilderSnapshot => 'BuilderSnapshot',
       _izw8z7ou.Greeting => 'Greeting',
+      _istc82cm.GuidanceQuestion => 'GuidanceQuestion',
       _iv6iq8qv.InboxItem => 'InboxItem',
+      _iyb2dgte.MediaInfo => 'MediaInfo',
+      _i6mex4av.MediaUploadRequest => 'MediaUploadRequest',
+      _iu821fma.MediaUploadTicket => 'MediaUploadTicket',
       _i2slp771.MemberInfo => 'MemberInfo',
       _i0tc2cek.NestError => 'NestError',
       _ici3to49.PlatformInfo => 'PlatformInfo',
@@ -337,8 +384,16 @@ class Protocol extends _isc.SerializationManager {
         return 'BuilderSnapshot';
       case _izw8z7ou.Greeting():
         return 'Greeting';
+      case _istc82cm.GuidanceQuestion():
+        return 'GuidanceQuestion';
       case _iv6iq8qv.InboxItem():
         return 'InboxItem';
+      case _iyb2dgte.MediaInfo():
+        return 'MediaInfo';
+      case _i6mex4av.MediaUploadRequest():
+        return 'MediaUploadRequest';
+      case _iu821fma.MediaUploadTicket():
+        return 'MediaUploadTicket';
       case _i2slp771.MemberInfo():
         return 'MemberInfo';
       case _i0tc2cek.NestError():
@@ -402,8 +457,20 @@ class Protocol extends _isc.SerializationManager {
     if (dataClassName == 'Greeting') {
       return deserialize<_izw8z7ou.Greeting>(data['data']);
     }
+    if (dataClassName == 'GuidanceQuestion') {
+      return deserialize<_istc82cm.GuidanceQuestion>(data['data']);
+    }
     if (dataClassName == 'InboxItem') {
       return deserialize<_iv6iq8qv.InboxItem>(data['data']);
+    }
+    if (dataClassName == 'MediaInfo') {
+      return deserialize<_iyb2dgte.MediaInfo>(data['data']);
+    }
+    if (dataClassName == 'MediaUploadRequest') {
+      return deserialize<_i6mex4av.MediaUploadRequest>(data['data']);
+    }
+    if (dataClassName == 'MediaUploadTicket') {
+      return deserialize<_iu821fma.MediaUploadTicket>(data['data']);
     }
     if (dataClassName == 'MemberInfo') {
       return deserialize<_i2slp771.MemberInfo>(data['data']);

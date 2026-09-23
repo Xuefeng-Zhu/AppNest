@@ -1,6 +1,15 @@
 part of '../appnest_spec.dart';
 
-enum FieldType { text, integer, number, boolean, choice, timestamp, member }
+enum FieldType {
+  text,
+  integer,
+  number,
+  boolean,
+  choice,
+  timestamp,
+  member,
+  image,
+}
 
 class FieldSpec {
   final String id, label;
@@ -67,6 +76,8 @@ class FieldSpec {
         if (date == null)
           throw SpecException('$label must be a valid timestamp');
         return date.toUtc().toIso8601String();
+      case FieldType.image:
+        _imageId(value);
       case FieldType.member:
         if (value is! String || value.isEmpty || value.length > 100)
           throw SpecException('$label must reference an eligible member');
@@ -313,7 +324,10 @@ class ViewSpec {
   final List<String> fieldIds, filterFieldIds;
   final Map<String, dynamic>? query;
   final DateFilterSpec? dateFilter;
+  final Map<String, dynamic> options;
+  bool get contentOnly => type == 'richText' || type == 'banner';
   bool get configured =>
+      options.isNotEmpty ||
       presentation != null ||
       fieldIds.isNotEmpty ||
       filterFieldIds.isNotEmpty ||
@@ -337,6 +351,7 @@ class ViewSpec {
     this.dateFilter,
     this.detailPageId,
     this.formPageId,
+    this.options = const {},
   });
   factory ViewSpec.fromJson(Map<String, dynamic> j) {
     keys(j, {
@@ -354,6 +369,7 @@ class ViewSpec {
       'dateFilter',
       'detailPageId',
       'formPageId',
+      'options',
     }, 'view');
     if (j['presentation'] != null &&
         !{'compact', 'cards'}.contains(j['presentation']))
@@ -381,12 +397,20 @@ class ViewSpec {
       'summary',
       'capacity',
       'action',
+      ...richViewTypes,
     }.contains(type))
       throw const SpecException('Unsupported view');
+    final options = j['options'] == null
+        ? <String, dynamic>{}
+        : object(j['options'], 'view options');
+    _validateOptionsShape(type, options);
+    final contentOnly = type == 'richText' || type == 'banner';
+    if (contentOnly && j.containsKey('collectionId'))
+      throw const SpecException('Content blocks must omit collectionId');
     return ViewSpec(
       stableId(j['id']),
       type,
-      stableId(j['collectionId']),
+      contentOnly ? '' : stableId(j['collectionId']),
       str(j['label'] ?? j['id'], 'view label'),
       j['titleFieldId'] == null ? null : stableId(j['titleFieldId']),
       j['groupByFieldId'] == null ? null : stableId(j['groupByFieldId']),
@@ -402,13 +426,15 @@ class ViewSpec {
           ? null
           : stableId(j['detailPageId']),
       formPageId: j['formPageId'] == null ? null : stableId(j['formPageId']),
+      options: Map<String, dynamic>.unmodifiable(options),
     );
   }
   Map<String, dynamic> toJson() => {
     'id': id,
     'type': type,
-    'collectionId': collectionId,
+    if (!contentOnly) 'collectionId': collectionId,
     'label': label,
+    if (options.isNotEmpty) 'options': options,
     if (titleFieldId != null) 'titleFieldId': titleFieldId,
     if (groupByFieldId != null) 'groupByFieldId': groupByFieldId,
     'actionIds': actionIds,
@@ -478,6 +504,18 @@ const capabilities = {
   'views.summary.v1',
   'views.capacity.v1',
   'views.action.v1',
+  'views.table.v1',
+  'views.calendar.v1',
+  'views.timeline.v1',
+  'views.chart.v1',
+  'views.metric.v1',
+  'views.imageCards.v1',
+  'views.gallery.v1',
+  'views.richText.v1',
+  'views.banner.v1',
+  'views.checklist.v1',
+  'fields.image.v1',
+  'views.interactive.v1',
   'capacity.v1',
   'workflow.v1',
   'assignment.v1',
@@ -705,10 +743,21 @@ class AppSpec {
     };
     for (final col in c) {
       needed.addAll(col.behaviors.map((b) => b.type));
+      if (col.fields.any((f) => f.type == FieldType.image))
+        needed.add('fields.image.v1');
     }
     for (final view in v) {
       needed.add('views.${view.type}.v1');
       if (view.configured) needed.add('views.configured.v1');
+      if (richViewTypes.contains(view.type) || view.options.isNotEmpty) {
+        if (spec.navigation == null)
+          throw const SpecException('Rich components need app navigation');
+        _validateRichView(spec, view);
+      }
+      if ((view.type == 'form' || view.type == 'board') &&
+          view.options.isNotEmpty)
+        needed.add('views.interactive.v1');
+      if (view.contentOnly) continue;
       final col = spec.collection(view.collectionId);
       if (view.titleFieldId != null) col.field(view.titleFieldId!);
       if (view.groupByFieldId != null) col.field(view.groupByFieldId!);
@@ -742,8 +791,15 @@ class AppSpec {
       final interactiveFilters = view.type == 'summary'
           ? 0
           : view.filterFieldIds.length + (hasSearch ? 1 : 0);
+      final componentFilters = view.type == 'calendar'
+          ? 2
+          : view.type == 'timeline' &&
+                !col.field(view.options['dateFieldId'] as String).required
+          ? 1
+          : 0;
       if ((view.query?['filters'] as List? ?? []).length +
               relativeFilters +
+              componentFilters +
               interactiveFilters >
           Limits.filters)
         throw const SpecException(
@@ -1022,9 +1078,30 @@ class AppSpec {
       requireCapability('views.${view['type']}.v1');
       if (ViewSpec.fromJson(view).configured)
         requireCapability('views.configured.v1');
+      if ({'form', 'board'}.contains(view['type']) &&
+          (view['options'] as Map? ?? {}).isNotEmpty)
+        requireCapability('views.interactive.v1');
     }
 
     switch (type) {
+      case 'RenameField':
+        keys(patch, {
+          'type',
+          'collectionId',
+          'fieldId',
+          'label',
+        }, 'RenameField');
+        final label = str(patch['label'], 'label');
+        final collection = (j['collections'] as List)
+            .where((c) => c['id'] == patch['collectionId'])
+            .firstOrNull;
+        if (collection == null)
+          throw const SpecException('Collection not found');
+        final field = (collection['fields'] as List)
+            .where((f) => f['id'] == patch['fieldId'])
+            .firstOrNull;
+        if (field == null) throw const SpecException('Field not found');
+        field['label'] = label;
       case 'RenameLabel':
         keys(patch, {'type', 'targetId', 'label'}, 'RenameLabel');
         final label = str(patch['label'], 'label');
@@ -1075,6 +1152,7 @@ class AppSpec {
             .firstOrNull;
         if (col == null) throw const SpecException('Collection not found');
         (col['fields'] as List).add(FieldSpec.fromJson(f).toJson());
+        if (f['type'] == 'image') requireCapability('fields.image.v1');
       case 'AddChoice':
         keys(patch, {'type', 'collectionId', 'fieldId', 'choice'}, 'AddChoice');
         collection(patch['collectionId']).field(patch['fieldId']);

@@ -12,7 +12,6 @@
 // ignore_for_file: no_leading_underscores_for_library_prefixes
 import 'package:appnest_client/src/protocol/protocol.dart' as _ikh0m8by;
 import 'package:serverpod_client/serverpod_client.dart' as _isc;
-
 import 'runtime_record.dart' as _ilpx295a;
 
 abstract class RecordPage
