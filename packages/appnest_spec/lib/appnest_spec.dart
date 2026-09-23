@@ -5,6 +5,7 @@ import 'dart:convert';
 import 'package:crypto/crypto.dart';
 
 part 'src/spec.dart';
+part 'src/appearance.dart';
 part 'src/templates.dart';
 part 'src/schema.dart';
 part 'src/rich_spec.dart';

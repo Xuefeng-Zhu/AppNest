@@ -65,3 +65,22 @@ checks do not establish native-device, rich-component live-AI, or production
 acceptance.
 
 The central **template/manual** demo is verified end to end. Real natural-language generation through Nebius Nemotron also created and published Plant Corner and Trip Kit, with authenticated live record editing, workflow transitions and summary counts. A credentialed semantic label edit preserved the rest of the definition exactly. See [the AI creation check](AI_CREATION_CHECK.md). AI-authored additive field changes and the complete AI sharing/reminder sequence remain separate unverified layers.
+
+### App appearance and page composition (2026-09-23)
+
+Implemented: coordinated Clean, Editorial and Playful styles; accent colors,
+heading typography, spacing and corner overrides; style previews and reset
+controls; stacked, two-column and featured-first page layouts; responsive banner
+image placement. AI creation/editing and click-to-edit use the same bounded
+definition and semantic-patch contract. Absent properties preserve canonical
+legacy definitions; presentation changes retain business data and require
+publication before reaching the live app.
+
+Automated verification passed: 346 tests across spec, renderer, Flutter authoring
+and server packages; real PostgreSQL publication/authorization checks; isolated
+two-process reminder recovery; analysis/format checks; and the release web build.
+Eight isolated desktop/mobile captures were visually inspected. Connected runtime
+activation, preview-to-published visual parity and appearance-specific live-AI
+behavior remain unverified; prior connected evidence above does not establish
+those layers. See [the appearance contract and verification record](APPEARANCE.md)
+for defaults, capability semantics and exact boundaries.

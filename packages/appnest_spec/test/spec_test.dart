@@ -4,6 +4,42 @@ import 'package:appnest_spec/appnest_spec.dart';
 import 'package:test/test.dart';
 
 void main() {
+  test('choice diagnostics identify the field and the required repair', () {
+    Map<String, dynamic> field(String type, [List<String>? choices]) => {
+      'id': 'priority',
+      'label': 'Priority',
+      'type': type,
+      'required': false,
+      if (choices != null) 'choices': choices,
+    };
+    for (final choices in <List<String>?>[null, []]) {
+      expect(
+        () => FieldSpec.fromJson(field('choice', choices)),
+        throwsA(
+          isA<SpecException>().having(
+            (e) => e.message,
+            'message',
+            'Choice field priority requires at least one choice.',
+          ),
+        ),
+      );
+    }
+    expect(
+      () => FieldSpec.fromJson(field('integer', ['Low', 'High'])),
+      throwsA(
+        isA<SpecException>().having(
+          (e) => e.message,
+          'message',
+          'Field priority has type integer; only choice fields can define nonempty choices.',
+        ),
+      ),
+    );
+    expect(FieldSpec.fromJson(field('choice', ['Low', 'High'])).choices, [
+      'Low',
+      'High',
+    ]);
+    expect(FieldSpec.fromJson(field('integer', [])).choices, isEmpty);
+  });
   test('publication review reports an action-only rename with stable IDs', () {
     final before = starterTemplates()['planner']!;
     final after = before.patch({
@@ -196,5 +232,42 @@ void main() {
       }).limit,
       50,
     );
+  });
+  test('timestamp query errors explain relative date bindings', () {
+    final col = starterTemplates()['volunteer']!.collections.first;
+    for (final op in ['eq', 'in']) {
+      expect(
+        () => RecordQuery.parse(col, {
+          'filters': [
+            {
+              'fieldId': 'startsAt',
+              'operator': op,
+              'value': op == 'in' ? ['today'] : 'today',
+            },
+          ],
+        }),
+        throwsA(
+          isA<SpecException>().having(
+            (error) => error.message,
+            'actionable timestamp diagnostic',
+            allOf(
+              contains('Query filter startsAt'),
+              contains('view property dateFilter'),
+              contains('"period":"today"'),
+            ),
+          ),
+        ),
+      );
+    }
+    final query = RecordQuery.parse(col, {
+      'filters': [
+        {
+          'fieldId': 'startsAt',
+          'operator': 'gte',
+          'value': '2030-01-01T10:00:00-08:00',
+        },
+      ],
+    });
+    expect(query.filters.single['value'], '2030-01-01T18:00:00.000Z');
   });
 }

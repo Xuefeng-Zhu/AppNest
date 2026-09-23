@@ -299,7 +299,7 @@ class Builder {
             tx: tx,
             startFromScratch: startFromScratch,
           ),
-          promptVersion: 'appnest-v1',
+          promptVersion: 'appnest-v1-appearance-structured',
           nextAttemptAt: clock(),
           diagnostics: '',
           usageJson: '{}',

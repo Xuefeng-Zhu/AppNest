@@ -210,6 +210,7 @@ Map<String, dynamic> appSpecSchema() {
       'viewIds': {...arr(id, 8), 'minItems': 1, 'uniqueItems': true},
       'showDate': {'type': 'boolean'},
       'primaryActionId': id,
+      'layout': {'enum': pageLayouts.toList()},
     },
     ['id', 'title', 'viewIds'],
   );
@@ -250,6 +251,16 @@ Map<String, dynamic> appSpecSchema() {
         'policyPresetRequest': {'enum': policyPresets.toList()},
         'automationRequests': arr(rule, Limits.rules),
         'navigation': navigation,
+        'appearance': obj(
+          {
+            'style': {'enum': appearanceStyles.toList()},
+            'accentColor': {'type': 'string', 'pattern': r'^#[0-9a-fA-F]{6}$'},
+            'typography': {'enum': appearanceTypographies.toList()},
+            'density': {'enum': appearanceDensities.toList()},
+            'corners': {'enum': appearanceCorners.toList()},
+          },
+          ['style'],
+        ),
       },
       [
         'formatVersion',

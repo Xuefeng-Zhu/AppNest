@@ -62,25 +62,47 @@ class MiniAppRuntime extends StatelessWidget {
     this.editConfiguration,
   });
   @override
-  Widget build(BuildContext context) => _VisualEditScope(
-    configuration: adapter.preview ? editConfiguration : null,
-    child: adapter.spec.navigation == null
-        ? Theme(
-            data: Theme.of(context).copyWith(
+  Widget build(BuildContext context) => StreamBuilder<void>(
+    stream: adapter is PreviewRuntimeAdapter
+        ? (adapter as PreviewRuntimeAdapter)._presentationChanges.stream
+        : null,
+    builder: (context, _) {
+      final legacy = adapter.spec.navigation == null;
+      final themed = adapter.spec.appearance != null;
+      final body = _VisualEditScope(
+        configuration: adapter.preview ? editConfiguration : null,
+        child: legacy
+            ? _LegacyMiniAppRuntime(adapter: adapter)
+            : _RichMiniAppRuntime(
+                adapter: adapter,
+                controller: controller,
+                initialLocation: initialLocation,
+                onLocationChanged: onLocationChanged,
+                clock: clock ?? DateTime.now,
+              ),
+      );
+      final theme = themed
+          ? resolveMiniAppAppearanceTheme(Theme.of(context), adapter.spec)
+          : !legacy
+          ? Theme.of(context)
+          : Theme.of(context).copyWith(
               colorScheme: ColorScheme.fromSeed(
                 seedColor: _appColor(adapter.spec.theme),
                 brightness: Theme.of(context).brightness,
               ),
-            ),
-            child: _LegacyMiniAppRuntime(adapter: adapter),
-          )
-        : _RichMiniAppRuntime(
-            adapter: adapter,
-            controller: controller,
-            initialLocation: initialLocation,
-            onLocationChanged: onLocationChanged,
-            clock: clock ?? DateTime.now,
-          ),
+            );
+      // Keep the element path stable when an existing app first opts into a
+      // style, preserving navigation, filters and in-progress preview inputs.
+      return Theme(
+        data: theme,
+        child: ColoredBox(
+          color: themed && legacy
+              ? theme.scaffoldBackgroundColor
+              : Colors.transparent,
+          child: body,
+        ),
+      );
+    },
   );
 }
 

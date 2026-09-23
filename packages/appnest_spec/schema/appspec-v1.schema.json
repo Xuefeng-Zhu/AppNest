@@ -60,6 +60,8 @@
           "assignment.v1",
           "notifications.inApp.v1",
           "navigation.v1",
+          "appearance.v1",
+          "navigation.layouts.v1",
           "views.configured.v1",
           "notifications.owner.v1",
           "automations.conditions.v1",
@@ -967,6 +969,12 @@
                         "warning"
                       ]
                     },
+                    "imagePlacement": {
+                      "enum": [
+                        "above",
+                        "beside"
+                      ]
+                    },
                     "targetPageId": {
                       "type": "string",
                       "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$",
@@ -1221,6 +1229,13 @@
                 "type": "string",
                 "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$",
                 "maxLength": 64
+              },
+              "layout": {
+                "enum": [
+                  "stacked",
+                  "twoColumn",
+                  "featuredFirst"
+                ]
               }
             },
             "required": [
@@ -1275,6 +1290,46 @@
         "entryPageId",
         "pages",
         "tabs"
+      ]
+    },
+    "appearance": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "style": {
+          "enum": [
+            "clean",
+            "editorial",
+            "playful"
+          ]
+        },
+        "accentColor": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$"
+        },
+        "typography": {
+          "enum": [
+            "sans",
+            "serif"
+          ]
+        },
+        "density": {
+          "enum": [
+            "compact",
+            "comfortable",
+            "spacious"
+          ]
+        },
+        "corners": {
+          "enum": [
+            "square",
+            "soft",
+            "rounded"
+          ]
+        }
+      },
+      "required": [
+        "style"
       ]
     }
   },

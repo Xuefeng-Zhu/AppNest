@@ -56,7 +56,7 @@ class RecordDetails extends StatelessWidget {
     final col = spec.collection(item.collectionId);
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(20),
+        padding: EdgeInsets.all(_space(context, 20)),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -341,7 +341,7 @@ class _RecordFormState extends State<RecordForm> {
           children: [
             for (final f in fields)
               Padding(
-                padding: const EdgeInsets.only(bottom: 16),
+                padding: EdgeInsets.only(bottom: _space(context, 16)),
                 child: switch (f.type) {
                   FieldType.image => _imageField(f),
                   FieldType.choice ||

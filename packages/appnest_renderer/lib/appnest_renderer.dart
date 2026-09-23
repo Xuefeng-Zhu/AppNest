@@ -7,6 +7,7 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:appnest_spec/appnest_spec.dart';
+part 'src/appearance.dart';
 part 'src/runtime.dart';
 part 'src/components.dart';
 part 'src/navigation.dart';
@@ -106,6 +107,7 @@ class PreviewRuntimeAdapter extends RuntimeAdapter {
   AppSpec get spec => _spec;
   AppSpec _spec;
   final _changes = StreamController<void>.broadcast();
+  final _presentationChanges = StreamController<void>.broadcast();
   final _items = <RuntimeItem>[];
   final _receipts = <String, String>{};
   final Future<Uint8List?> Function()? _pickImage;
@@ -560,6 +562,7 @@ class PreviewRuntimeAdapter extends RuntimeAdapter {
       'RenameLabel',
       'RenameField',
       'SetTheme',
+      'SetAppearance',
       'UpdatePage',
       'UpdateView',
       'ReorderView',
@@ -567,12 +570,58 @@ class PreviewRuntimeAdapter extends RuntimeAdapter {
       throw ArgumentError('Not a presentation patch');
     }
     final next = spec.patch(patch, () => throw StateError('No new IDs'));
-    // Callers may update labels/layout only, never behavior or data bindings.
+    applyPresentationSpec(next);
+  }
+
+  /// Reuses this sandbox for a validated design change, retaining user-created
+  /// sample records, claims, uploaded images and command receipts.
+  void applyPresentationSpec(AppSpec next) {
+    _checkPresentationSpec(next);
+    _spec = next;
+    _presentationChanges.add(null);
+    _changes.add(null);
+  }
+
+  /// Independent, deep copy for style thumbnails. No synthetic data is reseeded.
+  PreviewRuntimeAdapter forkPresentation(AppSpec next) {
+    _checkPresentationSpec(next);
+    final fork = PreviewRuntimeAdapter(
+      next,
+      imageAssets: {
+        for (final entry in _imageAssets.entries)
+          entry.key: Uint8List.fromList(entry.value),
+      },
+    );
+    fork._items
+      ..clear()
+      ..addAll(
+        _items.map(
+          (item) => RuntimeItem(
+            item.id,
+            item.collectionId,
+            Map<String, dynamic>.from(_copyPreviewValue(item.data) as Map),
+            revision: item.revision,
+            capacity: item.capacity,
+            allocated: item.allocated,
+            claimed: item.claimed,
+            allowedActions: List.of(item.allowedActions),
+          ),
+        ),
+      );
+    fork._receipts.addAll(_receipts);
+    fork._imageSequence = _imageSequence;
+    return fork;
+  }
+
+  void _checkPresentationSpec(AppSpec next) {
+    // Reparse to enforce schema/capability validation on directly constructed specs.
+    AppSpec.parse(canonicalJson(next.toJson()));
     final before = spec.toJson(), after = next.toJson();
     Map<String, dynamic> behavior(Map<String, dynamic> value) {
       final result = Map<String, dynamic>.from(value)
         ..remove('name')
         ..remove('theme')
+        ..remove('appearance')
         ..remove('icon');
       result['collections'] = [
         for (final c in value['collections'])
@@ -603,6 +652,7 @@ class PreviewRuntimeAdapter extends RuntimeAdapter {
                 ...p as Map<String, dynamic>,
                 'title': '',
                 'showDate': false,
+                'layout': null,
                 'viewIds': [...p['viewIds'] as List]..sort(),
               },
           ],
@@ -610,15 +660,15 @@ class PreviewRuntimeAdapter extends RuntimeAdapter {
       // Presentation may opt into configured-view capability.
       result['requires'] = [...value['requires'] as List]
         ..remove('views.configured.v1')
-        ..remove('views.interactive.v1');
+        ..remove('views.interactive.v1')
+        ..remove('appearance.v1')
+        ..remove('navigation.layouts.v1');
       return result;
     }
 
     if (canonicalJson(behavior(before)) != canonicalJson(behavior(after))) {
       throw ArgumentError('Patch changes preview behavior');
     }
-    _spec = next;
-    _changes.add(null);
   }
 
   Map<String, dynamic> _bindingOptions(Map<String, dynamic> view) {
@@ -627,7 +677,14 @@ class PreviewRuntimeAdapter extends RuntimeAdapter {
       'chart' => ['style'],
       'metric' => ['target'],
       'richText' => ['markdown'],
-      'banner' => ['title', 'body', 'imageAssetId', 'imageAlt', 'tone'],
+      'banner' => [
+        'title',
+        'body',
+        'imageAssetId',
+        'imageAlt',
+        'tone',
+        'imagePlacement',
+      ],
       'form' => ['controls', 'steps'],
       _ => <String>[],
     };
@@ -639,6 +696,16 @@ class PreviewRuntimeAdapter extends RuntimeAdapter {
 
   void dispose() {
     _imageAssets.clear();
+    _presentationChanges.close();
     _changes.close();
   }
 }
+
+Object? _copyPreviewValue(Object? value) => switch (value) {
+  Map() => {
+    for (final entry in value.entries)
+      entry.key: _copyPreviewValue(entry.value),
+  },
+  List() => value.map(_copyPreviewValue).toList(),
+  _ => value,
+};

@@ -657,11 +657,19 @@ void main() {
       await tester.pumpAndSettle();
       await tester.enterText(find.byType(TextField).first, 'My overview');
       await tester.tap(find.text('Add to tab bar'));
-      await tester.tap(find.byKey(const ValueKey('add-section-allTasks')));
+      for (final id in ['allTasks', 'todayTasks']) {
+        final section = find.byKey(ValueKey('add-section-$id'));
+        await tester.ensureVisible(section);
+        await tester.pumpAndSettle();
+        expect(section.hitTestable(), findsOneWidget);
+        await tester.tap(section);
+        await tester.pumpAndSettle();
+      }
+      final moveUp = find.byTooltip('Move up').last;
+      await tester.ensureVisible(moveUp);
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('add-section-todayTasks')));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byTooltip('Move up').last);
+      expect(moveUp.hitTestable(), findsOneWidget);
+      await tester.tap(moveUp);
       await tester.pumpAndSettle();
       await tester.tap(find.text('Update preview'));
       await tester.pumpAndSettle();

@@ -16,6 +16,12 @@ void main() {
   setUpAll(() async {
     if (output.isEmpty) return;
     TestWidgetsFlutterBinding.ensureInitialized();
+    // The host already bundles this font; captures must exercise the real
+    // editorial face rather than Flutter test's placeholder glyphs.
+    final lora = File('../../appnest_flutter/assets/fonts/Lora.ttf');
+    await (FontLoader(
+      'Lora',
+    )..addFont(lora.readAsBytes().then(ByteData.sublistView))).load();
     // Locate the bundled SDK icon font without checking in machine-specific paths.
     var directory = File(Platform.resolvedExecutable).parent;
     for (var level = 0; level < 10; level++) {
@@ -106,6 +112,27 @@ void main() {
     for (final (name, size, location) in cases)
       (name, size, location, dailyPlannerTemplate()),
     ...richCases,
+    for (final style in appearanceStyles)
+      for (final size in [const Size(390, 844), const Size(1440, 1000)])
+        (
+          'appearance-$style-${size.width.toInt()}',
+          size,
+          const MiniAppLocation('todayPage'),
+          dailyPlannerTemplate()
+              .patch({
+                'type': 'SetAppearance',
+                'appearance': {'style': style},
+              }, () => 'unused')
+              .patch({
+                'type': 'UpdatePage',
+                'pageId': 'todayPage',
+                'page': {
+                  ...dailyPlannerTemplate().page('todayPage').toJson()
+                    ..remove('id'),
+                  'layout': 'featuredFirst',
+                },
+              }, () => 'unused'),
+        ),
   ]) {
     testWidgets('isolated preview visual layout $name', (tester) async {
       tester.view.physicalSize = size;

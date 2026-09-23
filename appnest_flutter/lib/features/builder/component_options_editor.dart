@@ -657,6 +657,10 @@ class _ComponentOptionsEditorState extends State<ComponentOptionsEditor> {
           ),
         if (options['imageAssetId'] != null) ...[
           text('Image description', 'imageAlt'),
+          select('Image placement', 'imagePlacement', const {
+            'above': 'Image above text',
+            'beside': 'Image beside text',
+          }, fallback: 'above'),
           TextButton(
             onPressed: !widget.enabled
                 ? null

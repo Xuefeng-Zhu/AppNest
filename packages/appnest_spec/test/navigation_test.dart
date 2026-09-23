@@ -356,6 +356,29 @@ void main() {
       );
     }
   });
+  test('primary action errors name the missing action binding', () {
+    expect(
+      () => changedPlanner((j) {
+        final page = (j['navigation']['pages'] as List).first as Map;
+        for (final view in j['views'] as List) {
+          if ((page['viewIds'] as List).contains(view['id'])) {
+            view['actionIds'] = <String>[];
+          }
+        }
+      }),
+      throwsA(
+        isA<SpecException>().having(
+          (error) => error.message,
+          'actionable primary action diagnostic',
+          allOf(
+            contains('Page todayPage primaryActionId addTask'),
+            contains('Include addTask in actionIds'),
+            contains('formPageId'),
+          ),
+        ),
+      ),
+    );
+  });
   test(
     'navigation rejects invalid references, record pages and query bindings',
     () {

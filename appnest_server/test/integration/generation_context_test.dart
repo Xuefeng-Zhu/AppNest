@@ -78,17 +78,21 @@ void main() {
         expect(draft.stage, 'failed');
         expect(await mode(), 'create');
         final planner = starterTemplates()['planner']!;
+        final styledPlanner = planner.patch({
+          'type': 'SetAppearance',
+          'appearance': {'style': 'clean'},
+        }, () => throw StateError('No new IDs'));
         await attempt('```json\n${planner.canonical}\n```');
         expect(
           draft.stage,
           'preview ready',
           reason: draft.diagnostics.join('; '),
         );
-        expect(draft.candidateHash, planner.hash);
+        expect(draft.candidateHash, styledPlanner.hash);
         expect(await mode(), 'edit');
         await attempt('invalid JSON');
         expect(draft.stage, 'failed');
-        expect(draft.candidateHash, planner.hash);
+        expect(draft.candidateHash, styledPlanner.hash);
         expect(await mode(), 'edit');
         draft = await Builder.patch(
           owner,

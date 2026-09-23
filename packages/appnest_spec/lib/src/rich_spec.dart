@@ -47,6 +47,7 @@ void _validateOptionsShape(String type, Map<String, dynamic> o) {
       'imageAssetId',
       'imageAlt',
       'tone',
+      'imagePlacement',
       'targetPageId',
     },
     'form' => {'controls', 'steps'},
@@ -69,6 +70,10 @@ void _validateOptionsShape(String type, Map<String, dynamic> o) {
   }
   if (type == 'richText') str(o['markdown'], 'rich text', max: 8192);
   if (type == 'banner') {
+    if (o.containsKey('imagePlacement') &&
+        !bannerImagePlacements.contains(o['imagePlacement'])) {
+      throw const SpecException('Choose an approved banner image placement');
+    }
     str(o['title'], 'banner title');
     if (o.containsKey('body')) str(o['body'], 'banner body', max: 2048);
     if (o.containsKey('imageAssetId')) {
@@ -276,10 +281,15 @@ void _validateRichView(AppSpec spec, ViewSpec view) {
     for (final value in o['controls'] as List? ?? []) {
       final c = object(value, 'form control');
       final f = col.field(c['fieldId']);
-      if (!editable.contains(f.id))
-        throw const SpecException(
-          'Form controls must bind a visible editable field',
+      if (!editable.contains(f.id)) {
+        throw SpecException(
+          workflowFields.contains(f.id)
+              ? 'Form ${view.id} must remove the control for workflow-managed '
+                    'field ${f.id}; change its state through the workflow action.'
+              : 'Form ${view.id} control ${f.id} must reference a field included '
+                    'in fieldIds, or be removed.',
         );
+      }
       final types = switch (c['control']) {
         'text' || 'multiline' => {FieldType.text},
         'switch' || 'checkbox' => {FieldType.boolean},
@@ -323,6 +333,11 @@ void _validateRichView(AppSpec spec, ViewSpec view) {
   }
   if (view.type == 'checklist' || view.type == 'board' && o.isNotEmpty) {
     final checklist = view.type == 'checklist';
+    if (!checklist && view.groupByFieldId == null) {
+      throw SpecException(
+        'Board ${view.id} needs groupByFieldId referencing a choice field in ${col.id}.',
+      );
+    }
     final field = col.field(
       checklist ? stableId(o['fieldId']) : view.groupByFieldId ?? '',
     );
@@ -330,8 +345,8 @@ void _validateRichView(AppSpec spec, ViewSpec view) {
       stableId(o[checklist ? 'actionId' : 'moveActionId']),
     );
     if (action.collectionId != col.id || !view.actionIds.contains(action.id))
-      throw const SpecException(
-        'Interactive components need a bound action from their collection',
+      throw SpecException(
+        'View ${view.id} must include action ${action.id} in actionIds, and that action must belong to collection ${col.id}.',
       );
     if (checklist && field.type == FieldType.boolean) {
       if (action.capability != 'records.patch.v1' ||
@@ -536,6 +551,7 @@ Map<String, dynamic> _richOptionsSchema(String type) {
         'tone': {
           'enum': ['neutral', 'accent', 'info', 'success', 'warning'],
         },
+        'imagePlacement': {'enum': bannerImagePlacements.toList()},
         'targetPageId': id,
       },
       ['title'],

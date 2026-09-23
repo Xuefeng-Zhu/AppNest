@@ -50,6 +50,7 @@ void main() {
     client.writes.clear();
     client.pause = null;
     client.failWrite = false;
+    client.pendingGeneration = null;
   });
   Future<void> mount(WidgetTester tester, {bool mobile = false}) async {
     tester.view.physicalSize = mobile
@@ -101,7 +102,7 @@ void main() {
       expect(AppSpec.parse(client.current.candidateJson).name, 'Final name');
       expect(client.writes.length, 2);
       expect(
-        tester.widget<MiniAppRuntime>(find.byType(MiniAppRuntime)).adapter,
+        tester.widget<MiniAppRuntime>(find.byType(MiniAppRuntime).last).adapter,
         same(original),
       );
       await tester.tap(find.text('Done editing'));
@@ -208,4 +209,46 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     },
   );
+  testWidgets('AI presentation result keeps preview records and navigation', (
+    tester,
+  ) async {
+    client.current = draft(spec: dailyPlannerTemplate());
+    await mount(tester);
+    final runtime = tester.widget<MiniAppRuntime>(find.byType(MiniAppRuntime));
+    final original = runtime.adapter;
+    final row = (await original.query('tasks', {})).items.first;
+    await original.execute(
+      original.spec.actions.firstWhere(
+        (action) =>
+            action.collectionId == 'tasks' &&
+            action.capability == 'records.patch.v1',
+      ),
+      row,
+      {
+        'data': {'title': 'My sample task'},
+      },
+      'preserve-ai-sample',
+    );
+    await runtime.controller!.navigate(const MiniAppLocation('tasksPage'));
+    await tester.pumpAndSettle();
+    final next = original.spec.patch({
+      'type': 'SetAppearance',
+      'appearance': {'style': 'editorial'},
+    }, () => 'unused');
+    client.current = draft(spec: next, mutation: 1);
+    await tester.enterText(
+      find.byKey(const ValueKey('builder-prompt')),
+      'Use an editorial style',
+    );
+    await tester.pump();
+    await tester.tap(find.byTooltip('Send message'));
+    await tester.pumpAndSettle();
+    final updated = tester.widget<MiniAppRuntime>(find.byType(MiniAppRuntime));
+    expect(updated.adapter, same(original));
+    expect(updated.adapter.spec.appearance!.style, 'editorial');
+    expect((await updated.adapter.get(row.id)).data['title'], 'My sample task');
+    expect(updated.controller!.location, const MiniAppLocation('tasksPage'));
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
 }

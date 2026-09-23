@@ -24,6 +24,52 @@ String builderStageLabel(String stage) => switch (stage) {
   _ => 'Draft saved',
 };
 
+/// Diagnostics also contain instructions for an AI repair attempt. Translate
+/// recognized failures into user guidance; do not promote raw diagnostics or
+/// model-supplied text into the main failure message.
+String builderFailureMessage(
+  List<String> diagnostics, {
+  required bool hasPreview,
+}) {
+  final details = diagnostics.join(' ').toLowerCase();
+  final requestedUnsupported = details.contains(
+    'requested capability is unavailable',
+  );
+  final String reason;
+  if (details.contains('token limit')) {
+    reason = 'The AI response ended before AppNest could finish your app.';
+  } else if (details.contains('definition is too large') ||
+      details.contains('response exceeded the size limit')) {
+    reason = 'The AI response was too large for AppNest to use.';
+  } else if (details.contains('timed out') ||
+      details.contains('response limit')) {
+    reason = 'The AI service took too long to respond.';
+  } else if (details.contains('not valid json') ||
+      details.contains('invalid json response') ||
+      details.contains('must be a json object')) {
+    reason = 'The AI returned a response AppNest couldn’t read.';
+  } else if (details.contains('ai provider')) {
+    reason = 'The AI service couldn’t complete the request.';
+  } else if (requestedUnsupported) {
+    reason = 'This request needs a feature AppNest doesn’t support yet.';
+  } else if (details.contains('unsupported capability') ||
+      details.contains('unsupported capabilities')) {
+    reason = 'The AI used a feature AppNest doesn’t support.';
+  } else if (details.contains('could not be validated') ||
+      details.contains('could not validate')) {
+    reason = 'AppNest couldn’t validate the generated app.';
+  } else {
+    reason = 'AppNest couldn’t finish building this preview.';
+  }
+  return [
+    reason,
+    if (hasPreview) 'Your last preview is still here.',
+    requestedUnsupported
+        ? 'Adjust the requested features, then try again.'
+        : 'Try again with the same request.',
+  ].join(' ');
+}
+
 class BuilderChat extends StatelessWidget {
   final List<BuilderMessage> messages;
   final ScrollController scrollController;
@@ -222,7 +268,10 @@ class BuilderChat extends StatelessWidget {
                     Text(
                       stage == 'stale'
                           ? 'A newer draft or published version replaced this request. Go back and reopen the app to continue from its latest version.'
-                          : 'Your request did not produce a ready preview. You can retry or adjust your description.',
+                          : builderFailureMessage(
+                              diagnostics,
+                              hasPreview: hasPreview,
+                            ),
                     ),
                     if (onRetry != null)
                       Align(

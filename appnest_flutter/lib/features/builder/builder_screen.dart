@@ -146,7 +146,16 @@ class _BuilderScreenState extends State<BuilderScreen> {
     if (lastRequest?.isNotEmpty == true) {
       conversation.add(BuilderMessage(text: lastRequest!, fromUser: true));
     }
-    if (hasPreview) {
+    if (draft.stage == 'failed') {
+      conversation.add(
+        BuilderMessage(
+          text: builderFailureMessage(
+            draft.diagnostics,
+            hasPreview: hasPreview,
+          ),
+        ),
+      );
+    } else if (hasPreview) {
       conversation.add(
         BuilderMessage(
           text: widget.initialPrompt == null
@@ -178,27 +187,30 @@ class _BuilderScreenState extends State<BuilderScreen> {
     }
   }
 
-  void update(BuilderSnapshot d, {Map<String, dynamic>? presentationPatch}) {
+  void update(BuilderSnapshot d) {
     if (!mounted || d.mutation < draft.mutation) return;
     final completed = generating && d.stage == 'preview ready';
-    final failed = generating && d.stage == 'failed';
+    final failed =
+        d.stage == 'failed' &&
+        (draft.stage != 'failed' ||
+            d.jobId != draft.jobId ||
+            d.mutation != draft.mutation);
     setState(() {
       if (d.mutation != draft.mutation ||
           d.candidateHash != draft.candidateHash) {
         guidanceQuestions = null;
       }
       if (d.candidateHash != draft.candidateHash) {
-        if (presentationPatch != null) {
-          try {
-            preview.applyPresentationPatch(presentationPatch);
-          } on Object catch (issue) {
-            if (issue is! SpecException && issue is! ArgumentError) rethrow;
-            preview.dispose();
-            preview = newPreview(AppSpec.parse(d.candidateJson));
-          }
-        } else {
+        final nextSpec = AppSpec.parse(d.candidateJson);
+        try {
+          // AI changes and direct controls share the same presentation guard.
+          // Keeping this adapter retains sample data, location and filters.
+          preview.applyPresentationSpec(nextSpec);
+          unawaited(loadPreviewImages(nextSpec));
+        } on Object catch (issue) {
+          if (issue is! SpecException && issue is! ArgumentError) rethrow;
           preview.dispose();
-          preview = newPreview(AppSpec.parse(d.candidateJson));
+          preview = newPreview(nextSpec);
         }
         enabled.removeWhere(
           (id) => !preview.spec.automationRequests.any((r) => r.id == id),
@@ -216,9 +228,7 @@ class _BuilderScreenState extends State<BuilderScreen> {
       } else if (failed) {
         conversation.add(
           BuilderMessage(
-            text: hasPreview
-                ? 'I couldn’t finish that change. Your last preview is still here. Try a smaller, more specific request.'
-                : 'I couldn’t finish this app yet. Try again, or describe a simpler first version.',
+            text: builderFailureMessage(d.diagnostics, hasPreview: hasPreview),
           ),
         );
       }
@@ -726,8 +736,12 @@ class _BuilderScreenState extends State<BuilderScreen> {
     if (!await finishVisualEdit() || !mounted) return;
     final patch = await showDialog<Map<String, dynamic>>(
       context: context,
-      builder: (_) =>
-          PageEditor(spec: preview.spec, uploadImage: uploadDraftImage),
+      builder: (_) => PageEditor(
+        spec: preview.spec,
+        uploadImage: uploadDraftImage,
+        preview: preview,
+        location: previewController.location,
+      ),
     );
     if (patch != null && mounted) {
       await perform(
@@ -1047,7 +1061,7 @@ class _BuilderScreenState extends State<BuilderScreen> {
           read: () => client.builder.get(draft.draftId),
           write: (mutation, patch) =>
               client.builder.patch(draft.draftId, mutation, patch),
-          onSaved: (next, patch) => update(next, presentationPatch: patch),
+          onSaved: (next, _) => update(next),
         );
       }
       setState(() {
@@ -1100,6 +1114,9 @@ class _BuilderScreenState extends State<BuilderScreen> {
           onClose: () => mobile ? closeMobileInspector() : finishVisualEdit(),
           onReload: () => reloadVisualEdit(),
           uploadImage: uploadDraftImage,
+          preview: preview,
+          location: previewController.location,
+          onSelectTarget: selectVisualTarget,
         );
 
   Widget previewPane() => Column(
@@ -1111,55 +1128,153 @@ class _BuilderScreenState extends State<BuilderScreen> {
           color: Colors.white,
           border: Border(bottom: BorderSide(color: Color(0xffe2e5df))),
         ),
-        child: Row(
-          children: [
-            const Icon(Icons.web_asset_outlined, size: 18),
-            const SizedBox(width: 8),
-            Expanded(
-              child: TextButton.icon(
-                onPressed: canEdit
-                    ? () => visualEditing
-                          ? finishVisualEdit()
-                          : selectVisualTarget(
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            if (constraints.maxWidth < 500) {
+              return Row(
+                children: [
+                  if (visualEditing)
+                    IconButton(
+                      tooltip: 'Done editing',
+                      onPressed: canEdit ? finishVisualEdit : null,
+                      icon: const Icon(Icons.check, size: 18),
+                    )
+                  else
+                    TextButton.icon(
+                      onPressed: canEdit
+                          ? () => selectVisualTarget(
                               const MiniAppEditTarget(
                                 MiniAppEditKind.app,
                                 'app',
                               ),
                             )
-                    : null,
-                icon: Icon(
-                  visualEditing ? Icons.check : Icons.ads_click,
-                  size: 18,
-                ),
-                label: Text(visualEditing ? 'Done editing' : 'Edit'),
-              ),
-            ),
-            IconButton(
-              tooltip: 'Desktop preview',
-              isSelected: !mobilePreview,
-              onPressed: () => setState(() => mobilePreview = false),
-              icon: const Icon(Icons.desktop_windows_outlined, size: 20),
-            ),
-            IconButton(
-              tooltip: 'Mobile preview',
-              isSelected: mobilePreview,
-              onPressed: () => setState(() => mobilePreview = true),
-              icon: const Icon(Icons.smartphone_outlined, size: 20),
-            ),
-            if (hasPreview)
-              IconButton(
-                tooltip: 'Reset sample data',
-                onPressed: busy || visualEditing
-                    ? null
-                    : () => setState(() {
+                          : null,
+                      icon: const Icon(Icons.ads_click, size: 18),
+                      label: const Text('Edit'),
+                    ),
+                  Expanded(
+                    child: TextButton(
+                      key: const ValueKey('open-appearance'),
+                      onPressed: canEdit
+                          ? () => selectVisualTarget(
+                              const MiniAppEditTarget(
+                                MiniAppEditKind.app,
+                                'app',
+                              ),
+                            )
+                          : null,
+                      child: const Text('Appearance'),
+                    ),
+                  ),
+                  PopupMenuButton<String>(
+                    tooltip: 'Preview options',
+                    onSelected: (value) => setState(() {
+                      if (value == 'desktop') mobilePreview = false;
+                      if (value == 'mobile') mobilePreview = true;
+                      if (value == 'reset') {
                         preview.dispose();
                         preview = newPreview(
                           AppSpec.parse(draft.candidateJson),
                         );
-                      }),
-                icon: const Icon(Icons.refresh, size: 20),
-              ),
-          ],
+                      }
+                    }),
+                    itemBuilder: (_) => [
+                      const PopupMenuItem(
+                        value: 'desktop',
+                        child: Text('Desktop preview'),
+                      ),
+                      const PopupMenuItem(
+                        value: 'mobile',
+                        child: Text('Mobile preview'),
+                      ),
+                      if (hasPreview)
+                        PopupMenuItem(
+                          value: 'reset',
+                          enabled: !busy && !visualEditing,
+                          child: const Text('Reset sample data'),
+                        ),
+                    ],
+                  ),
+                ],
+              );
+            }
+            return Wrap(
+              alignment: WrapAlignment.spaceBetween,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              spacing: 4,
+              runSpacing: 4,
+              children: [
+                Wrap(
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    TextButton.icon(
+                      onPressed: canEdit
+                          ? () => visualEditing
+                                ? finishVisualEdit()
+                                : selectVisualTarget(
+                                    const MiniAppEditTarget(
+                                      MiniAppEditKind.app,
+                                      'app',
+                                    ),
+                                  )
+                          : null,
+                      icon: Icon(
+                        visualEditing ? Icons.check : Icons.ads_click,
+                        size: 18,
+                      ),
+                      label: Text(visualEditing ? 'Done editing' : 'Edit'),
+                    ),
+                    TextButton.icon(
+                      key: const ValueKey('open-appearance'),
+                      onPressed: canEdit
+                          ? () => selectVisualTarget(
+                              const MiniAppEditTarget(
+                                MiniAppEditKind.app,
+                                'app',
+                              ),
+                            )
+                          : null,
+                      icon: const Icon(Icons.palette_outlined, size: 18),
+                      label: const Text('Appearance'),
+                    ),
+                  ],
+                ),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      tooltip: 'Desktop preview',
+                      isSelected: !mobilePreview,
+                      onPressed: () => setState(() => mobilePreview = false),
+                      icon: const Icon(
+                        Icons.desktop_windows_outlined,
+                        size: 20,
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Mobile preview',
+                      isSelected: mobilePreview,
+                      onPressed: () => setState(() => mobilePreview = true),
+                      icon: const Icon(Icons.smartphone_outlined, size: 20),
+                    ),
+                    if (hasPreview)
+                      IconButton(
+                        tooltip: 'Reset sample data',
+                        onPressed: busy || visualEditing
+                            ? null
+                            : () => setState(() {
+                                preview.dispose();
+                                preview = newPreview(
+                                  AppSpec.parse(draft.candidateJson),
+                                );
+                              }),
+                        icon: const Icon(Icons.refresh, size: 20),
+                      ),
+                  ],
+                ),
+              ],
+            );
+          },
         ),
       ),
       Expanded(

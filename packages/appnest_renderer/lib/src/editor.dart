@@ -171,7 +171,7 @@ class _RecordEditorState extends State<_RecordEditor> {
   @override
   Widget build(BuildContext context) => Card(
     child: Padding(
-      padding: const EdgeInsets.all(24),
+      padding: EdgeInsets.all(_space(context, 24)),
       child: AbsorbPointer(
         absorbing: _saving || _uploading,
         child: Column(
@@ -196,14 +196,14 @@ class _RecordEditorState extends State<_RecordEditor> {
             for (final field in visibleFields)
               Padding(
                 key: ValueKey('editor-field-${field.id}'),
-                padding: const EdgeInsets.only(bottom: 20),
+                padding: EdgeInsets.only(bottom: _space(context, 20)),
                 child: _fieldControl(field),
               ),
             if (creating &&
                 (_stepIndex == steps.length - 1 || steps.isEmpty) &&
                 widget.collection.behaviors.any((b) => b.type == 'capacity.v1'))
               Padding(
-                padding: const EdgeInsets.only(bottom: 20),
+                padding: EdgeInsets.only(bottom: _space(context, 20)),
                 child: TextField(
                   controller: _capacity,
                   keyboardType: TextInputType.number,
@@ -214,7 +214,7 @@ class _RecordEditorState extends State<_RecordEditor> {
               const LinearProgressIndicator(semanticsLabel: 'Uploading image'),
             if (_error != null)
               Padding(
-                padding: const EdgeInsets.only(bottom: 20),
+                padding: EdgeInsets.only(bottom: _space(context, 20)),
                 child: Text(
                   _error!,
                   style: TextStyle(color: Theme.of(context).colorScheme.error),

@@ -234,7 +234,7 @@ class __LegacyMiniAppRuntimeState extends State<_LegacyMiniAppRuntime>
             label: const Text('Reconnecting — refresh connection'),
           ),
         Padding(
-          padding: const EdgeInsets.all(16),
+          padding: EdgeInsets.all(_space(context, 16)),
           child: Wrap(
             spacing: 12,
             runSpacing: 12,
@@ -310,7 +310,7 @@ class __LegacyMiniAppRuntimeState extends State<_LegacyMiniAppRuntime>
         if (loading) const LinearProgressIndicator(),
         if (error != null)
           Padding(
-            padding: const EdgeInsets.all(16),
+            padding: EdgeInsets.all(_space(context, 16)),
             child: Text(
               'Could not complete the request. $error',
               style: TextStyle(color: Theme.of(context).colorScheme.error),
@@ -321,7 +321,7 @@ class __LegacyMiniAppRuntimeState extends State<_LegacyMiniAppRuntime>
             target: MiniAppEditTarget(MiniAppEditKind.section, view.id),
             child: _VisualEditScope.of(context) != null && view.type == 'form'
                 ? SingleChildScrollView(
-                    padding: const EdgeInsets.all(16),
+                    padding: EdgeInsets.all(_space(context, 16)),
                     child: _editForm(adapter.spec, view),
                   )
                 : page == null
@@ -360,7 +360,7 @@ class __LegacyMiniAppRuntimeState extends State<_LegacyMiniAppRuntime>
                 : AbsorbPointer(
                     absorbing: loading,
                     child: SingleChildScrollView(
-                      padding: const EdgeInsets.all(16),
+                      padding: EdgeInsets.all(_space(context, 16)),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [

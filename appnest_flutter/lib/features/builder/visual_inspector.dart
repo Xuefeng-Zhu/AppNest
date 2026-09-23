@@ -2,6 +2,7 @@ import 'package:appnest_renderer/appnest_renderer.dart';
 import 'package:appnest_spec/appnest_spec.dart';
 import 'package:flutter/material.dart';
 
+import 'appearance_editor.dart';
 import 'visual_edit_session.dart';
 import 'component_options_editor.dart';
 
@@ -29,6 +30,9 @@ class VisualInspector extends StatefulWidget {
   final VisualEditSession session;
   final VoidCallback onClose, onReload;
   final bool mobile;
+  final PreviewRuntimeAdapter? preview;
+  final MiniAppLocation? location;
+  final ValueChanged<MiniAppEditTarget>? onSelectTarget;
   final Future<String?> Function()? uploadImage;
   const VisualInspector({
     super.key,
@@ -37,6 +41,9 @@ class VisualInspector extends StatefulWidget {
     required this.onClose,
     required this.onReload,
     this.mobile = false,
+    this.preview,
+    this.location,
+    this.onSelectTarget,
     this.uploadImage,
   });
   @override
@@ -286,6 +293,16 @@ class _VisualInspectorState extends State<VisualInspector> {
                 ),
               if (target.kind == MiniAppEditKind.page) ...[
                 const Text('Your tab label stays the same.'),
+                const SizedBox(height: 20),
+                PageLayoutPicker(
+                  value: spec.page(target.id).layout,
+                  onChanged: session.conflict
+                      ? null
+                      : (layout) => change(
+                          'layout',
+                          (s) => editPage(s, target.id, {'layout': layout}),
+                        ),
+                ),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
                   title: const Text('Show date'),
@@ -300,33 +317,16 @@ class _VisualInspectorState extends State<VisualInspector> {
               ],
               if (target.kind == MiniAppEditKind.app) ...[
                 const SizedBox(height: 20),
-                const Text('Color palette'),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 8,
-                  children: [
-                    for (final theme in [
-                      'teal',
-                      'amber',
-                      'blue',
-                      'rose',
-                      'sage',
-                    ])
-                      ChoiceChip(
-                        label: Text(theme),
-                        selected: spec.theme == theme,
-                        onSelected: session.conflict
-                            ? null
-                            : (_) => change(
-                                'theme',
-                                (s) => {
-                                  'type': 'SetTheme',
-                                  'theme': theme,
-                                  'icon': s.icon,
-                                },
-                              ),
-                      ),
-                  ],
+                AppearanceEditor(
+                  spec: spec,
+                  preview: widget.preview,
+                  location: widget.location,
+                  enabled: !session.conflict,
+                  onChanged: (appearance) => change(
+                    'appearance',
+                    (_) => {'type': 'SetAppearance', 'appearance': appearance},
+                    immediate: false,
+                  ),
                 ),
                 const SizedBox(height: 20),
                 const Text('App icon'),
@@ -357,6 +357,36 @@ class _VisualInspectorState extends State<VisualInspector> {
                       ),
                   ],
                 ),
+                if (widget.onSelectTarget != null &&
+                    spec.views.any((view) => view.type == 'banner')) ...[
+                  const SizedBox(height: 20),
+                  const Text('Banners & images'),
+                  for (final banner in spec.views.where(
+                    (view) => view.type == 'banner',
+                  ))
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton.icon(
+                        onPressed: session.conflict
+                            ? null
+                            : () => widget.onSelectTarget!(
+                                MiniAppEditTarget(
+                                  MiniAppEditKind.section,
+                                  banner.id,
+                                  pageId: spec.navigation?.pages
+                                      .where(
+                                        (page) =>
+                                            page.viewIds.contains(banner.id),
+                                      )
+                                      .firstOrNull
+                                      ?.id,
+                                ),
+                              ),
+                        icon: const Icon(Icons.image_outlined, size: 18),
+                        label: Text('Edit ${banner.label}'),
+                      ),
+                    ),
+                ],
               ],
               if (section != null) ...[
                 ComponentOptionsEditor(

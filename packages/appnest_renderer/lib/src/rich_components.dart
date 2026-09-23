@@ -155,8 +155,9 @@ extension _RichComponents on _RichMiniAppRuntimeState {
       children: [
         Text(
           view.label,
-          style: Theme.of(context).textTheme.titleMedium
-              ?.copyWith(fontWeight: FontWeight.w700),
+          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+            fontWeight: spec.appearance == null ? FontWeight.w700 : null,
+          ),
         ),
         const SizedBox(height: 12),
         if (page.primaryActionId == null)
@@ -451,7 +452,7 @@ extension _RichComponents on _RichMiniAppRuntimeState {
     final locale = MaterialLocalizations.of(context);
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: EdgeInsets.all(_space(context, 16)),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -531,7 +532,9 @@ extension _RichComponents on _RichMiniAppRuntimeState {
                                             .colorScheme
                                             .primaryContainer
                                       : null,
-                                  borderRadius: BorderRadius.circular(8),
+                                  borderRadius: BorderRadius.circular(
+                                    _radius(context, 8),
+                                  ),
                                 ),
                                 child: Column(
                                   children: [
@@ -648,14 +651,15 @@ extension _RichComponents on _RichMiniAppRuntimeState {
     ];
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(20),
+        padding: EdgeInsets.all(_space(context, 20)),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text(
               _number(value),
-              style: Theme.of(context).textTheme.displaySmall
-                  ?.copyWith(fontWeight: FontWeight.w700),
+              style: Theme.of(context).textTheme.displaySmall?.copyWith(
+                fontWeight: spec.appearance == null ? FontWeight.w700 : null,
+              ),
             ),
             Text(
               '${view.options['metric'] ?? 'count'} · ${data['total']} matching records',
@@ -936,7 +940,7 @@ extension _RichComponents on _RichMiniAppRuntimeState {
                       color: candidates.isEmpty
                           ? Theme.of(context).colorScheme.surfaceContainerLow
                           : Theme.of(context).colorScheme.primaryContainer,
-                      borderRadius: BorderRadius.circular(12),
+                      borderRadius: BorderRadius.circular(_radius(context, 12)),
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -955,11 +959,13 @@ extension _RichComponents on _RichMiniAppRuntimeState {
                                 choices.any((c) => canMove(item, c)) ? 1 : 0,
                             feedback: Material(
                               elevation: 8,
-                              borderRadius: BorderRadius.circular(12),
+                              borderRadius: BorderRadius.circular(
+                                _radius(context, 12),
+                              ),
                               child: SizedBox(
                                 width: width,
                                 child: Padding(
-                                  padding: const EdgeInsets.all(20),
+                                  padding: EdgeInsets.all(_space(context, 20)),
                                   child: Text(
                                     '${item.data[view.titleFieldId] ?? 'Record'}',
                                   ),
@@ -990,7 +996,7 @@ extension _RichComponents on _RichMiniAppRuntimeState {
     if (view.type == 'richText')
       return Card(
         child: Padding(
-          padding: const EdgeInsets.all(20),
+          padding: EdgeInsets.all(_space(context, 20)),
           child: _FormattedText(view.options['markdown'] as String? ?? ''),
         ),
       );
@@ -1001,51 +1007,75 @@ extension _RichComponents on _RichMiniAppRuntimeState {
       'warning' => colors.secondaryContainer,
       _ => colors.primaryContainer,
     };
+    final foreground = switch (options['tone']) {
+      'success' => colors.onTertiaryContainer,
+      'warning' => colors.onSecondaryContainer,
+      _ => colors.onPrimaryContainer,
+    };
+    final text = Padding(
+      padding: EdgeInsets.all(_space(context, 24)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            options['title'] as String? ?? view.label,
+            style: Theme.of(context).textTheme.headlineSmall
+                ?.copyWith(color: spec.appearance == null ? null : foreground),
+          ),
+          if (options['body'] != null) ...[
+            const SizedBox(height: 8),
+            Text(
+              options['body'] as String,
+              style: spec.appearance == null
+                  ? null
+                  : TextStyle(color: foreground),
+            ),
+          ],
+          if (options['targetPageId'] != null) ...[
+            const SizedBox(height: 16),
+            FilledButton(
+              onPressed: () {
+                if (_VisualEditScope.of(context) == null)
+                  _navigate(MiniAppLocation(options['targetPageId'] as String));
+              },
+              child: Text(
+                'Open ${spec.page(options['targetPageId'] as String).title}',
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
     return Card(
       color: background,
       clipBehavior: Clip.antiAlias,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          if (options['imageAssetId'] != null)
-            _PrivateImage(
-              adapter: adapter,
-              assetId: options['imageAssetId'] as String,
-              label: options['imageAlt'] as String? ?? '',
-              height: 200,
-              thumbnail: false,
-            ),
-          Padding(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final beside =
+              options['imagePlacement'] == 'beside' &&
+              constraints.maxWidth >= 640 &&
+              MediaQuery.textScalerOf(context).scale(100) < 150;
+          final assetId = options['imageAssetId'] as String?;
+          Widget image() => _PrivateImage(
+            adapter: adapter,
+            assetId: assetId!,
+            label: options['imageAlt'] as String? ?? '',
+            height: beside ? 260 : 200,
+            thumbnail: false,
+          );
+          if (assetId != null && beside)
+            return Row(
+              key: ValueKey('banner-beside-${view.id}'),
               children: [
-                Text(
-                  options['title'] as String? ?? view.label,
-                  style: Theme.of(context).textTheme.headlineSmall,
-                ),
-                if (options['body'] != null) ...[
-                  const SizedBox(height: 8),
-                  Text(options['body'] as String),
-                ],
-                if (options['targetPageId'] != null) ...[
-                  const SizedBox(height: 16),
-                  FilledButton(
-                    onPressed: () {
-                      if (_VisualEditScope.of(context) == null)
-                        _navigate(
-                          MiniAppLocation(options['targetPageId'] as String),
-                        );
-                    },
-                    child: Text(
-                      'Open ${spec.page(options['targetPageId'] as String).title}',
-                    ),
-                  ),
-                ],
+                Expanded(child: image()),
+                Expanded(child: text),
               ],
-            ),
-          ),
-        ],
+            );
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [if (assetId != null) image(), text],
+          );
+        },
       ),
     );
   }

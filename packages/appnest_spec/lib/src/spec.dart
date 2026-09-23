@@ -19,6 +19,7 @@ class FieldSpec {
   FieldSpec(this.id, this.label, this.type, this.required, this.choices);
   factory FieldSpec.fromJson(Map<String, dynamic> j) {
     keys(j, {'id', 'label', 'type', 'required', 'choices'}, 'field');
+    final id = stableId(j['id']);
     final type = FieldType.values.where((t) => t.name == j['type']).firstOrNull;
     if (type == null) throw const SpecException('Unsupported field type');
     if (j['required'] is! bool)
@@ -29,11 +30,16 @@ class FieldSpec {
       30,
     ).map((c) => str(c, 'choice', max: 80)).toList();
     unique(choices, 'choices');
-    if ((type == FieldType.choice) != choices.isNotEmpty) {
-      throw const SpecException('Only choice fields require choices');
+    if (type == FieldType.choice && choices.isEmpty) {
+      throw SpecException('Choice field $id requires at least one choice.');
+    }
+    if (type != FieldType.choice && choices.isNotEmpty) {
+      throw SpecException(
+        'Field $id has type ${type.name}; only choice fields can define nonempty choices.',
+      );
     }
     return FieldSpec(
-      stableId(j['id']),
+      id,
       str(j['label'], 'label'),
       type,
       j['required'],
@@ -226,18 +232,29 @@ class PageSpec {
   final List<String> viewIds;
   final bool showDate;
   final String? primaryActionId;
+  final String? layout;
   const PageSpec(
     this.id,
     this.title,
     this.viewIds, {
     this.showDate = false,
     this.primaryActionId,
+    this.layout,
   });
   factory PageSpec.fromJson(Map<String, dynamic> j) {
-    keys(j, {'id', 'title', 'viewIds', 'showDate', 'primaryActionId'}, 'page');
+    keys(j, {
+      'id',
+      'title',
+      'viewIds',
+      'showDate',
+      'primaryActionId',
+      'layout',
+    }, 'page');
     if (j.containsKey('showDate') && j['showDate'] is! bool) {
       throw const SpecException('Page showDate must be boolean');
     }
+    if (j.containsKey('layout') && !pageLayouts.contains(j['layout']))
+      throw const SpecException('Choose an approved page layout');
     final ids = array(j['viewIds'], 'page views', 8).map(stableId).toList();
     if (ids.isEmpty)
       throw const SpecException('A page needs at least one view');
@@ -250,6 +267,7 @@ class PageSpec {
       primaryActionId: j['primaryActionId'] == null
           ? null
           : stableId(j['primaryActionId']),
+      layout: j['layout'] as String?,
     );
   }
   Map<String, dynamic> toJson() => {
@@ -258,6 +276,7 @@ class PageSpec {
     'viewIds': viewIds,
     if (showDate) 'showDate': true,
     if (primaryActionId != null) 'primaryActionId': primaryActionId,
+    if (layout != null) 'layout': layout,
   };
 }
 
@@ -521,6 +540,8 @@ const capabilities = {
   'assignment.v1',
   'notifications.inApp.v1',
   'navigation.v1',
+  'appearance.v1',
+  'navigation.layouts.v1',
   'views.configured.v1',
   'notifications.owner.v1',
   'automations.conditions.v1',
@@ -609,6 +630,7 @@ class AppSpec {
   final List<ActionSpec> actions;
   final List<AutomationSpec> automationRequests;
   final NavigationSpec? navigation;
+  final AppearanceSpec? appearance;
   AppSpec._(
     this.name,
     this.theme,
@@ -620,6 +642,7 @@ class AppSpec {
     this.actions,
     this.automationRequests,
     this.navigation,
+    this.appearance,
   );
   factory AppSpec.parse(String source) {
     if (utf8.encode(source).length > Limits.definitionBytes)
@@ -657,6 +680,7 @@ class AppSpec {
       'policyPresetRequest',
       'automationRequests',
       'navigation',
+      'appearance',
     }, 'AppSpec');
     if (j['formatVersion'] is! int || j['formatVersion'] != 1)
       throw const SpecException('Unsupported AppSpec format version');
@@ -736,10 +760,16 @@ class AppSpec {
       j['navigation'] == null
           ? null
           : NavigationSpec.fromJson(object(j['navigation'], 'navigation')),
+      j.containsKey('appearance')
+          ? AppearanceSpec.fromJson(object(j['appearance'], 'appearance'))
+          : null,
     );
     final needed = <String>{
       'collections.v1',
       if (spec.navigation != null) 'navigation.v1',
+      if (spec.appearance != null) 'appearance.v1',
+      if (spec.navigation?.pages.any((p) => p.layout != null) ?? false)
+        'navigation.layouts.v1',
     };
     for (final col in c) {
       needed.addAll(col.behaviors.map((b) => b.type));
@@ -748,6 +778,8 @@ class AppSpec {
     }
     for (final view in v) {
       needed.add('views.${view.type}.v1');
+      if (view.type == 'banner' && view.options.containsKey('imagePlacement'))
+        needed.add('appearance.v1');
       if (view.configured) needed.add('views.configured.v1');
       if (richViewTypes.contains(view.type) || view.options.isNotEmpty) {
         if (spec.navigation == null)
@@ -945,8 +977,11 @@ class AppSpec {
                   v.actionIds.contains(action.id) &&
                   (v.type == 'form' || v.formPageId != null),
             ))
-          throw const SpecException(
-            'Primary actions need a create action and a form destination',
+          throw SpecException(
+            'Page ${page.id} primaryActionId ${action.id} must reference a '
+            'records.create.v1 action. Include ${action.id} in actionIds of a '
+            'view on this page and set that view formPageId to its form page '
+            '(unless the view is itself a form).',
           );
       }
       final recordViews = pageViews.where(
@@ -989,6 +1024,7 @@ class AppSpec {
     'policyPresetRequest': policyPresetRequest,
     'automationRequests': automationRequests.map((x) => x.toJson()).toList(),
     if (navigation != null) 'navigation': navigation!.toJson(),
+    if (appearance != null) 'appearance': appearance!.toJson(),
   };
   String get canonical => canonicalJson(toJson());
   String get hash => hashJson(toJson());
@@ -1034,6 +1070,30 @@ class AppSpec {
     if (name != previous.name) result.add('Rename ${previous.name} to $name');
     if (theme != previous.theme || icon != previous.icon)
       result.add('Update app theme or icon');
+    if (canonicalJson(appearance?.toJson()) !=
+        canonicalJson(previous.appearance?.toJson())) {
+      result.add(
+        appearance == null
+            ? 'Restore original app appearance'
+            : appearance!.style != previous.appearance?.style
+            ? 'Change app style to ${appearance!.style}'
+            : 'Update app appearance',
+      );
+    }
+    for (final page in navigation?.pages ?? <PageSpec>[]) {
+      final old = previous.navigation?.pages
+          .where((p) => p.id == page.id)
+          .firstOrNull;
+      if (old != null && page.layout != old.layout) {
+        final label = switch (page.layout) {
+          'stacked' => 'Stacked',
+          'twoColumn' => 'Two columns',
+          'featuredFirst' => 'Featured first',
+          _ => 'Original',
+        };
+        result.add('Change ${page.title} layout to $label');
+      }
+    }
     if (canonicalJson(navigation?.toJson()) !=
         canonicalJson(previous.navigation?.toJson()))
       result.add('Update pages or tab navigation');
@@ -1050,6 +1110,18 @@ class AppSpec {
     if (canonicalJson(views.map((v) => v.toJson()).toList()) !=
         canonicalJson(previous.views.map((v) => v.toJson()).toList()))
       result.add('Update views or view order');
+    for (final view in views.where((v) => v.type == 'banner')) {
+      final old = previous.views.where((v) => v.id == view.id).firstOrNull;
+      if (old != null &&
+          view.options['imagePlacement'] != old.options['imagePlacement']) {
+        final label = switch (view.options['imagePlacement']) {
+          'beside' => 'Beside text',
+          'above' => 'Above text',
+          _ => 'Original',
+        };
+        result.add('Change ${view.label} image placement to $label');
+      }
+    }
     for (final action in actions) {
       final before = previous.actions
           .where((a) => a.id == action.id)
@@ -1281,6 +1353,17 @@ class AppSpec {
         keys(patch, {'type', 'theme', 'icon'}, 'SetTheme');
         j['theme'] = patch['theme'];
         if (patch.containsKey('icon')) j['icon'] = patch['icon'];
+      case 'SetAppearance':
+        keys(patch, {'type', 'appearance'}, 'SetAppearance');
+        if (!patch.containsKey('appearance'))
+          throw const SpecException('SetAppearance needs an appearance value');
+        if (patch['appearance'] == null) {
+          j.remove('appearance');
+        } else {
+          j['appearance'] = AppearanceSpec.fromJson(
+            object(patch['appearance'], 'appearance'),
+          ).toJson();
+        }
       case 'ReorderView':
         keys(patch, {'type', 'viewIds'}, 'ReorderView');
         final ids = array(
@@ -1307,6 +1390,39 @@ class AppSpec {
           requireCapability('automations.conditions.v1');
       default:
         throw const SpecException('Unsupported semantic patch');
+    }
+    // These presentation capabilities follow their actual use. Restoring one
+    // appearance option must not disable a different option that still uses it.
+    if ({
+      'SetAppearance',
+      'AddView',
+      'UpdateView',
+      'AddPage',
+      'UpdatePage',
+    }.contains(type)) {
+      void reconcileCapability(String capability, bool used) {
+        if (used) {
+          requireCapability(capability);
+        } else {
+          (j['requires'] as List).removeWhere((value) => value == capability);
+        }
+      }
+
+      reconcileCapability(
+        'appearance.v1',
+        j.containsKey('appearance') ||
+            (j['views'] as List).any(
+              (v) =>
+                  v['type'] == 'banner' &&
+                  (v['options'] as Map? ?? {}).containsKey('imagePlacement'),
+            ),
+      );
+      reconcileCapability(
+        'navigation.layouts.v1',
+        (j['navigation']?['pages'] as List? ?? []).any(
+          (p) => (p as Map).containsKey('layout'),
+        ),
+      );
     }
     return AppSpec.parse(jsonEncode(j));
   }
@@ -1348,13 +1464,15 @@ class RecordQuery {
           throw const SpecException(
             'Membership filters cannot include null; use equality for unset values',
           );
-        f['value'] = values.map(field.normalize).toList();
+        f['value'] = values
+            .map((value) => _normalizeFilter(field, value))
+            .toList();
       } else {
         if (op != 'eq' && f['value'] == null)
           throw const SpecException(
             'Only equality filters can compare unset values',
           );
-        f['value'] = field.normalize(f['value']);
+        f['value'] = _normalizeFilter(field, f['value']);
       }
     }
     final sorts = array(
@@ -1370,6 +1488,20 @@ class RecordQuery {
     }
     if (j['cursor'] != null) str(j['cursor'], 'cursor', max: 4096);
     return RecordQuery(filters, sorts, limit, j['cursor']);
+  }
+
+  static Object? _normalizeFilter(FieldSpec field, Object? value) {
+    try {
+      return field.normalize(value);
+    } on SpecException {
+      if (field.type != FieldType.timestamp || value == null) rethrow;
+      throw SpecException(
+        'Query filter ${field.id} needs a valid ISO timestamp with timezone. '
+        'For relative days, remove this query filter and set the view property '
+        'dateFilter: {"fieldId":"${field.id}","period":"today"} '
+        '(or period "overdue"). Relative words and date-only values are not timestamps.',
+      );
+    }
   }
 }
 

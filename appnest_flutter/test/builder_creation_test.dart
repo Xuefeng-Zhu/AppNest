@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:appnest_client/appnest_client.dart';
 import 'package:appnest_flutter/client.dart' as transport;
 import 'package:appnest_flutter/features/builder/builder_screen.dart';
+import 'package:appnest_flutter/features/builder/builder_chat.dart';
 import 'package:appnest_renderer/appnest_renderer.dart';
 import 'package:appnest_spec/appnest_spec.dart';
 import 'package:flutter/material.dart';
@@ -540,6 +541,12 @@ void main() {
       startFromScratch: true,
     );
     expect(find.byType(MiniAppRuntime), findsNothing);
+    expect(
+      find.text(
+        builderFailureMessage(client.current.diagnostics, hasPreview: false),
+      ),
+      findsNWidgets(2),
+    );
     expect(find.text('Try again'), findsOneWidget);
     client.current = draft(stage: 'queued', mutation: 2, jobId: 8);
     await tester.tap(find.text('Try again'));
@@ -563,6 +570,9 @@ void main() {
       initialPrompt: 'Make a team planner',
       startFromScratch: true,
     );
+    final original = tester
+        .widget<MiniAppRuntime>(find.byType(MiniAppRuntime))
+        .adapter;
     const request = 'Add another calendar';
     client.current = draft(
       spec: dailyPlannerTemplate(),
@@ -586,6 +596,15 @@ void main() {
     await tester.pump(const Duration(seconds: 2));
     await tester.pump(const Duration(milliseconds: 100));
     expect(find.byType(MiniAppRuntime), findsOneWidget);
+    expect(
+      tester.widget<MiniAppRuntime>(find.byType(MiniAppRuntime)).adapter,
+      same(original),
+    );
+    final failureMessage = builderFailureMessage(
+      client.current.diagnostics,
+      hasPreview: true,
+    );
+    expect(find.text(failureMessage), findsWidgets);
     expect(find.text(request), findsOneWidget);
     expect(tester.widget<TextField>(composer()).enabled, isNot(isFalse));
     expect(client.generations.single['startFromScratch'], true);
@@ -645,6 +664,50 @@ void main() {
       await tester.pumpAndSettle();
       await tester.ensureVisible(find.text('Review & publish'));
       expect(tester.takeException(), isNull);
+      await closeBuilder(tester);
+    },
+  );
+  testWidgets(
+    'JSON generation failure explains response problem without exposing repair instructions',
+    (tester) async {
+      const details =
+          'The AI response was not valid JSON. Return exactly one complete JSON object without commentary or markdown.';
+      const request = 'Create a custom reading journal';
+      client.current = draft(stage: 'queued', mutation: 1, jobId: 7);
+      await showBuilder(
+        tester,
+        initial: client.current,
+        initialPrompt: request,
+        startFromScratch: true,
+      );
+      client.current = draft(
+        stage: 'failed',
+        mutation: 1,
+        jobId: 7,
+        diagnostics: [details],
+      );
+      await tester.pump(const Duration(seconds: 2));
+      await tester.pump(const Duration(milliseconds: 100));
+      final message = builderFailureMessage([details], hasPreview: false);
+      expect(find.text(message), findsNWidgets(2));
+      expect(find.textContaining('simpler first version'), findsNothing);
+      expect(
+        find.textContaining('smaller, more specific request'),
+        findsNothing,
+      );
+      expect(find.text(details), findsNothing);
+      expect(find.byType(MiniAppRuntime), findsNothing);
+      final buildDetails = find.text('Build details');
+      await tester.ensureVisible(buildDetails);
+      await tester.tap(buildDetails);
+      await tester.pumpAndSettle();
+      expect(find.text(details), findsOneWidget);
+      final retry = find.text('Try again');
+      await tester.ensureVisible(retry);
+      client.current = draft(stage: 'queued', mutation: 2, jobId: 8);
+      await tester.tap(retry);
+      await tester.pump();
+      expect(client.generations.single['request'], request);
       await closeBuilder(tester);
     },
   );

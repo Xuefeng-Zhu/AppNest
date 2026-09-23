@@ -48,7 +48,7 @@ class _VisualEditScope extends InheritedWidget {
 class _EditTarget extends StatelessWidget {
   final MiniAppEditTarget target;
   final Widget child;
-  const _EditTarget({required this.target, required this.child});
+  const _EditTarget({super.key, required this.target, required this.child});
   @override
   Widget build(BuildContext context) {
     final edit = _VisualEditScope.of(context);

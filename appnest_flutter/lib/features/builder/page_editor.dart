@@ -1,13 +1,23 @@
 import 'package:appnest_spec/appnest_spec.dart';
+import 'package:appnest_renderer/appnest_renderer.dart';
 import 'package:flutter/material.dart';
 
+import 'appearance_editor.dart';
 import 'component_options_editor.dart';
 
 /// Edits semantic definitions; no widget code or executable expressions.
 class PageEditor extends StatefulWidget {
   final AppSpec spec;
+  final PreviewRuntimeAdapter? preview;
+  final MiniAppLocation? location;
   final Future<String?> Function()? uploadImage;
-  const PageEditor({super.key, required this.spec, this.uploadImage});
+  const PageEditor({
+    super.key,
+    required this.spec,
+    this.uploadImage,
+    this.preview,
+    this.location,
+  });
   @override
   State<PageEditor> createState() => _PageEditorState();
 }
@@ -15,7 +25,8 @@ class PageEditor extends StatefulWidget {
 class _PageEditorState extends State<PageEditor> {
   String mode = 'Pages';
   String? selectedPage, selectedView, primaryAction, entryPage;
-  String theme = 'teal', icon = 'spark';
+  String? pageLayout;
+  Map<String, dynamic>? appearance;
   String viewType = 'list', collectionId = '';
   String? presentation = 'compact';
   String? titleField, groupField, detailPage, formPage;
@@ -40,8 +51,7 @@ class _PageEditorState extends State<PageEditor> {
   @override
   void initState() {
     super.initState();
-    theme = spec.theme;
-    icon = spec.icon;
+    appearance = spec.appearance?.toJson();
     final nav = spec.navigation;
     entryPage = nav?.entryPageId;
     pageOrder.addAll(nav?.pages.map((p) => p.id) ?? []);
@@ -67,6 +77,7 @@ class _PageEditorState extends State<PageEditor> {
       ..clear()
       ..addAll(p?.viewIds ?? []);
     showDate = p?.showDate ?? false;
+    pageLayout = p?.layout;
     addTab = false;
     primaryAction = p?.primaryActionId;
     failure = null;
@@ -236,6 +247,7 @@ class _PageEditorState extends State<PageEditor> {
             'title': title.text.trim(),
             'viewIds': sectionIds,
             'showDate': showDate,
+            if (pageLayout != null) 'layout': pageLayout,
             if (primaryAction != null) 'primaryActionId': primaryAction,
           };
           patch = selectedPage == null
@@ -318,7 +330,7 @@ class _PageEditorState extends State<PageEditor> {
             ? {'type': 'AddView', 'view': view}
             : {'type': 'UpdateView', 'viewId': selectedView, 'view': view};
       default:
-        patch = {'type': 'SetTheme', 'theme': theme, 'icon': icon};
+        patch = {'type': 'SetAppearance', 'appearance': appearance};
     }
     try {
       var nextId = 0;
@@ -456,6 +468,11 @@ class _PageEditorState extends State<PageEditor> {
           (v) => primaryAction = v,
           nullable: true,
         ),
+        PageLayoutPicker(
+          value: pageLayout,
+          onChanged: (value) => setState(() => pageLayout = value),
+        ),
+        const SizedBox(height: 20),
         const Text('Page sections · displayed in this order'),
         _ordered(sectionIds, {
           for (final v in spec.views) v.id: '${v.label} (${v.type})',
@@ -848,23 +865,12 @@ class _PageEditorState extends State<PageEditor> {
               'Pages' => _pages(),
               'Views' => _views(),
               'Navigation' => _navigation(),
-              _ => Column(
-                children: [
-                  _select('Color theme', theme, const {
-                    'teal': 'Teal',
-                    'blue': 'Blue',
-                    'amber': 'Amber',
-                    'rose': 'Rose',
-                    'sage': 'Sage',
-                  }, (v) => theme = v!),
-                  _select('App icon', icon, const {
-                    'book': 'Book',
-                    'board': 'Board',
-                    'people': 'People',
-                    'spark': 'Spark',
-                    'check': 'Check',
-                  }, (v) => icon = v!),
-                ],
+              _ => AppearanceEditor(
+                spec: spec,
+                initialValue: appearance,
+                preview: widget.preview,
+                location: widget.location,
+                onChanged: (next) => appearance = next,
               ),
             },
             if (failure != null)

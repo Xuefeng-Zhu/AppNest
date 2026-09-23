@@ -401,6 +401,49 @@ class Worker {
       'run_complete run_id=$runId status=${run.status} lag_seconds=${clock().difference(run.dueAt).inSeconds}',
     );
   });
+  static const _repairUsageKey = '_appnestRepair';
+
+  static Map<String, dynamic> _generationUsage(String source) {
+    try {
+      final value = jsonDecode(source);
+      if (value is Map<String, dynamic>) return value;
+    } on FormatException {
+      // Old or malformed usage metadata must never prevent a safe retry.
+    }
+    return {};
+  }
+
+  static String _withoutRepair(String source) => jsonEncode(
+    _generationUsage(source)..remove(_repairUsageKey),
+  );
+
+  static String? _rejectedOutput(
+    GenerationJob job,
+    AppDraft draft,
+    AppSpec base,
+  ) {
+    final repair = _generationUsage(job.usageJson)[_repairUsageKey];
+    if (repair is! Map ||
+        repair['jobId'] != job.id ||
+        repair['draftId'] != draft.id ||
+        repair['mutation'] != job.mutation ||
+        repair['mutation'] != draft.mutation ||
+        repair['baseCandidateHash'] != base.hash ||
+        repair['baseCandidateHash'] != draft.candidateHash ||
+        repair['baseVersionId'] != draft.baseVersionId ||
+        repair['mode'] != job.mode ||
+        repair['attempt'] != job.attempts - 1) {
+      return null;
+    }
+    final output = repair['output'];
+    if (output is! String ||
+        output.isEmpty ||
+        utf8.encode(output).length > Limits.definitionBytes) {
+      return null;
+    }
+    return output;
+  }
+
   static Future<void> generate(
     Session s,
     int id, {
@@ -430,12 +473,14 @@ class Worker {
           d.baseVersionId != app.activeVersionId ||
           !await hasAccess(s, app, j.actorId, tx, builder: true)) {
         j.status = 'stale';
+        j.usageJson = _withoutRepair(j.usageJson);
         await GenerationJob.db.updateRow(s, j, transaction: tx);
         return null;
       }
       if (j.attempts >= Limits.generationAttempts) {
         j.status = 'failed';
         j.diagnostics = 'Generation attempt limit reached.';
+        j.usageJson = _withoutRepair(j.usageJson);
         await GenerationJob.db.updateRow(s, j, transaction: tx);
         return null;
       }
@@ -453,6 +498,7 @@ class Worker {
     AiResult? result;
     String? error;
     String? errorKind;
+    String? baseCandidateHash;
     try {
       final ai = provider ?? ChatCompletionProvider.configured(s);
       if (ai == null) {
@@ -462,11 +508,13 @@ class Worker {
         );
       }
       final base = AppSpec.parse(draft.candidateJson);
+      baseCandidateHash = base.hash;
       result = await ai.generate(
         job.requestText,
         base,
         editing: job.mode == 'edit',
         diagnostics: job.diagnostics.isEmpty ? [] : [job.diagnostics],
+        rejectedOutput: _rejectedOutput(job, draft, base),
       );
       await s.db.unsafeExecute(
         'UPDATE nest_generation SET status=\'validating\' WHERE id=@id AND "leaseGeneration"=@lease',
@@ -494,6 +542,14 @@ class Worker {
         if (errors.isNotEmpty) throw SpecException(errors.join(' '));
       } else {
         candidate = AppSpec.parse(jsonEncode(output));
+        // Fresh AI apps get a finished default design. Existing definitions and
+        // edit jobs keep their exact presentation unless explicitly changed.
+        if (candidate.appearance == null) {
+          candidate = candidate.patch({
+            'type': 'SetAppearance',
+            'appearance': {'style': 'clean'},
+          }, () => throw StateError('Appearance must not allocate IDs'));
+        }
       }
     } on AiResponseException catch (e) {
       error = e.message;
@@ -527,6 +583,7 @@ class Worker {
           d == null ||
           d.activeJobId != id ||
           d.mutation != job.mutation ||
+          d.candidateHash != draft.candidateHash ||
           d.baseVersionId != app.activeVersionId ||
           !await hasAccess(s, app, job.actorId, tx, builder: true);
       if (!stale && candidate != null && error == null) {
@@ -551,7 +608,34 @@ class Worker {
       j.diagnostics = error ?? '';
       j.provider = result?.provider;
       j.model = result?.model;
-      j.usageJson = jsonEncode(result?.usage ?? {});
+      // Provider metadata cannot supply or retain our private repair context.
+      final usage = Map<String, dynamic>.from(result?.usage ?? {})
+        ..remove(_repairUsageKey);
+      final output = result?.text;
+      if (j.status == 'queued' &&
+          {
+            'output_json',
+            'output_shape',
+            'spec_validation',
+            'value_format',
+            'media_reference',
+          }.contains(errorKind) &&
+          baseCandidateHash != null &&
+          output != null &&
+          output.isNotEmpty &&
+          utf8.encode(output).length <= Limits.definitionBytes) {
+        usage[_repairUsageKey] = {
+          'jobId': j.id,
+          'draftId': draft.id,
+          'mutation': job.mutation,
+          'baseCandidateHash': baseCandidateHash,
+          'baseVersionId': draft.baseVersionId,
+          'mode': job.mode,
+          'attempt': j.attempts,
+          'output': output,
+        };
+      }
+      j.usageJson = jsonEncode(usage);
       j.leaseUntil = null;
       j.nextAttemptAt = clock().add(Duration(seconds: 1 << j.attempts));
       j.updatedAt = clock();

@@ -416,7 +416,16 @@ void main() {
           ],
         },
       ),
-      invalid,
+      throwsA(
+        isA<SpecException>().having(
+          (error) => error.message,
+          'workflow form repair instruction',
+          allOf(
+            contains('Form editor'),
+            contains('workflow-managed field status'),
+          ),
+        ),
+      ),
     );
     // Control bounds do not change stored-value validity or clamp old data.
     expect(habits.collection('checkins').field('minutes').normalize(500), 500);
@@ -525,6 +534,29 @@ void main() {
   });
 
   test('drag boards cannot bypass workflow bindings or permission actions', () {
+    expect(
+      () => mutate(projects, 'taskBoard', (v) => v.remove('groupByFieldId')),
+      throwsA(
+        isA<SpecException>().having(
+          (e) => e.message,
+          'message',
+          contains('Board taskBoard needs groupByFieldId'),
+        ),
+      ),
+    );
+    expect(
+      () => mutate(projects, 'taskBoard', (v) => v['actionIds'] = <String>[]),
+      throwsA(
+        isA<SpecException>().having(
+          (e) => e.message,
+          'message',
+          allOf(
+            contains('View taskBoard must include action'),
+            contains('in actionIds'),
+          ),
+        ),
+      ),
+    );
     expect(
       () => mutate(
         projects,

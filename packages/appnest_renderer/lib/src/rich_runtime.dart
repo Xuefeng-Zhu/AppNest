@@ -618,26 +618,32 @@ class _RichMiniAppRuntimeState extends State<_RichMiniAppRuntime>
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = ColorScheme.fromSeed(
-      seedColor: _appColor(spec.theme),
-      brightness: Theme.of(context).brightness,
-    );
-    final theme = Theme.of(context).copyWith(
-      colorScheme: colorScheme,
-      inputDecorationTheme: InputDecorationTheme(
-        filled: true,
-        fillColor: colorScheme.surfaceContainerLowest,
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: BorderSide.none,
-        ),
-      ),
-      cardTheme: CardThemeData(
-        elevation: 0,
-        color: colorScheme.surfaceContainerLowest,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      ),
-    );
+    final colorScheme = spec.appearance != null
+        ? Theme.of(context).colorScheme
+        : ColorScheme.fromSeed(
+            seedColor: _appColor(spec.theme),
+            brightness: Theme.of(context).brightness,
+          );
+    final theme = spec.appearance != null
+        ? Theme.of(context)
+        : Theme.of(context).copyWith(
+            colorScheme: colorScheme,
+            inputDecorationTheme: InputDecorationTheme(
+              filled: true,
+              fillColor: colorScheme.surfaceContainerLowest,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: BorderSide.none,
+              ),
+            ),
+            cardTheme: CardThemeData(
+              elevation: 0,
+              color: colorScheme.surfaceContainerLowest,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+              ),
+            ),
+          );
     return Theme(
       data: theme,
       child: Builder(
@@ -750,7 +756,12 @@ class _RichMiniAppRuntimeState extends State<_RichMiniAppRuntime>
       bucket: _storage,
       child: SingleChildScrollView(
         key: PageStorageKey('page-${page.id}-${_location.recordId ?? "root"}'),
-        padding: const EdgeInsets.fromLTRB(24, 24, 24, 32),
+        padding: EdgeInsets.fromLTRB(
+          _space(context, 24),
+          _space(context, 24),
+          _space(context, 24),
+          _space(context, 32),
+        ),
         child: Align(
           alignment: Alignment.topCenter,
           child: ConstrainedBox(
@@ -798,7 +809,11 @@ class _RichMiniAppRuntimeState extends State<_RichMiniAppRuntime>
                           child: Text(
                             page.title,
                             style: Theme.of(context).textTheme.headlineMedium
-                                ?.copyWith(fontWeight: FontWeight.w700),
+                                ?.copyWith(
+                                  fontWeight: spec.appearance == null
+                                      ? FontWeight.w700
+                                      : null,
+                                ),
                           ),
                         ),
                       ],
@@ -811,11 +826,11 @@ class _RichMiniAppRuntimeState extends State<_RichMiniAppRuntime>
                       ),
                   ],
                 ),
-                const SizedBox(height: 24),
+                SizedBox(height: _space(context, 24)),
                 if (_error != null)
                   Card(
                     child: Padding(
-                      padding: const EdgeInsets.all(24),
+                      padding: EdgeInsets.all(_space(context, 24)),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
@@ -847,18 +862,7 @@ class _RichMiniAppRuntimeState extends State<_RichMiniAppRuntime>
                     ),
                   )
                 else
-                  for (final id in page.viewIds)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 24),
-                      child: _EditTarget(
-                        target: MiniAppEditTarget(
-                          MiniAppEditKind.section,
-                          id,
-                          pageId: page.id,
-                        ),
-                        child: _section(context, spec.view(id)),
-                      ),
-                    ),
+                  _pageSections(context),
               ],
             ),
           ),
@@ -866,6 +870,68 @@ class _RichMiniAppRuntimeState extends State<_RichMiniAppRuntime>
       ),
     );
   }
+
+  Widget _pageSections(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) {
+      final gap = _space(context, 24);
+      final paired =
+          (page.layout == 'twoColumn' || page.layout == 'featuredFirst') &&
+          constraints.maxWidth >= 960 &&
+          MediaQuery.textScalerOf(context).scale(100) < 150;
+      final views = page.viewIds.map(spec.view).toList();
+      Widget section(ViewSpec view) => _EditTarget(
+        key: ValueKey('section-${view.id}'),
+        target: MiniAppEditTarget(
+          MiniAppEditKind.section,
+          view.id,
+          pageId: page.id,
+        ),
+        child: _section(context, view),
+      );
+      bool fullWidth(ViewSpec view) =>
+          {
+            'table',
+            'calendar',
+            'board',
+            'form',
+            'details',
+          }.contains(view.type) ||
+          _location.recordId != null;
+      final rows = <Widget>[];
+      for (var index = 0; index < views.length; index++) {
+        final first = views[index];
+        final canPair =
+            paired &&
+            !(index == 0 && page.layout == 'featuredFirst') &&
+            !fullWidth(first) &&
+            index + 1 < views.length &&
+            !fullWidth(views[index + 1]);
+        rows.add(
+          Padding(
+            padding: EdgeInsets.only(bottom: gap),
+            child: canPair
+                ? Row(
+                    key: ValueKey('section-pair-${first.id}'),
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(child: section(first)),
+                      SizedBox(width: gap),
+                      Expanded(child: section(views[++index])),
+                    ],
+                  )
+                : section(first),
+          ),
+        );
+      }
+      return FocusTraversalGroup(
+        policy: ReadingOrderTraversalPolicy(),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: rows,
+        ),
+      );
+    },
+  );
 
   Widget _section(BuildContext context, ViewSpec view) {
     if (view.type == 'form') {
@@ -919,8 +985,9 @@ class _RichMiniAppRuntimeState extends State<_RichMiniAppRuntime>
       children: [
         Text(
           view.label,
-          style: Theme.of(context).textTheme.titleMedium
-              ?.copyWith(fontWeight: FontWeight.w700),
+          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+            fontWeight: spec.appearance == null ? FontWeight.w700 : null,
+          ),
         ),
         const SizedBox(height: 12),
         if (page.primaryActionId == null) ...[
@@ -1018,7 +1085,7 @@ class _RichMiniAppRuntimeState extends State<_RichMiniAppRuntime>
           else if (stored.records!.items.isEmpty)
             Card(
               child: Padding(
-                padding: const EdgeInsets.all(24),
+                padding: EdgeInsets.all(_space(context, 24)),
                 child: Row(
                   children: [
                     Icon(
@@ -1159,14 +1226,15 @@ class _RichMiniAppRuntimeState extends State<_RichMiniAppRuntime>
     String collectionLabel,
   ) => Card(
     child: Padding(
-      padding: const EdgeInsets.all(20),
+      padding: EdgeInsets.all(_space(context, 20)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(
             '${summary.total}',
-            style: Theme.of(context).textTheme.displaySmall
-                ?.copyWith(fontWeight: FontWeight.w700),
+            style: Theme.of(context).textTheme.displaySmall?.copyWith(
+              fontWeight: spec.appearance == null ? FontWeight.w700 : null,
+            ),
           ),
           Text(collectionLabel),
           const SizedBox(height: 20),
@@ -1368,7 +1436,7 @@ class _RichMiniAppRuntimeState extends State<_RichMiniAppRuntime>
         : view.fieldIds.map(collection.field);
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(24),
+        padding: EdgeInsets.all(_space(context, 24)),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -1392,12 +1460,12 @@ class _RichMiniAppRuntimeState extends State<_RichMiniAppRuntime>
             const SizedBox(height: 24),
             if (item.capacity != null)
               Padding(
-                padding: const EdgeInsets.only(bottom: 20),
+                padding: EdgeInsets.only(bottom: _space(context, 20)),
                 child: CapacitySummary(item: item),
               ),
             for (final field in fields.where((f) => f.id != view.titleFieldId))
               Padding(
-                padding: const EdgeInsets.only(bottom: 20),
+                padding: EdgeInsets.only(bottom: _space(context, 20)),
                 child: _editableField(
                   context,
                   view,
@@ -1434,7 +1502,7 @@ class _RichMiniAppRuntimeState extends State<_RichMiniAppRuntime>
             if (_reminder != null)
               for (final reminder in _reminder!)
                 Padding(
-                  padding: const EdgeInsets.only(bottom: 20),
+                  padding: EdgeInsets.only(bottom: _space(context, 20)),
                   child: Text(_reminderText(reminder)),
                 ),
             Wrap(
