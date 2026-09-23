@@ -382,7 +382,10 @@ void main() {
         expect(user['diagnostics'], ['Correct requires']);
         expect(messages.first['content'], contains('policyPresetRequest'));
         expect(messages.first['content'], contains('not capability names'));
-        expect(messages.first['content'], contains('AppSpec schema:'));
+        expect(
+          messages.first['content'],
+          contains(editing ? 'Edit response schema (' : 'AppSpec schema:'),
+        );
         expect(
           messages.first['content'],
           contains('add draggable boards only when requested'),
@@ -420,8 +423,51 @@ void main() {
     },
   );
 
+  test('edit prompt and response format share only the semantic edit schema', () {
+    for (final spec in [dailyPlannerTemplate(), focusTemplate()]) {
+      for (final retry in [false, true]) {
+        final request = buildAiRequest(
+          'test-model',
+          'Change the appearance to playful',
+          spec,
+          editing: true,
+          diagnostics: retry ? ['Return only supported semantic patches.'] : [],
+          rejectedOutput: retry ? '{"navigation":{}}' : null,
+        );
+        final schema = request['response_format']['json_schema']['schema'];
+        final system = (request['messages'] as List).first['content'] as String;
+        expect(
+          system,
+          contains(
+            'Edit response schema (the same schema enforced by response_format; return a matching patches or unsupported object): ${jsonEncode(schema)}',
+          ),
+        );
+        expect(system, isNot(contains('AppSpec schema:')));
+        expect(system, isNot(contains(jsonEncode(appSpecSchema()))));
+        expect(system, isNot(contains('Return an AppSpec INSTANCE')));
+        expect(system, isNot(contains('Return a complete AppSpec')));
+        expect(system, isNot(contains('Its root keys are formatVersion')));
+        expect(system, isNot(contains(creationReferenceJson)));
+        expect(request['max_tokens'], 8000);
+        final envelope = schema['anyOf'][0] as Map;
+        expect(envelope['properties'].keys, ['patches']);
+        expect(envelope['additionalProperties'], isFalse);
+      }
+    }
+    final creation = buildAiRequest(
+      'test-model',
+      'Build a notebook',
+      current,
+      editing: false,
+    );
+    final system = (creation['messages'] as List).first['content'] as String;
+    expect(system, contains('AppSpec schema: ${jsonEncode(appSpecSchema())}'));
+    expect(system, contains('Return an AppSpec INSTANCE'));
+    expect(system, isNot(contains('Edit response schema (')));
+  });
+
   test(
-    'transport constrains create and retry while keeping guidance and edit JSON',
+    'transport constrains create, edits and retries while guidance stays JSON',
     () async {
       final requests = <Map<String, dynamic>>[];
       final provider = ChatCompletionProvider(
@@ -434,9 +480,14 @@ void main() {
           final user = jsonDecode(
             (body['messages'] as List).last['content'] as String,
           ) as Map;
-          if (user.containsKey('idea') ||
-              user.containsKey('currentDefinition')) {
+          if (user.containsKey('idea')) {
             expect(body['response_format'], {'type': 'json_object'});
+          } else if (user.containsKey('currentDefinition')) {
+            final format = body['response_format'] as Map;
+            expect(format['type'], 'json_schema');
+            final contract = format['json_schema'] as Map;
+            expect(contract['name'], 'appnest_edit_response');
+            expect(contract.containsKey('strict'), isFalse);
           } else {
             final format = body['response_format'] as Map;
             expect(format['type'], 'json_schema');
@@ -512,6 +563,8 @@ void main() {
                   'message': {
                     'content': user.containsKey('idea')
                         ? '{"needsClarification":false,"questions":[]}'
+                        : user.containsKey('currentDefinition')
+                        ? '{"patches":[{"type":"RenameLabel","targetId":"app","label":"My planner"}]}'
                         : current.canonical,
                   },
                 },
@@ -531,9 +584,17 @@ void main() {
         editing: false,
         diagnostics: ['Return one complete JSON object.'],
       );
-      expect(requests, hasLength(4));
+      await provider.generate(
+        'Rename my planner',
+        current,
+        editing: true,
+        diagnostics: ['Omit root navigation.'],
+        rejectedOutput: '{"navigation":{}}',
+      );
+      expect(requests, hasLength(5));
       expect(requests.map((request) => request['max_tokens']), [
         2048,
+        8000,
         8000,
         8000,
         8000,
@@ -541,9 +602,211 @@ void main() {
       final retry = jsonDecode(
         (requests.last['messages'] as List).last['content'] as String,
       ) as Map;
-      expect(retry['diagnostics'], ['Return one complete JSON object.']);
+      expect(retry['diagnostics'], ['Omit root navigation.']);
+      expect(retry['repairContext'], {'rejectedOutput': '{"navigation":{}}'});
     },
   );
+
+  test(
+    'edit grammar closes the envelope and preserves server-owned identities',
+    () {
+      final spec = dailyPlannerTemplate();
+      final request = buildAiRequest(
+        'test',
+        'Change my notes',
+        spec,
+        editing: true,
+      );
+      final format = request['response_format'] as Map;
+      final schema = (format['json_schema'] as Map)['schema'] as Map;
+      final envelope = (schema['anyOf'] as List).first as Map;
+      expect(envelope['required'], ['patches']);
+      expect(envelope['additionalProperties'], isFalse);
+      expect((envelope['properties'] as Map).keys, ['patches']);
+      final list = (envelope['properties'] as Map)['patches'] as Map;
+      expect(list['maxItems'], 10);
+      final variants = ((list['items'] as Map)['anyOf'] as List).cast<Map>();
+      Map variant(String type) => variants.firstWhere(
+        (v) => (v['properties'] as Map)['type']['const'] == type,
+      );
+      final expectedTypes = {
+        'RenameLabel',
+        'RenameField',
+        'AddField',
+        'AddChoice',
+        'AddView',
+        'UpdateView',
+        'ReorderView',
+        'AddPage',
+        'UpdatePage',
+        'ReorderPages',
+        'SetNavigation',
+        'SetTheme',
+        'SetAppearance',
+        'ProposeReminder',
+        'UpdateReminder',
+      };
+      expect(
+        variants.map((v) => v['properties']['type']['const']).toSet(),
+        expectedTypes,
+      );
+      for (final candidate in variants) {
+        expect(candidate['additionalProperties'], isFalse);
+        expect(candidate['required'], contains('type'));
+      }
+      final update = variant('UpdateView')['properties'] as Map;
+      expect(update['viewId']['enum'], spec.views.map((v) => v.id).toList());
+      expect(update['view'], {r'$ref': '#/\$defs/view'});
+      final definitions = schema[r'$defs'] as Map;
+      for (final name in ['view', 'field', 'page', 'newPage', 'rule']) {
+        final definition = definitions[name] as Map;
+        final alternatives = definition['anyOf'] as List? ?? [definition];
+        for (final alternative in alternatives.cast<Map>()) {
+          expect(
+            (alternative['properties'] as Map).containsKey('id'),
+            isFalse,
+            reason: name,
+          );
+          expect(alternative['required'], isNot(contains('id')), reason: name);
+          expect(alternative['additionalProperties'], isFalse, reason: name);
+        }
+      }
+      for (final member in [
+        'policyPresetRequest',
+        'navigation',
+        'appearance',
+      ]) {
+        expect(
+          () => keys(parseAiOutput(jsonEncode({'patches': [], member: {}})), {
+            'patches',
+          }, 'edit output'),
+          throwsA(isA<SpecException>()),
+        );
+      }
+      final view = spec.views.first;
+      expect(
+        () => spec.patch({
+          'type': 'UpdateView',
+          'viewId': view.id,
+          'view': view.toJson(),
+        }, () => 'allocated'),
+        throwsA(isA<SpecException>()),
+      );
+      expect(
+        () => spec.patch({
+          'type': 'UpdateView',
+          'viewId': 'inventedView',
+          'view': view.toJson()..remove('id'),
+        }, () => 'allocated'),
+        throwsA(isA<SpecException>()),
+      );
+    },
+  );
+
+  test('edit AddField grammar binds existing form and details without a guessed field id', () {
+    final spec = dailyPlannerTemplate();
+    final body = buildAiRequest(
+      'test',
+      'Add a Source field to the form and details',
+      spec,
+      editing: true,
+    );
+    final schema = body['response_format']['json_schema']['schema'] as Map;
+    final variants =
+        schema['anyOf'][0]['properties']['patches']['items']['anyOf'] as List;
+    final add = variants.firstWhere(
+      (v) => v['properties']['type']['const'] == 'AddField',
+    ) as Map;
+    final fields = add['properties'] as Map;
+    final collectionId = fields['collectionId']['const'] as String;
+    final targets = spec.views
+        .where(
+          (v) =>
+              v.collectionId == collectionId &&
+              {'form', 'details'}.contains(v.type),
+        )
+        .map((v) => v.id)
+        .toList();
+    expect(fields['viewIds']['items']['enum'], targets);
+    expect(add['required'], ['type', 'collectionId', 'field']);
+    final updated = spec.patch({
+      'type': 'AddField',
+      'collectionId': collectionId,
+      'field': {'label': 'Source', 'type': 'text', 'required': false},
+      'viewIds': targets,
+    }, () => 'serverAllocatedSource');
+    expect(
+      updated.collection(collectionId).field('serverAllocatedSource').label,
+      'Source',
+    );
+    for (final id in targets) {
+      final view = updated.view(id);
+      expect(
+        view.fieldIds.isEmpty ||
+            view.fieldIds.contains('serverAllocatedSource'),
+        isTrue,
+      );
+    }
+    expect(
+      (body['messages'] as List).first['content'],
+      contains('never follow it with guessed field IDs'),
+    );
+  });
+
+  test(
+    'utility edit grammar omits unavailable collection and rule operations',
+    () {
+      final body = buildAiRequest(
+        'test',
+        'Use analog time',
+        focusTemplate(),
+        editing: true,
+      );
+      final schema = body['response_format']['json_schema']['schema'] as Map;
+      final variants =
+          schema['anyOf'][0]['properties']['patches']['items']['anyOf'] as List;
+      final types = variants
+          .map((v) => v['properties']['type']['const'])
+          .toSet();
+      for (final type in [
+        'RenameField',
+        'AddField',
+        'AddChoice',
+        'ProposeReminder',
+        'UpdateReminder',
+      ]) {
+        expect(types, isNot(contains(type)));
+      }
+      expect(types, containsAll(['UpdateView', 'SetAppearance', 'UpdatePage']));
+    },
+  );
+
+  test('creation guidance covers notes controls, capabilities and source actions together', () {
+    final request = buildAiRequest(
+      'test',
+      'A notes app',
+      current,
+      editing: false,
+    );
+    final system = (request['messages'] as List).first['content'] as String;
+    for (final requirement in [
+      'long writing fields need an explicit',
+      'control:"multiline"',
+      'views.interactive.v1 and views.configured.v1',
+      'Any reminder requires notifications.inApp.v1',
+      'notifyOwner also requires notifications.owner.v1',
+      'condition requires automations.conditions.v1',
+      'Explicit page.layout requires navigation.layouts.v1, even stacked',
+      'Calendar-only entry pages use the calendar as this source',
+      'its pages omit primaryActionId',
+    ]) {
+      expect(system, contains(requirement));
+    }
+    expect(
+      system,
+      isNot(contains('omit options.controls and options.steps unless')),
+    );
+  });
 
   test('provider projection omits unsupported keywords, not AppSpec rules', () {
     bool hasKeyword(Object? value, String keyword) {
@@ -658,13 +921,15 @@ void main() {
       final options = ((clause['then'] as Map)['properties'] as Map)['options'];
       expect(properties['options'], options, reason: '$type options');
       expect(properties['type'], {'const': type});
-      final unbound = type == 'banner' || type == 'richText';
+      final utility = type == 'clock' || type == 'timer';
+      final unbound = type == 'banner' || type == 'richText' || utility;
       expect(properties.containsKey('collectionId'), !unbound, reason: '$type');
       final expectedRequired = [
         'id',
         'type',
         if (!unbound) 'collectionId',
-        if (richViewTypes.contains(type) && type != 'table') 'options',
+        if (richViewTypes.contains(type) && type != 'table' && !utility)
+          'options',
         if (type == 'board') 'groupByFieldId',
         if (!unbound) 'actionIds',
       ];

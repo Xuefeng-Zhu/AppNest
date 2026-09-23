@@ -44,6 +44,8 @@ import 'entity_record.dart' as _iy0qwluf;
 import 'field_value.dart' as _iyrqavho;
 import 'future_calls_generated_models/nest_worker_future_call_execute_model.dart'
     as _i2npzse7;
+import 'future_calls_generated_models/nest_worker_future_call_generate_model.dart'
+    as _i7d9xtt1;
 import 'generation_job.dart' as _ig17l95t;
 import 'greetings/greeting.dart' as _izw8z7ou;
 import 'guidance_question.dart' as _istc82cm;
@@ -2643,6 +2645,9 @@ class Protocol extends _is.DatabaseSerializationManager {
     if (t == _i2npzse7.NestWorkerFutureCallExecuteModel) {
       return _i2npzse7.NestWorkerFutureCallExecuteModel.fromJson(data) as T;
     }
+    if (t == _i7d9xtt1.NestWorkerFutureCallGenerateModel) {
+      return _i7d9xtt1.NestWorkerFutureCallGenerateModel.fromJson(data) as T;
+    }
     if (t == _ig17l95t.GenerationJob) {
       return _ig17l95t.GenerationJob.fromJson(data) as T;
     }
@@ -2786,6 +2791,12 @@ class Protocol extends _is.DatabaseSerializationManager {
     if (t == _is.getType<_i2npzse7.NestWorkerFutureCallExecuteModel?>()) {
       return (data != null
               ? _i2npzse7.NestWorkerFutureCallExecuteModel.fromJson(data)
+              : null)
+          as T;
+    }
+    if (t == _is.getType<_i7d9xtt1.NestWorkerFutureCallGenerateModel?>()) {
+      return (data != null
+              ? _i7d9xtt1.NestWorkerFutureCallGenerateModel.fromJson(data)
               : null)
           as T;
     }
@@ -2995,6 +3006,8 @@ class Protocol extends _is.DatabaseSerializationManager {
       _iyrqavho.FieldValue => 'FieldValue',
       _i2npzse7.NestWorkerFutureCallExecuteModel =>
         'NestWorkerFutureCallExecuteModel',
+      _i7d9xtt1.NestWorkerFutureCallGenerateModel =>
+        'NestWorkerFutureCallGenerateModel',
       _ig17l95t.GenerationJob => 'GenerationJob',
       _izw8z7ou.Greeting => 'Greeting',
       _istc82cm.GuidanceQuestion => 'GuidanceQuestion',
@@ -3072,6 +3085,8 @@ class Protocol extends _is.DatabaseSerializationManager {
         return 'FieldValue';
       case _i2npzse7.NestWorkerFutureCallExecuteModel():
         return 'NestWorkerFutureCallExecuteModel';
+      case _i7d9xtt1.NestWorkerFutureCallGenerateModel():
+        return 'NestWorkerFutureCallGenerateModel';
       case _ig17l95t.GenerationJob():
         return 'GenerationJob';
       case _izw8z7ou.Greeting():
@@ -3206,6 +3221,11 @@ class Protocol extends _is.DatabaseSerializationManager {
     }
     if (dataClassName == 'NestWorkerFutureCallExecuteModel') {
       return deserialize<_i2npzse7.NestWorkerFutureCallExecuteModel>(
+        data['data'],
+      );
+    }
+    if (dataClassName == 'NestWorkerFutureCallGenerateModel') {
+      return deserialize<_i7d9xtt1.NestWorkerFutureCallGenerateModel>(
         data['data'],
       );
     }

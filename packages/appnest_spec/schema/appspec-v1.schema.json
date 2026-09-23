@@ -53,6 +53,8 @@
           "views.richText.v1",
           "views.banner.v1",
           "views.checklist.v1",
+          "views.clock.v1",
+          "views.timer.v1",
           "fields.image.v1",
           "views.interactive.v1",
           "capacity.v1",
@@ -194,8 +196,7 @@
           "fields"
         ]
       },
-      "maxItems": 8,
-      "minItems": 1
+      "maxItems": 8
     },
     "views": {
       "type": "array",
@@ -217,6 +218,8 @@
               "summary",
               "capacity",
               "action",
+              "clock",
+              "timer",
               "table",
               "calendar",
               "timeline",
@@ -393,7 +396,9 @@
                 "type": {
                   "enum": [
                     "richText",
-                    "banner"
+                    "banner",
+                    "clock",
+                    "timer"
                   ]
                 }
               }
@@ -642,6 +647,68 @@
                   "type": "object",
                   "additionalProperties": false,
                   "properties": {}
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "type": {
+                  "const": "clock"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "options": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "style": {
+                      "enum": [
+                        "analog",
+                        "digital"
+                      ]
+                    },
+                    "hourFormat": {
+                      "enum": [
+                        "system",
+                        "12",
+                        "24"
+                      ]
+                    },
+                    "showSeconds": {
+                      "type": "boolean"
+                    },
+                    "showDate": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "type": {
+                  "const": "timer"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "options": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "durationMinutes": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 180
+                    }
+                  }
                 }
               }
             }

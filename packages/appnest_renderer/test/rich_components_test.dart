@@ -93,7 +93,10 @@ class RevocableImages extends RecordingPreview {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   for (final size in [const Size(390, 844), const Size(1440, 1000)]) {
-    for (final template in richStarterTemplates().entries) {
+    for (final template in {
+      ...richStarterTemplates(),
+      ...utilityStarterTemplates(),
+    }.entries) {
       testWidgets('${template.key} every page renders at $size and 150% text', (
         tester,
       ) async {

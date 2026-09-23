@@ -89,6 +89,24 @@ void _expectNoLeak(BuilderSnapshot current, BuilderSnapshot original) {
   expect(current.diagnostics.join('\n'), isNot(contains(_privateMarker)));
 }
 
+// Retry tests advance the injected clock to the persisted retry deadline.
+// Production wakeups must respect that deadline even when duplicated.
+Future<void> _generateWhenDue(
+  Session session,
+  int jobId, {
+  AiProvider? provider,
+}) async {
+  final job = (await GenerationJob.db.findById(session, jobId))!;
+  final previous = clock;
+  final now = clock();
+  clock = () => job.nextAttemptAt.isAfter(now) ? job.nextAttemptAt : now;
+  try {
+    await Worker.generate(session, jobId, provider: provider);
+  } finally {
+    clock = previous;
+  }
+}
+
 void main() {
   withServerpod('Private generation repair retries', (sessions, endpoints) {
     Future<(Session, BuilderSnapshot)> fixture() async {
@@ -124,7 +142,7 @@ void main() {
               _repairKey: {'output': 'provider-controlled collision'},
             },
           );
-          await Worker.generate(owner, job.id!, provider: provider);
+          await _generateWhenDue(owner, job.id!, provider: provider);
           final rejectedJob = await _stored(owner, job);
           expect(rejectedJob.status, 'queued');
           expect(rejectedJob.attempts, 1);
@@ -143,7 +161,7 @@ void main() {
           expect(rejectedJob.diagnostics, isNot(contains(_privateMarker)));
           expect(provider.rejected, [null]);
 
-          await Worker.generate(owner, job.id!, provider: provider);
+          await _generateWhenDue(owner, job.id!, provider: provider);
           final repairedJob = await _stored(owner, job);
           expect(repairedJob.status, 'preview ready');
           expect(repairedJob.attempts, 2);
@@ -181,7 +199,7 @@ void main() {
           _repairKey: {'output': 'provider-controlled collision'},
         },
       );
-      await Worker.generate(owner, job.id!, provider: provider);
+      await _generateWhenDue(owner, job.id!, provider: provider);
       final rejected = await _stored(owner, job);
       expect(rejected.status, 'queued');
       expect(rejected.attempts, 1);
@@ -189,7 +207,7 @@ void main() {
       expect(rejected.usageJson, isNot(contains(_privateMarker)));
       expect(rejected.diagnostics, isNot(contains(_privateMarker)));
       _expectNoLeak(await Builder.get(owner, draft.draftId), draft);
-      await Worker.generate(owner, job.id!, provider: provider);
+      await _generateWhenDue(owner, job.id!, provider: provider);
       expect(provider.rejected, [null, null]);
       expect((await _stored(owner, job)).status, 'preview ready');
     });
@@ -201,7 +219,7 @@ void main() {
         'invalid JSON $_privateMarker',
         starterTemplates()['planner']!.canonical,
       ]);
-      await Worker.generate(owner, job.id!, provider: provider);
+      await _generateWhenDue(owner, job.id!, provider: provider);
       final stored = await _stored(owner, job);
       final usage = _usage(stored);
       final context = _context(stored);
@@ -216,7 +234,7 @@ void main() {
       usage[_repairKey] = context;
       stored.usageJson = jsonEncode(usage);
       await GenerationJob.db.updateRow(owner, stored);
-      await Worker.generate(owner, job.id!, provider: provider);
+      await _generateWhenDue(owner, job.id!, provider: provider);
       expect(provider.rejected, [null, null]);
       final completed = await _stored(owner, job);
       expect(completed.status, 'preview ready');
@@ -228,7 +246,7 @@ void main() {
       final (owner, draft) = await fixture();
       final job = await _queue(owner, draft);
       final prior = _CapturingProvider(['invalid JSON $_privateMarker']);
-      await Worker.generate(owner, job.id!, provider: prior);
+      await _generateWhenDue(owner, job.id!, provider: prior);
       expect(_usage(await _stored(owner, job)), contains(_repairKey));
       final changed = await Builder.patch(
         owner,
@@ -244,7 +262,7 @@ void main() {
       final notCalled = _CapturingProvider([
         starterTemplates()['planner']!.canonical,
       ]);
-      await Worker.generate(owner, job.id!, provider: notCalled);
+      await _generateWhenDue(owner, job.id!, provider: notCalled);
       expect(notCalled.rejected, isEmpty);
       final stale = await _stored(owner, job);
       expect(stale.status, 'stale');
@@ -258,7 +276,7 @@ void main() {
       final next = _CapturingProvider([
         starterTemplates()['planner']!.canonical,
       ]);
-      await Worker.generate(owner, fresh.id!, provider: next);
+      await _generateWhenDue(owner, fresh.id!, provider: next);
       expect(next.rejected, [null]);
       expect((await _stored(owner, fresh)).status, 'preview ready');
     });
@@ -281,7 +299,7 @@ void main() {
             'invalid JSON $_privateMarker',
             starterTemplates()['planner']!.canonical,
           ]);
-          await Worker.generate(owner, job.id!, provider: provider);
+          await _generateWhenDue(owner, job.id!, provider: provider);
           final stored = await _stored(owner, job);
           final usage = _usage(stored);
           final context = _context(stored);
@@ -295,7 +313,7 @@ void main() {
           usage[_repairKey] = context;
           stored.usageJson = jsonEncode(usage);
           await GenerationJob.db.updateRow(owner, stored);
-          await Worker.generate(owner, job.id!, provider: provider);
+          await _generateWhenDue(owner, job.id!, provider: provider);
           expect(provider.rejected, [null, null]);
           final completed = await _stored(owner, job);
           expect(completed.status, 'preview ready');
@@ -315,7 +333,7 @@ void main() {
           'invalid third $_privateMarker',
         ]);
         for (var attempt = 1; attempt <= Limits.generationAttempts; attempt++) {
-          await Worker.generate(owner, job.id!, provider: provider);
+          await _generateWhenDue(owner, job.id!, provider: provider);
           final current = await _stored(owner, job);
           expect(current.attempts, attempt);
           expect(
@@ -336,7 +354,7 @@ void main() {
           provider.outputs[0],
           provider.outputs[1],
         ]);
-        await Worker.generate(owner, job.id!, provider: provider);
+        await _generateWhenDue(owner, job.id!, provider: provider);
         expect(provider.rejected.length, Limits.generationAttempts);
       },
     );
@@ -344,7 +362,7 @@ void main() {
     test('preclaim attempt limit also erases retained repair context without calling AI', () async {
       final (owner, draft) = await fixture();
       final job = await _queue(owner, draft);
-      await Worker.generate(
+      await _generateWhenDue(
         owner,
         job.id!,
         provider: _CapturingProvider(['invalid $_privateMarker']),
@@ -355,7 +373,7 @@ void main() {
       final provider = _CapturingProvider([
         starterTemplates()['planner']!.canonical,
       ]);
-      await Worker.generate(owner, job.id!, provider: provider);
+      await _generateWhenDue(owner, job.id!, provider: provider);
       expect(provider.rejected, isEmpty);
       final terminal = await _stored(owner, job);
       expect(terminal.status, 'failed');

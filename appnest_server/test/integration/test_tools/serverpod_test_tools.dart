@@ -24,6 +24,8 @@ import 'package:appnest_server/src/generated/builder_snapshot.dart'
 import 'package:appnest_server/src/generated/future_calls.dart' as _itt87tub;
 import 'package:appnest_server/src/generated/future_calls_generated_models/nest_worker_future_call_execute_model.dart'
     as _iz1n0nsk;
+import 'package:appnest_server/src/generated/future_calls_generated_models/nest_worker_future_call_generate_model.dart'
+    as _i5e2zv8q;
 import 'package:appnest_server/src/generated/greetings/greeting.dart'
     as _ib9e9hkj;
 import 'package:appnest_server/src/generated/guidance_question.dart'
@@ -1306,6 +1308,43 @@ class _BuilderEndpoint {
     });
   }
 
+  _ida.Future<_im1nomiz.BuilderSnapshot> abandonFailedEdit(
+    _ist.TestSessionBuilder sessionBuilder,
+    int draftId,
+    int mutation,
+    int jobId,
+  ) async {
+    return _ist.callAwaitableFunctionAndHandleExceptions(() async {
+      var _localUniqueSession =
+          (sessionBuilder as _ist.InternalTestSessionBuilder).internalBuild(
+            endpoint: 'builder',
+            method: 'abandonFailedEdit',
+          );
+      try {
+        var _localCallContext = await _endpointDispatch.getMethodCallContext(
+          createSessionCallback: (_) => _localUniqueSession,
+          endpointPath: 'builder',
+          methodName: 'abandonFailedEdit',
+          parameters: _ist.testObjectToJson({
+            'draftId': draftId,
+            'mutation': mutation,
+            'jobId': jobId,
+          }),
+          serializationManager: _serializationManager,
+        );
+        var _localReturnValue =
+            await (_localCallContext.method.call(
+                  _localUniqueSession,
+                  _localCallContext.arguments,
+                )
+                as _ida.Future<_im1nomiz.BuilderSnapshot>);
+        return _localReturnValue;
+      } finally {
+        await _localUniqueSession.close();
+      }
+    });
+  }
+
   _ida.Future<List<_irfbx1ex.ActivityItem>> runs(
     _ist.TestSessionBuilder sessionBuilder,
     int appId,
@@ -1837,6 +1876,23 @@ class _NestWorkerFutureCall {
         (sessionBuilder as _ist.InternalTestSessionBuilder).internalBuild();
     try {
       await _itt87tub.NestWorkerExecuteFutureCall().invoke(
+        _localUniqueSession,
+        object,
+      );
+    } finally {
+      await _localUniqueSession.close();
+    }
+  }
+
+  Future<void> generate(
+    _ist.TestSessionBuilder sessionBuilder,
+    int jobId,
+  ) async {
+    var object = _i5e2zv8q.NestWorkerFutureCallGenerateModel(jobId: jobId);
+    var _localUniqueSession =
+        (sessionBuilder as _ist.InternalTestSessionBuilder).internalBuild();
+    try {
+      await _itt87tub.NestWorkerGenerateFutureCall().invoke(
         _localUniqueSession,
         object,
       );

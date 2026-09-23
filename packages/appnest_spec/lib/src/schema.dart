@@ -126,7 +126,7 @@ Map<String, dynamic> appSpecSchema() {
       'if': {
         'properties': {
           'type': {
-            'enum': ['richText', 'banner'],
+            'enum': ['richText', 'banner', 'clock', 'timer'],
           },
         },
       },
@@ -157,7 +157,8 @@ Map<String, dynamic> appSpecSchema() {
         },
         'then': {
           'properties': {'options': _richOptionsSchema(type)},
-          if (richViewTypes.contains(type) && type != 'table')
+          if (richViewTypes.contains(type) &&
+              !{'table', 'clock', 'timer'}.contains(type))
             'required': ['options'],
         },
       },
@@ -245,7 +246,7 @@ Map<String, dynamic> appSpecSchema() {
           'enum': ['book', 'board', 'people', 'spark', 'check'],
         },
         'requires': arr({'enum': capabilities.toList()}, 40),
-        'collections': {...arr(collection, Limits.collections), 'minItems': 1},
+        'collections': arr(collection, Limits.collections),
         'views': {...arr(view, Limits.views), 'minItems': 1},
         'actions': arr(action, Limits.actions),
         'policyPresetRequest': {'enum': policyPresets.toList()},

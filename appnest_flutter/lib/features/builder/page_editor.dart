@@ -87,9 +87,9 @@ class _PageEditorState extends State<PageEditor> {
     selectedView = id;
     final v = id == null ? null : spec.view(id);
     collectionId = v == null || v.collectionId.isEmpty
-        ? spec.collections.first.id
+        ? spec.collections.firstOrNull?.id ?? ''
         : v.collectionId;
-    viewType = v?.type ?? 'list';
+    viewType = v?.type ?? (spec.collections.isEmpty ? 'clock' : 'list');
     componentOptions = Map<String, dynamic>.from(v?.options ?? {});
     viewLabel.text = v?.label ?? '';
     titleField = v?.titleFieldId;
@@ -175,6 +175,13 @@ class _PageEditorState extends State<PageEditor> {
       'title': viewLabel.text.isEmpty ? 'Welcome' : viewLabel.text,
     },
     'richText' => {'markdown': 'Write something helpful for your app.'},
+    'clock' => {
+      'style': 'digital',
+      'hourFormat': 'system',
+      'showSeconds': false,
+      'showDate': true,
+    },
+    'timer' => {'durationMinutes': 25},
     _ => {},
   };
 
@@ -595,7 +602,7 @@ class _PageEditorState extends State<PageEditor> {
   }
 
   Widget _views() {
-    final col = spec.collection(collectionId);
+    final col = collectionId.isEmpty ? null : spec.collection(collectionId);
     final pages = {
       for (final p in spec.navigation?.pages ?? <PageSpec>[]) p.id: p.title,
     };
@@ -640,11 +647,17 @@ class _PageEditorState extends State<PageEditor> {
             },
           ),
         _select('Display', viewType, {
-          for (final group in componentGroups.values) ...group,
+          for (final group in componentGroups.values)
+            for (final entry in group.entries)
+              if (spec.collections.isNotEmpty || isContentComponent(entry.key))
+                entry.key: entry.value,
         }, (v) => _changeType(v!)),
         OutlinedButton.icon(
           onPressed: () async {
-            final type = await chooseComponent(context);
+            final type = await chooseComponent(
+              context,
+              hasCollections: spec.collections.isNotEmpty,
+            );
             if (type != null && mounted) setState(() => _changeType(type));
           },
           icon: const Icon(Icons.widgets_outlined),
@@ -693,7 +706,7 @@ class _PageEditorState extends State<PageEditor> {
           _select(
             'Title field',
             titleField,
-            {for (final f in col.fields) f.id: f.label},
+            {for (final f in col!.fields) f.id: f.label},
             (v) => titleField = v,
             nullable: true,
           ),

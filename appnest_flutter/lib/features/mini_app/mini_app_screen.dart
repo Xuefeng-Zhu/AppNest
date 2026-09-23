@@ -3,10 +3,12 @@ import 'package:appnest_renderer/appnest_renderer.dart';
 import 'package:appnest_spec/appnest_spec.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:serverpod_auth_idp_flutter/serverpod_auth_idp_flutter.dart';
 
 import '../../client.dart';
 import '../builder/builder_screen.dart';
 import 'live_adapter.dart';
+import 'device_timer_store.dart';
 
 class MiniAppScreen extends StatefulWidget {
   final int appId;
@@ -32,9 +34,11 @@ class MiniAppScreenState extends State<MiniAppScreen> {
   AppManifest? manifest;
   Object? error;
   LiveRuntimeAdapter? adapter;
+  (String, String, int)? _timerScope;
   final controller = MiniAppController();
   MiniAppLocation? initialLocation;
   int _loadGeneration = 0;
+  bool _customizing = false;
   @override
   void initState() {
     super.initState();
@@ -44,6 +48,7 @@ class MiniAppScreenState extends State<MiniAppScreen> {
   @override
   void dispose() {
     _loadGeneration++;
+    adapter?.timerController.dispose();
     controller.dispose();
     super.dispose();
   }
@@ -65,9 +70,10 @@ class MiniAppScreenState extends State<MiniAppScreen> {
 
   Future<MiniAppLocation?> _resolveLocation(
     MiniAppLocation? requested,
-    int? recordId,
-  ) async {
-    final a = adapter;
+    int? recordId, {
+    LiveRuntimeAdapter? runtime,
+  }) async {
+    final a = runtime ?? adapter;
     final nav = a?.spec.navigation;
     if (a == null || nav == null) return null;
     if (requested != null) {
@@ -114,25 +120,90 @@ class MiniAppScreenState extends State<MiniAppScreen> {
     }
   }
 
+  Future<void> customize() async {
+    if (_customizing) return;
+    final app = manifest;
+    if (app == null) return;
+    setState(() => _customizing = true);
+    try {
+      if (!await canLeave() || !mounted) return;
+      final draft = await client.builder.begin(
+        app.workspaceId,
+        'reading',
+        app.appId,
+      );
+      if (!mounted) return;
+      await Navigator.push<int>(
+        context,
+        MaterialPageRoute<int>(builder: (_) => BuilderScreen(initial: draft)),
+      );
+      if (mounted) await load();
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Couldn’t open customization. Try again.'),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _customizing = false);
+    }
+  }
+
   Future<void> load() async {
     final generation = ++_loadGeneration;
+    LiveRuntimeAdapter? pending;
+    var ownsPendingController = true;
     try {
       final m = await client.apps.manifest(widget.appId);
       if (!mounted || generation != _loadGeneration) return;
-      final next = LiveRuntimeAdapter(client, m);
-      adapter = next;
+      UtilityTimerController? timer;
+      (String, String, int)? timerScope;
+      if (AppSpec.parse(m.specJson!).views
+          .any((view) => view.type == 'timer')) {
+        final account = client.auth.authInfo?.authUserId.toString();
+        if (account == null) {
+          throw StateError('Sign in again to open this app.');
+        }
+        timerScope = (client.host, account, m.appId);
+        if (_timerScope == timerScope && adapter != null) {
+          timer = adapter!.timerController;
+          ownsPendingController = false;
+        } else {
+          timer = UtilityTimerController(
+            store: DeviceTimerStore(
+              server: client.host,
+              actorId: account,
+              appId: m.appId,
+            ),
+          );
+        }
+      }
+      final next = LiveRuntimeAdapter(client, m, timerController: timer);
+      pending = next;
       final location = await _resolveLocation(
         controller.location ?? widget.initialLocation,
         widget.initialRecordId,
+        runtime: next,
       );
-      if (!mounted || generation != _loadGeneration) return;
+      if (!mounted || generation != _loadGeneration) {
+        if (ownsPendingController) next.timerController.dispose();
+        return;
+      }
       if (mounted) {
+        final previous = adapter;
         setState(() {
           manifest = m;
           adapter = next;
+          _timerScope = timerScope;
           initialLocation = location;
           error = null;
         });
+        pending = null;
+        if (!identical(previous?.timerController, next.timerController)) {
+          previous?.timerController.dispose();
+        }
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted && generation == _loadGeneration && location != null) {
             widget.onLocationChanged?.call(controller.location ?? location);
@@ -140,10 +211,13 @@ class MiniAppScreenState extends State<MiniAppScreen> {
         });
       }
     } catch (e) {
+      if (ownsPendingController) pending?.timerController.dispose();
       if (mounted && generation == _loadGeneration) {
+        adapter?.timerController.dispose();
         setState(() {
           error = e;
           adapter = null;
+          _timerScope = null;
           manifest = null;
         });
       }
@@ -356,6 +430,12 @@ class MiniAppScreenState extends State<MiniAppScreen> {
           ],
         ),
         actions: [
+          if (m != null && builder && !m.archived)
+            IconButton(
+              onPressed: _customizing ? null : customize,
+              tooltip: 'Customize app',
+              icon: const Icon(Icons.tune),
+            ),
           if (m != null)
             PopupMenuButton<String>(
               tooltip: 'Mini-app menu',
@@ -365,21 +445,7 @@ class MiniAppScreenState extends State<MiniAppScreen> {
                   if (value == 'activity') await activity();
                   if (value == 'share') await share();
                   if (value == 'edit') {
-                    if (!await canLeave()) return;
-                    final d = await client.builder.begin(
-                      m.workspaceId,
-                      'reading',
-                      m.appId,
-                    );
-                    if (context.mounted) {
-                      await Navigator.push<int>(
-                        context,
-                        MaterialPageRoute<int>(
-                          builder: (_) => BuilderScreen(initial: d),
-                        ),
-                      );
-                    }
-                    load();
+                    await customize();
                   }
                   if (value == 'members') await manage();
                   if (value == 'unpin') {
@@ -450,7 +516,7 @@ class MiniAppScreenState extends State<MiniAppScreen> {
                 if (builder && !m.archived)
                   const PopupMenuItem(
                     value: 'edit',
-                    child: Text('Edit with AI'),
+                    child: Text('Customize app'),
                   ),
                 if (builder)
                   const PopupMenuItem(

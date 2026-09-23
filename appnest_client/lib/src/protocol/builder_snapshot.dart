@@ -28,7 +28,14 @@ abstract class BuilderSnapshot
     required this.changes,
     required this.enabledRuleIds,
     this.publishedVersionId,
-  });
+    bool? candidateReady,
+    this.latestRequest,
+    int? jobAttempts,
+    this.jobCreatedAt,
+    this.jobUpdatedAt,
+    this.failureCategory,
+  }) : candidateReady = candidateReady ?? false,
+       jobAttempts = jobAttempts ?? 0;
 
   factory BuilderSnapshot({
     required int appId,
@@ -43,6 +50,12 @@ abstract class BuilderSnapshot
     required List<String> changes,
     required List<String> enabledRuleIds,
     int? publishedVersionId,
+    bool? candidateReady,
+    String? latestRequest,
+    int? jobAttempts,
+    DateTime? jobCreatedAt,
+    DateTime? jobUpdatedAt,
+    String? failureCategory,
   }) = _BuilderSnapshotImpl;
 
   factory BuilderSnapshot.fromJson(Map<String, dynamic> jsonSerialization) {
@@ -65,6 +78,24 @@ abstract class BuilderSnapshot
         jsonSerialization['enabledRuleIds'],
       ),
       publishedVersionId: jsonSerialization['publishedVersionId'] as int?,
+      candidateReady: jsonSerialization['candidateReady'] == null
+          ? null
+          : _isc.BoolJsonExtension.fromJson(
+              jsonSerialization['candidateReady'],
+            ),
+      latestRequest: jsonSerialization['latestRequest'] as String?,
+      jobAttempts: jsonSerialization['jobAttempts'] as int?,
+      jobCreatedAt: jsonSerialization['jobCreatedAt'] == null
+          ? null
+          : _isc.DateTimeJsonExtension.fromJson(
+              jsonSerialization['jobCreatedAt'],
+            ),
+      jobUpdatedAt: jsonSerialization['jobUpdatedAt'] == null
+          ? null
+          : _isc.DateTimeJsonExtension.fromJson(
+              jsonSerialization['jobUpdatedAt'],
+            ),
+      failureCategory: jsonSerialization['failureCategory'] as String?,
     );
   }
 
@@ -92,6 +123,18 @@ abstract class BuilderSnapshot
 
   int? publishedVersionId;
 
+  bool candidateReady;
+
+  String? latestRequest;
+
+  int jobAttempts;
+
+  DateTime? jobCreatedAt;
+
+  DateTime? jobUpdatedAt;
+
+  String? failureCategory;
+
   /// Returns a shallow copy of this [BuilderSnapshot]
   /// with some or all fields replaced by the given arguments.
   @_isc.useResult
@@ -108,6 +151,12 @@ abstract class BuilderSnapshot
     List<String>? changes,
     List<String>? enabledRuleIds,
     int? publishedVersionId,
+    bool? candidateReady,
+    String? latestRequest,
+    int? jobAttempts,
+    DateTime? jobCreatedAt,
+    DateTime? jobUpdatedAt,
+    String? failureCategory,
   });
   @override
   Map<String, dynamic> toJson() {
@@ -125,6 +174,12 @@ abstract class BuilderSnapshot
       'changes': changes.toJson(),
       'enabledRuleIds': enabledRuleIds.toJson(),
       if (publishedVersionId != null) 'publishedVersionId': publishedVersionId,
+      'candidateReady': candidateReady,
+      if (latestRequest != null) 'latestRequest': latestRequest,
+      'jobAttempts': jobAttempts,
+      if (jobCreatedAt != null) 'jobCreatedAt': jobCreatedAt?.toJson(),
+      if (jobUpdatedAt != null) 'jobUpdatedAt': jobUpdatedAt?.toJson(),
+      if (failureCategory != null) 'failureCategory': failureCategory,
     };
   }
 
@@ -144,6 +199,12 @@ abstract class BuilderSnapshot
       'changes': changes.toJson(),
       'enabledRuleIds': enabledRuleIds.toJson(),
       if (publishedVersionId != null) 'publishedVersionId': publishedVersionId,
+      'candidateReady': candidateReady,
+      if (latestRequest != null) 'latestRequest': latestRequest,
+      'jobAttempts': jobAttempts,
+      if (jobCreatedAt != null) 'jobCreatedAt': jobCreatedAt?.toJson(),
+      if (jobUpdatedAt != null) 'jobUpdatedAt': jobUpdatedAt?.toJson(),
+      if (failureCategory != null) 'failureCategory': failureCategory,
     };
   }
 
@@ -169,6 +230,12 @@ class _BuilderSnapshotImpl extends BuilderSnapshot {
     required List<String> changes,
     required List<String> enabledRuleIds,
     int? publishedVersionId,
+    bool? candidateReady,
+    String? latestRequest,
+    int? jobAttempts,
+    DateTime? jobCreatedAt,
+    DateTime? jobUpdatedAt,
+    String? failureCategory,
   }) : super._(
          appId: appId,
          draftId: draftId,
@@ -182,6 +249,12 @@ class _BuilderSnapshotImpl extends BuilderSnapshot {
          changes: changes,
          enabledRuleIds: enabledRuleIds,
          publishedVersionId: publishedVersionId,
+         candidateReady: candidateReady,
+         latestRequest: latestRequest,
+         jobAttempts: jobAttempts,
+         jobCreatedAt: jobCreatedAt,
+         jobUpdatedAt: jobUpdatedAt,
+         failureCategory: failureCategory,
        );
 
   /// Returns a shallow copy of this [BuilderSnapshot]
@@ -201,6 +274,12 @@ class _BuilderSnapshotImpl extends BuilderSnapshot {
     List<String>? changes,
     List<String>? enabledRuleIds,
     Object? publishedVersionId = _Undefined,
+    bool? candidateReady,
+    Object? latestRequest = _Undefined,
+    int? jobAttempts,
+    Object? jobCreatedAt = _Undefined,
+    Object? jobUpdatedAt = _Undefined,
+    Object? failureCategory = _Undefined,
   }) {
     return BuilderSnapshot(
       appId: appId ?? this.appId,
@@ -218,6 +297,20 @@ class _BuilderSnapshotImpl extends BuilderSnapshot {
       publishedVersionId: publishedVersionId is int?
           ? publishedVersionId
           : this.publishedVersionId,
+      candidateReady: candidateReady ?? this.candidateReady,
+      latestRequest: latestRequest is String?
+          ? latestRequest
+          : this.latestRequest,
+      jobAttempts: jobAttempts ?? this.jobAttempts,
+      jobCreatedAt: jobCreatedAt is DateTime?
+          ? jobCreatedAt
+          : this.jobCreatedAt,
+      jobUpdatedAt: jobUpdatedAt is DateTime?
+          ? jobUpdatedAt
+          : this.jobUpdatedAt,
+      failureCategory: failureCategory is String?
+          ? failureCategory
+          : this.failureCategory,
     );
   }
 }

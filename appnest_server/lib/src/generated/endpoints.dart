@@ -776,6 +776,37 @@ class Endpoints extends _is.EndpointDispatch {
                     params['request'],
                   ),
         ),
+        'abandonFailedEdit': _is.MethodConnector(
+          name: 'abandonFailedEdit',
+          params: {
+            'draftId': _is.ParameterDescription(
+              name: 'draftId',
+              type: _is.getType<int>(),
+              nullable: false,
+            ),
+            'mutation': _is.ParameterDescription(
+              name: 'mutation',
+              type: _is.getType<int>(),
+              nullable: false,
+            ),
+            'jobId': _is.ParameterDescription(
+              name: 'jobId',
+              type: _is.getType<int>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _is.Session session,
+                Map<String, dynamic> params,
+              ) async => (endpoints['builder'] as _ittyaucl.BuilderEndpoint)
+                  .abandonFailedEdit(
+                    session,
+                    params['draftId'],
+                    params['mutation'],
+                    params['jobId'],
+                  ),
+        ),
         'runs': _is.MethodConnector(
           name: 'runs',
           params: {

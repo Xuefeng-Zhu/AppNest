@@ -16,6 +16,9 @@ class CreationClient extends Client {
 
   final generations = <Map<String, dynamic>>[];
   final gets = <int>[];
+  final abandoned = <Map<String, dynamic>>[];
+  final patches = <Map<String, dynamic>>[];
+  Object? getFailure;
   late BuilderSnapshot current;
   Completer<BuilderSnapshot>? pendingGeneration;
   Object? generationFailure;
@@ -48,6 +51,7 @@ class CreationClient extends Client {
         );
       case 'builder.get':
         gets.add(args['draftId'] as int);
+        if (getFailure != null) throw getFailure!;
         result = current;
       case 'builder.generate':
         generations.add(Map<String, dynamic>.from(args));
@@ -55,6 +59,16 @@ class CreationClient extends Client {
         result = pendingGeneration == null
             ? current
             : await pendingGeneration!.future;
+      case 'builder.abandonFailedEdit':
+        abandoned.add(Map<String, dynamic>.from(args));
+        result = current.copyWith(
+          stage: 'preview ready',
+          mutation: current.mutation + 1,
+          jobId: null,
+        );
+      case 'builder.patch':
+        patches.add(Map<String, dynamic>.from(args));
+        result = current;
       case 'builder.suggestQuestions':
         questionRequests.add(Map<String, dynamic>.from(args));
         if (questionFailure != null) throw questionFailure!;
@@ -74,6 +88,8 @@ BuilderSnapshot draft({
   int mutation = 0,
   int? jobId,
   List<String> diagnostics = const [],
+  bool? candidateReady,
+  String? latestRequest,
 }) {
   final candidate = spec ?? starterTemplates()['volunteer']!;
   return BuilderSnapshot(
@@ -87,6 +103,9 @@ BuilderSnapshot draft({
     diagnostics: diagnostics,
     changes: candidate.diff(null),
     enabledRuleIds: [],
+    candidateReady:
+        candidateReady ?? (stage == 'preview ready' || jobId == null),
+    latestRequest: latestRequest,
   );
 }
 
@@ -100,6 +119,9 @@ void main() {
   setUp(() {
     client.generations.clear();
     client.gets.clear();
+    client.abandoned.clear();
+    client.patches.clear();
+    client.getFailure = null;
     client.current = draft();
     client.pendingGeneration = null;
     client.generationFailure = null;
@@ -151,6 +173,197 @@ void main() {
 
   Finder composer() => find.byKey(const ValueKey('builder-prompt'));
 
+  testWidgets('send creates directly without optional guidance', (
+    tester,
+  ) async {
+    await showBuilder(tester, initial: draft());
+    await tester.enterText(composer(), 'Make my notes blue');
+    await tester.pump();
+    await tester.tap(find.byTooltip('Send message'));
+    await tester.pump();
+    expect(client.generations, hasLength(1));
+    expect(client.questionRequests, isEmpty);
+    await closeBuilder(tester);
+  });
+
+  testWidgets('rapid Use app taps open one review', (tester) async {
+    await showBuilder(tester, initial: draft());
+    final submit = tester
+        .widget<FilledButton>(
+          find.widgetWithText(FilledButton, 'Use app'),
+        )
+        .onPressed!;
+    submit();
+    submit();
+    await tester.pumpAndSettle();
+    expect(find.byType(AlertDialog), findsOneWidget);
+    await tester.tap(find.text('Back to preview'));
+    await tester.pumpAndSettle();
+    expect(find.byType(AlertDialog), findsNothing);
+    expect(
+      tester
+          .widget<FilledButton>(find.widgetWithText(FilledButton, 'Use app'))
+          .onPressed,
+      isNotNull,
+    );
+    await closeBuilder(tester);
+  });
+
+  testWidgets('a lost accepted response recovers the existing job', (
+    tester,
+  ) async {
+    await showBuilder(tester, initial: draft());
+    const request = 'Make my notes blue';
+    client.current = draft(
+      stage: 'queued',
+      mutation: 1,
+      jobId: 7,
+      candidateReady: true,
+      latestRequest: request,
+    );
+    client.generationFailure = const ServerpodClientNetworkException(
+      'response lost',
+    );
+    await tester.enterText(composer(), request);
+    await tester.pump();
+    await tester.tap(find.byTooltip('Send message'));
+    await tester.pump();
+    expect(client.generations, hasLength(1));
+    expect(client.gets, [9]);
+    expect(tester.widget<TextField>(composer()).controller!.text, isEmpty);
+    expect(find.byType(MiniAppRuntime), findsOneWidget);
+    await closeBuilder(tester);
+  });
+
+  testWidgets('an uncertain submission reads before any retry', (tester) async {
+    await showBuilder(tester, initial: draft());
+    const request = 'Make my notes blue';
+    client.generationFailure = const ServerpodClientNetworkException('offline');
+    client.getFailure = const ServerpodClientNetworkException('offline');
+    await tester.enterText(composer(), request);
+    await tester.pump();
+    await tester.tap(find.byTooltip('Send message'));
+    await tester.pump();
+    expect(client.generations, hasLength(1));
+    client.getFailure = null;
+    client.current = draft(
+      stage: 'queued',
+      mutation: 1,
+      jobId: 7,
+      candidateReady: true,
+      latestRequest: request,
+    );
+    await tester.enterText(composer(), 'A different unsent change');
+    await tester.pump();
+    await tester.tap(find.byTooltip('Send message'));
+    await tester.pump();
+    expect(client.generations, hasLength(1));
+    expect(client.gets, [9, 9]);
+    expect(
+      tester.widget<TextField>(composer()).controller!.text,
+      'A different unsent change',
+    );
+    await closeBuilder(tester);
+  });
+
+  testWidgets(
+    'reopening a failed edit preserves and restores its last preview',
+    (tester) async {
+      client.current = draft(
+        stage: 'failed',
+        mutation: 4,
+        jobId: 10,
+        candidateReady: true,
+        latestRequest: 'Make the colors warmer',
+      );
+      await showBuilder(
+        tester,
+        initial: client.current,
+        startFromScratch: true,
+      );
+      expect(find.byType(MiniAppRuntime), findsOneWidget);
+      expect(find.text('Make the colors warmer'), findsOneWidget);
+      await tester.ensureVisible(find.text('Keep previous preview'));
+      await tester.tap(find.text('Keep previous preview'));
+      await tester.pumpAndSettle();
+      expect(client.abandoned.single, {
+        'draftId': 9,
+        'mutation': 4,
+        'jobId': 10,
+      });
+      expect(
+        tester
+            .widget<FilledButton>(find.widgetWithText(FilledButton, 'Use app'))
+            .onPressed,
+        isNotNull,
+      );
+      await closeBuilder(tester);
+    },
+  );
+
+  for (final size in [const Size(390, 844), const Size(1440, 1000)]) {
+    testWidgets('Customize exposes four categories at ${size.width}', (
+      tester,
+    ) async {
+      await showBuilder(tester, initial: draft(), size: size);
+      await tester.tap(find.byKey(const ValueKey('customize-app')));
+      await tester.pumpAndSettle();
+      expect(find.text('Content'), findsOneWidget);
+      expect(find.text('Layout'), findsOneWidget);
+      expect(find.text('Behavior'), findsOneWidget);
+      expect(find.text('Appearance'), findsWidgets);
+      expect(tester.takeException(), isNull);
+      await closeBuilder(tester);
+    });
+  }
+
+  testWidgets('pure utility Content opens without creating dummy collections', (
+    tester,
+  ) async {
+    await showBuilder(tester, initial: draft(spec: focusTemplate()));
+    await tester.tap(find.byKey(const ValueKey('customize-app')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Content'));
+    await tester.pumpAndSettle();
+    expect(find.text('Make a small edit'), findsOneWidget);
+    expect(find.text('Rename app or field'), findsOneWidget);
+    expect(find.text('Add a field'), findsNothing);
+    expect(tester.takeException(), isNull);
+    await closeBuilder(tester);
+  });
+
+  testWidgets('changed reminders need approval again in the single review', (
+    tester,
+  ) async {
+    final spec = dailyPlannerTemplate();
+    final original = spec.automationRequests.single;
+    await showBuilder(
+      tester,
+      initial: draft(spec: spec).copyWith(enabledRuleIds: [original.id]),
+    );
+    final rule = original.toJson()..remove('id');
+    (rule['trigger'] as Map)['offsetSeconds'] = 900;
+    final changed = spec.patch({
+      'type': 'UpdateReminder',
+      'ruleId': original.id,
+      'rule': rule,
+    }, () => throw StateError('Must retain identity'));
+    final dynamic state = tester.state(find.byType(BuilderScreen));
+    state.update(
+      draft(spec: changed, mutation: 1).copyWith(enabledRuleIds: [original.id]),
+    );
+    await tester.pump();
+    await tester.tap(find.text('Use app'));
+    await tester.pumpAndSettle();
+    expect(find.byType(AlertDialog), findsOneWidget);
+    expect(
+      tester.widget<CheckboxListTile>(find.byType(CheckboxListTile)).value,
+      isFalse,
+    );
+    expect(find.text('Review & publish'), findsNothing);
+    await closeBuilder(tester);
+  });
+
   testWidgets('builder guidance prepares but does not send a change', (
     tester,
   ) async {
@@ -170,8 +383,8 @@ void main() {
     await tester.enterText(composer(), 'Make it easier for neighbors');
     await tester.pump();
     expect(client.questionRequests, isEmpty);
-    expect(find.byKey(const ValueKey('shape-idea')), findsNothing);
-    await tester.tap(find.byTooltip('Send message'));
+    expect(find.byKey(const ValueKey('shape-idea')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('shape-idea')));
     await tester.pumpAndSettle();
     expect(client.questionRequests, hasLength(1));
     expect(client.questionRequests.single['draftId'], 9);
@@ -186,7 +399,7 @@ void main() {
             ),
           )
           .onPressed,
-      isNull,
+      isNotNull,
     );
     expect(find.byKey(const ValueKey('guidance-answer-0')), findsNothing);
     await tester.tap(find.byKey(const ValueKey('guidance-option-0-0')));
@@ -234,7 +447,7 @@ void main() {
     );
     await tester.enterText(composer(), 'A shared task app');
     await tester.pump();
-    await tester.tap(find.byTooltip('Send message'));
+    await tester.tap(find.byKey(const ValueKey('shape-idea')));
     await tester.pumpAndSettle();
     expect(find.text('A few details would help'), findsOneWidget);
     expect(tester.takeException(), isNull);
@@ -262,7 +475,7 @@ void main() {
     await showBuilder(tester, initial: draft());
     await tester.enterText(composer(), 'A simpler app');
     await tester.pump();
-    await tester.tap(find.byTooltip('Send message'));
+    await tester.tap(find.byKey(const ValueKey('shape-idea')));
     await tester.pumpAndSettle();
     expect(find.text('Built-in questions'), findsOneWidget);
     expect(find.text('1. What should change first?'), findsOneWidget);
@@ -289,7 +502,7 @@ void main() {
     await showBuilder(tester, initial: draft());
     await tester.enterText(composer(), 'A club app');
     await tester.pump();
-    await tester.tap(find.byTooltip('Send message'));
+    await tester.tap(find.byKey(const ValueKey('shape-idea')));
     await tester.pump();
     tester.widget<TextField>(composer()).controller!.text = 'A new idea';
     client.pendingQuestions!.complete([
@@ -312,7 +525,7 @@ void main() {
     await showBuilder(tester, initial: draft());
     await tester.enterText(composer(), 'A club app');
     await tester.pump();
-    await tester.tap(find.byTooltip('Send message'));
+    await tester.tap(find.byKey(const ValueKey('shape-idea')));
     await tester.pumpAndSettle();
     expect(find.text('Built-in questions'), findsNothing);
     expect(find.byKey(const ValueKey('guidance-continue')), findsNothing);
@@ -321,7 +534,7 @@ void main() {
     await closeBuilder(tester);
   });
 
-  testWidgets('a new idea after answering needs a new assessment', (
+  testWidgets('a new idea can optionally ask for fresh guidance', (
     tester,
   ) async {
     client.questionResponse = [
@@ -331,7 +544,7 @@ void main() {
     await showBuilder(tester, initial: draft());
     await tester.enterText(composer(), 'A club app');
     await tester.pump();
-    await tester.tap(find.byTooltip('Send message'));
+    await tester.tap(find.byKey(const ValueKey('shape-idea')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('guidance-option-0-0')));
     await tester.pump();
@@ -340,7 +553,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.enterText(composer(), 'A new app for gardeners');
     await tester.pump();
-    await tester.tap(find.byTooltip('Send message'));
+    await tester.tap(find.byKey(const ValueKey('shape-idea')));
     await tester.pumpAndSettle();
     expect(client.questionRequests, hasLength(2));
     expect(client.generations, isEmpty);
@@ -391,7 +604,7 @@ void main() {
       tester,
     ) async {
       await showBuilder(tester, initial: draft(spec: example.$1));
-      await tester.tap(find.text('Publish'));
+      await tester.tap(find.text('Use app'));
       await tester.pumpAndSettle();
       await tester.ensureVisible(find.byType(CheckboxListTile));
       expect(find.text(example.$2), findsOneWidget);
@@ -422,7 +635,7 @@ void main() {
       expect(find.byType(MiniAppRuntime), findsNothing);
       expect(
         tester
-            .widget<FilledButton>(find.widgetWithText(FilledButton, 'Publish'))
+            .widget<FilledButton>(find.widgetWithText(FilledButton, 'Use app'))
             .onPressed,
         isNull,
       );
@@ -480,7 +693,12 @@ void main() {
       expect(client.generations.single['startFromScratch'], false);
       expect(client.generations.single['mutation'], 0);
 
-      client.current = draft(stage: 'queued', mutation: 1, jobId: 7);
+      client.current = draft(
+        stage: 'queued',
+        mutation: 1,
+        jobId: 7,
+        candidateReady: true,
+      );
       client.pendingGeneration!.complete(client.current);
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 100));
@@ -579,6 +797,7 @@ void main() {
       stage: 'queued',
       mutation: 2,
       jobId: 8,
+      candidateReady: true,
     );
     await tester.enterText(composer(), request);
     await tester.pump();
@@ -591,6 +810,7 @@ void main() {
       stage: 'failed',
       mutation: 2,
       jobId: 8,
+      candidateReady: true,
       diagnostics: ['This requested capability is unavailable.'],
     );
     await tester.pump(const Duration(seconds: 2));
@@ -656,13 +876,15 @@ void main() {
       await tester.pump(const Duration(seconds: 2));
       await tester.pump(const Duration(milliseconds: 100));
       expect(tester.takeException(), isNull);
-      await tester.tap(find.widgetWithText(Tab, 'Preview'));
+      await tester.tap(find.widgetWithText(Tab, 'Try'));
       await tester.pumpAndSettle();
       expect(find.byType(MiniAppRuntime), findsOneWidget);
       expect(tester.takeException(), isNull);
-      await tester.tap(find.text('Publish'));
+      await tester.tap(find.text('Use app'));
       await tester.pumpAndSettle();
-      await tester.ensureVisible(find.text('Review & publish'));
+      await tester.ensureVisible(
+        find.widgetWithText(FilledButton, 'Use app').last,
+      );
       expect(tester.takeException(), isNull);
       await closeBuilder(tester);
     },

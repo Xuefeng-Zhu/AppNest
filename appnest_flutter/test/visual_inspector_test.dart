@@ -71,7 +71,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     if (mobile) {
-      await tester.tap(find.text('Preview'));
+      await tester.tap(find.text('Try'));
       await tester.pumpAndSettle();
     }
   }

@@ -967,6 +967,19 @@ class _RichMiniAppRuntimeState extends State<_RichMiniAppRuntime>
         return const Text('Choose a record to open its details.');
       return _details(context, view, _record!);
     }
+    if (view.type == 'clock')
+      return _UtilityClock(
+        key: ValueKey(view.id),
+        view: view,
+        clock: widget.clock,
+      );
+    if (view.type == 'timer')
+      return _UtilityTimer(
+        key: ValueKey(view.id),
+        view: view,
+        controller: adapter.timerController,
+        preview: adapter.preview,
+      );
     if (view.contentOnly) return _contentSection(context, view);
     if ({
       'table',

@@ -502,6 +502,20 @@ class EndpointBuilder extends _isc.EndpointRef {
         {'request': request},
       );
 
+  _ida.Future<_i3ykup7f.BuilderSnapshot> abandonFailedEdit(
+    int draftId,
+    int mutation,
+    int jobId,
+  ) => caller.callServerEndpoint<_i3ykup7f.BuilderSnapshot>(
+    'builder',
+    'abandonFailedEdit',
+    {
+      'draftId': draftId,
+      'mutation': mutation,
+      'jobId': jobId,
+    },
+  );
+
   _ida.Future<List<_ihdhb6mh.ActivityItem>> runs(int appId) =>
       caller.callServerEndpoint<List<_ihdhb6mh.ActivityItem>>(
         'builder',

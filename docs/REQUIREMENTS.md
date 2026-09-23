@@ -84,3 +84,23 @@ activation, preview-to-published visual parity and appearance-specific live-AI
 behavior remain unverified; prior connected evidence above does not establish
 those layers. See [the appearance contract and verification record](APPEARANCE.md)
 for defaults, capability semantics and exact boundaries.
+
+### Everyday customization (2026-09-23)
+
+Implemented: describe-first creation with optional guidance; Notes, Reminders,
+Calendar and Clock & Focus examples; appearance/content/layout/behavior controls;
+one explicit publication review; reminder timing edits with renewed approval;
+and a device-local focus countdown that survives normal reopening. Immediate
+durable generation dispatch, visible recovery metadata and safe failed-edit
+discard support the same creation loop. Existing app identities and data remain
+protected by the shared compatibility and authenticated publication contracts.
+
+Verification passed: 505 tests, analysis/formatting, PostgreSQL integration and
+two-process reminder recovery, plus web and Android release compilation. iOS
+compilation is blocked by an uninstalled Xcode platform component. Live AI checks
+passed 5/8 creation scenarios and all 8 edit scenarios on their latest checks;
+three edits used explicit templates because creation failed. AI creation still
+needs reliability work. Current connected runtime and physical-device
+interaction remain unverified. Phone actions/data access and background alerts
+are deferred. See [the live AI evaluation](CUSTOMIZATION_AI_CHECK.md).
+See [the customization contract and execution record](CUSTOMIZATION.md).

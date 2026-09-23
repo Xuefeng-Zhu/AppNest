@@ -8,6 +8,7 @@ import 'package:appnest_spec/appnest_spec.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 BuilderSnapshot snapshot(AppSpec spec, int revision) => BuilderSnapshot(
+  candidateReady: true,
   appId: 1,
   draftId: 2,
   mutation: revision,

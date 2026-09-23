@@ -344,7 +344,10 @@ class ViewSpec {
   final Map<String, dynamic>? query;
   final DateFilterSpec? dateFilter;
   final Map<String, dynamic> options;
-  bool get contentOnly => type == 'richText' || type == 'banner';
+  bool get contentOnly =>
+      const {'richText', 'banner', 'clock', 'timer'}.contains(type);
+  ClockOptions get clockOptions => ClockOptions.fromJson(options);
+  TimerOptions get timerOptions => TimerOptions.fromJson(options);
   bool get configured =>
       options.isNotEmpty ||
       presentation != null ||
@@ -423,7 +426,12 @@ class ViewSpec {
         ? <String, dynamic>{}
         : object(j['options'], 'view options');
     _validateOptionsShape(type, options);
-    final contentOnly = type == 'richText' || type == 'banner';
+    final contentOnly = const {
+      'richText',
+      'banner',
+      'clock',
+      'timer',
+    }.contains(type);
     if (contentOnly && j.containsKey('collectionId'))
       throw const SpecException('Content blocks must omit collectionId');
     return ViewSpec(
@@ -533,6 +541,8 @@ const capabilities = {
   'views.richText.v1',
   'views.banner.v1',
   'views.checklist.v1',
+  'views.clock.v1',
+  'views.timer.v1',
   'fields.image.v1',
   'views.interactive.v1',
   'capacity.v1',
@@ -741,8 +751,7 @@ class AppSpec {
       'automationRequests',
       Limits.rules,
     ).map((v) => AutomationSpec.fromJson(object(v, 'rule'))).toList();
-    if (c.isEmpty || v.isEmpty)
-      throw const SpecException('An app needs collections and views');
+    if (v.isEmpty) throw const SpecException('An app needs at least one view');
     unique(c.map((x) => x.id), 'collections');
     unique(v.map((x) => x.id), 'views');
     unique(a.map((x) => x.id), 'actions');
@@ -765,7 +774,7 @@ class AppSpec {
           : null,
     );
     final needed = <String>{
-      'collections.v1',
+      if (c.isNotEmpty) 'collections.v1',
       if (spec.navigation != null) 'navigation.v1',
       if (spec.appearance != null) 'appearance.v1',
       if (spec.navigation?.pages.any((p) => p.layout != null) ?? false)
@@ -964,7 +973,11 @@ class AppSpec {
             ? 'capacity.v1'
             : 'assignment.v1';
         if (!col.behaviors.any((b) => b.type == behavior))
-          throw const SpecException('Reminder recipient binding is invalid');
+          throw SpecException(
+            'Reminder effect ${rule.effect} requires a $behavior behavior on '
+            'collection ${col.id}. For owner inbox reminders, use notifyOwner '
+            'with the personalTracker.v1 policy.',
+          );
       }
     }
     for (final page in spec.navigation?.pages ?? <PageSpec>[]) {
@@ -1214,16 +1227,50 @@ class AppSpec {
             'Label target is ambiguous; use globally distinct IDs for manual label editing.',
           );
       case 'AddField':
-        keys(patch, {'type', 'collectionId', 'field'}, 'AddField');
-        final f = Map<String, dynamic>.from(object(patch['field'], 'field'))
-          ..['id'] = allocateId();
-        f['required'] ??= false;
+        keys(patch, {'type', 'collectionId', 'field', 'viewIds'}, 'AddField');
         final col = (j['collections'] as List)
             .cast<Map<String, dynamic>>()
             .where((c) => c['id'] == patch['collectionId'])
             .firstOrNull;
         if (col == null) throw const SpecException('Collection not found');
-        (col['fields'] as List).add(FieldSpec.fromJson(f).toJson());
+        final viewIds = array(
+          patch.containsKey('viewIds') ? patch['viewIds'] : [],
+          'field views',
+          Limits.views,
+        ).map(stableId).toList();
+        unique(viewIds, 'field views');
+        for (final id in viewIds) {
+          final target = view(id);
+          if (target.collectionId != col['id'] ||
+              !{'form', 'details'}.contains(target.type)) {
+            throw const SpecException(
+              'New fields can bind only to forms and details in the same collection',
+            );
+          }
+        }
+        final f = Map<String, dynamic>.from(object(patch['field'], 'field'))
+          ..['id'] = allocateId();
+        f['required'] ??= false;
+        final field = FieldSpec.fromJson(f);
+        (col['fields'] as List).add(field.toJson());
+        for (final target in j['views'] as List) {
+          final selected = viewIds.contains(target['id']);
+          // Empty/absent fieldIds already displays all collection fields. Keep
+          // that behavior instead of narrowing the view to only the new field.
+          final visible = target['fieldIds'] as List?;
+          final implicit = visible == null || visible.isEmpty;
+          // With atomic binding, every implicit stepped form exposes the new
+          // field, including unselected forms. Extend their step coverage too.
+          final implicitForm =
+              patch.containsKey('viewIds') &&
+              target['type'] == 'form' &&
+              target['collectionId'] == col['id'] &&
+              implicit;
+          if (!selected && !implicitForm) continue;
+          if (selected && !implicit) visible.add(field.id);
+          final steps = target['options']?['steps'] as List?;
+          if (steps != null) (steps.last['fieldIds'] as List).add(field.id);
+        }
         if (f['type'] == 'image') requireCapability('fields.image.v1');
       case 'AddChoice':
         keys(patch, {'type', 'collectionId', 'fieldId', 'choice'}, 'AddChoice');
@@ -1378,6 +1425,24 @@ class AppSpec {
         j['views'] = ids
             .map((id) => (j['views'] as List).firstWhere((v) => v['id'] == id))
             .toList();
+      case 'UpdateReminder':
+        keys(patch, {'type', 'ruleId', 'rule'}, 'UpdateReminder');
+        final id = stableId(patch['ruleId']);
+        if (!automationRequests.any((rule) => rule.id == id))
+          throw const SpecException('Reminder not found');
+        final rule = Map<String, dynamic>.from(object(patch['rule'], 'rule'));
+        if (rule.containsKey('id'))
+          throw const SpecException('Reminder identity cannot be changed');
+        rule['id'] = id;
+        final validated = AutomationSpec.fromJson(rule).toJson();
+        j['automationRequests'] = (j['automationRequests'] as List)
+            .map((existing) => existing['id'] == id ? validated : existing)
+            .toList();
+        requireCapability('notifications.inApp.v1');
+        if (rule['effect']?['type'] == 'notifyOwner')
+          requireCapability('notifications.owner.v1');
+        if (rule['condition'] != null)
+          requireCapability('automations.conditions.v1');
       case 'ProposeReminder':
         keys(patch, {'type', 'rule'}, 'ProposeReminder');
         final rule = Map<String, dynamic>.from(object(patch['rule'], 'rule'))

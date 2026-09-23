@@ -112,6 +112,33 @@ void main() {
     for (final (name, size, location) in cases)
       (name, size, location, dailyPlannerTemplate()),
     ...richCases,
+    for (final (utility, template) in [
+      ('notes', notesTemplate()),
+      ('reminders', remindersTemplate()),
+      ('calendar', calendarTemplate()),
+    ])
+      for (final size in [const Size(390, 844), const Size(1440, 1000)])
+        (
+          'utility-$utility-${size.width.toInt()}',
+          size,
+          MiniAppLocation(template.navigation!.entryPageId),
+          template,
+        ),
+    for (final style in ['digital', 'analog'])
+      for (final size in [const Size(390, 844), const Size(1440, 1000)])
+        (
+          'utility-focus-$style-${size.width.toInt()}',
+          size,
+          const MiniAppLocation('focusPage'),
+          focusTemplate().patch({
+            'type': 'UpdateView',
+            'viewId': 'localClock',
+            'view': {
+              ...focusTemplate().view('localClock').toJson()..remove('id'),
+              'options': {'style': style, 'hourFormat': '24', 'showDate': true},
+            },
+          }, () => 'unused'),
+        ),
     for (final style in appearanceStyles)
       for (final size in [const Size(390, 844), const Size(1440, 1000)])
         (

@@ -735,11 +735,21 @@ void main() {
 
         final malformed = await job(d.mutation);
         for (var i = 0; i < 3; i++) {
-          await Worker.generate(
+          final stored = (await GenerationJob.db.findById(
             owner,
             malformed.id!,
-            provider: FakeAiProvider('not JSON'),
-          );
+          ))!;
+          final previous = clock;
+          clock = () => stored.nextAttemptAt;
+          try {
+            await Worker.generate(
+              owner,
+              malformed.id!,
+              provider: FakeAiProvider('not JSON'),
+            );
+          } finally {
+            clock = previous;
+          }
         }
         expect(
           (await GenerationJob.db.findById(owner, malformed.id!))!.status,

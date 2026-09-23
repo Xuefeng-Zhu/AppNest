@@ -83,6 +83,10 @@ class BuilderChat extends StatelessWidget {
   final String? error;
   final List<String> diagnostics;
   final VoidCallback onSend;
+  final VoidCallback? onShapeIdea;
+  final VoidCallback? onKeepPreview;
+  final int jobAttempts;
+  final DateTime? jobCreatedAt;
   final List<GuidanceQuestion>? guidanceQuestions;
   final Key guidancePanelKey;
   final String? guidanceSource;
@@ -110,6 +114,10 @@ class BuilderChat extends StatelessWidget {
     required this.error,
     required this.diagnostics,
     required this.onSend,
+    this.onShapeIdea,
+    this.onKeepPreview,
+    this.jobAttempts = 0,
+    this.jobCreatedAt,
     required this.guidanceQuestions,
     required this.guidancePanelKey,
     required this.guidanceSource,
@@ -247,6 +255,13 @@ class BuilderChat extends StatelessWidget {
                               builderStageLabel(stage),
                               style: Theme.of(context).textTheme.titleSmall,
                             ),
+                            if (jobAttempts > 1)
+                              Text('Attempt $jobAttempts of 3'),
+                            if (jobCreatedAt != null)
+                              Text(
+                                '${DateTime.now().difference(jobCreatedAt!).inSeconds.clamp(0, 3600)} seconds since your request was saved',
+                                style: Theme.of(context).textTheme.bodySmall,
+                              ),
                             const SizedBox(height: 6),
                             Text(switch (stage) {
                               'queued' =>
@@ -282,6 +297,14 @@ class BuilderChat extends StatelessWidget {
                           label: const Text('Try again'),
                         ),
                       ),
+                    if (onKeepPreview != null)
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: OutlinedButton(
+                          onPressed: busy ? null : onKeepPreview,
+                          child: const Text('Keep previous preview'),
+                        ),
+                      ),
                   ],
                   if (diagnostics.isNotEmpty && !generating)
                     ExpansionTile(
@@ -310,7 +333,7 @@ class BuilderChat extends StatelessWidget {
               const Padding(
                 padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 child: Text(
-                  'Template mode · AI provider not configured. Use the edit menu to shape your app.',
+                  'Template mode · AI provider not configured. Use Customize to shape your app.',
                   style: TextStyle(fontSize: 12),
                 ),
               ),
@@ -373,6 +396,29 @@ class BuilderChat extends StatelessWidget {
                               onEditIdea: onEditIdea,
                             ),
                           ),
+                        if (onShapeIdea != null)
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: ValueListenableBuilder<TextEditingValue>(
+                              valueListenable: controller,
+                              builder: (context, value, _) => TextButton.icon(
+                                key: const ValueKey('shape-idea'),
+                                onPressed:
+                                    busy ||
+                                        generating ||
+                                        aiAvailable != true ||
+                                        stage == 'stale' ||
+                                        value.text.trim().isEmpty
+                                    ? null
+                                    : onShapeIdea,
+                                icon: const Icon(
+                                  Icons.lightbulb_outline,
+                                  size: 16,
+                                ),
+                                label: const Text('Help shape my idea'),
+                              ),
+                            ),
+                          ),
                         Padding(
                           padding: const EdgeInsets.fromLTRB(16, 0, 10, 10),
                           child: Row(
@@ -383,7 +429,7 @@ class BuilderChat extends StatelessWidget {
                                       ? 'Checking whether a few details would help'
                                       : generating
                                       ? 'Working on your request'
-                                      : 'One idea at a time',
+                                      : 'Ready when you are',
                                   style: const TextStyle(fontSize: 12),
                                 ),
                               ),
@@ -398,7 +444,6 @@ class BuilderChat extends StatelessWidget {
                                       onPressed:
                                           busy ||
                                               assessing ||
-                                              guidanceQuestions != null ||
                                               generating ||
                                               aiAvailable != true ||
                                               value.text.trim().isEmpty ||
@@ -430,7 +475,7 @@ class BuilderChat extends StatelessWidget {
             const Padding(
               padding: EdgeInsets.only(bottom: 12),
               child: Text(
-                'Changes stay in preview until you publish.',
+                'Try changes here. Apply them when you’re ready.',
                 textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 11),
               ),

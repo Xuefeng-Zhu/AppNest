@@ -1,8 +1,25 @@
 # AppNest
 
-Describe the tool your group needs. AppNest creates it—with shared data, permissions, and automations.
+Make everyday apps your own. Describe what you want, try it, customize it, and start using it.
 
 A working local Flutter web + Serverpod modular monolith. Mini apps are validated declarative definitions, **not generated executable code**. Daily Planner, reading journals, shared chore boards and capacity-limited volunteer shifts share one renderer and one transactional runtime.
+
+## Create, try, customize
+
+Start with an idea or choose Notes, Reminders, Calendar, or Clock & Focus as an
+example. Creation goes straight to generation; **Help shape my idea** offers
+optional questions. Explicit templates remain available without AI.
+
+Use **Customize** for appearance, content, layout, and supported behavior. The
+same controls and chat edits update a reviewable preview. **Use app** publishes
+the first version; **Apply changes** updates an existing app through one review,
+preserving saved records and explicit reminder approval.
+
+Clock & Focus adds analog/digital local time and a countdown that can start,
+pause, resume, and reset. Timer state stays on the current device, separated by
+account and mini-app, and restores from its deadline after reopening. Completion
+is shown in AppNest; background alerts and phone integrations are not included.
+See [the customization contract and verification record](docs/CUSTOMIZATION.md).
 
 ## Personal mini-apps
 

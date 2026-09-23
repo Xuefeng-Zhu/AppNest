@@ -25,8 +25,11 @@ void main() {
   test(
     'all rich capabilities are represented by usable round-trip templates',
     () {
-      final templates = richStarterTemplates();
-      expect(templates.length, 3);
+      final templates = {
+        ...richStarterTemplates(),
+        ...utilityStarterTemplates(),
+      };
+      expect(templates.length, 7);
       final types = <String>{};
       for (final spec in templates.values) {
         expect(AppSpec.parse(spec.canonical).canonical, spec.canonical);

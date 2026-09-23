@@ -8,6 +8,7 @@ import '../../generated/protocol.dart';
 import '../../generated/future_calls.dart';
 import '../runtime/access.dart';
 import '../builder/provider.dart';
+import '../builder/generation_quality.dart';
 import '../media/media.dart';
 
 class Worker {
@@ -132,17 +133,7 @@ class Worker {
         s.log('outbox_retry event_id=${e.id} attempt=${e.attempts}');
       }
     }
-    final jobs = await GenerationJob.db.find(
-      s,
-      where: (t) =>
-          t.status.inSet({'queued', 'generating', 'validating'}) &
-          (t.nextAttemptAt <= clock()),
-      orderBy: (t) => t.id,
-      limit: 1,
-    );
-    for (final job in jobs) {
-      await generate(s, job.id!);
-    }
+    final generationScheduled = await scheduleNextGeneration(s);
     final runs = await AutomationRun.db.find(
       s,
       where: (t) =>
@@ -180,9 +171,9 @@ class Worker {
             .execute(run.id!);
       }
     }
-    if (events.isNotEmpty || jobs.isNotEmpty || runs.isNotEmpty) {
+    if (events.isNotEmpty || generationScheduled || runs.isNotEmpty) {
       s.log(
-        'reconcile outbox_batch=${events.length} generation_batch=${jobs.length} run_batch=${runs.length}',
+        'reconcile outbox_batch=${events.length} generation_scheduled=$generationScheduled run_batch=${runs.length}',
       );
     }
   }
@@ -402,6 +393,72 @@ class Worker {
     );
   });
   static const _repairUsageKey = '_appnestRepair';
+  static const _failureUsageKey = '_appnestFailureCategory';
+
+  /// Named calls are wakeups, not deduplication keys. The job lease and revision
+  /// checks are authoritative even when the scheduler delivers duplicates.
+  static Future<bool> scheduleGeneration(Session s, int id, DateTime at) async {
+    try {
+      await s.serverpod.futureCalls
+          .callAtTime(at, identifier: 'appnest-generation-$id')
+          .nestWorker
+          .generate(id);
+      return true;
+    } catch (_) {
+      s.log('generation_schedule_pending job_id=$id');
+      return false;
+    }
+  }
+
+  static Future<bool> scheduleNextGeneration(Session s) async {
+    final job = await GenerationJob.db.findFirstRow(
+      s,
+      where: (t) =>
+          t.status.inSet({'queued', 'generating', 'validating'}) &
+          (t.nextAttemptAt <= clock()) &
+          (t.leaseUntil.equals(null) | (t.leaseUntil <= clock())),
+      orderBy: (t) => t.id,
+    );
+    return job != null && await scheduleGeneration(s, job.id!, clock());
+  }
+
+  static String? failureCategory(GenerationJob job) {
+    if (job.status == 'stale') return 'stale';
+    final category = _generationUsage(job.usageJson)[_failureUsageKey];
+    return category is String && _failureCategories.contains(category)
+        ? category
+        : job.status == 'failed'
+        ? 'validation'
+        : null;
+  }
+
+  static const _failureCategories = {
+    'timeout',
+    'responseFormat',
+    'responseTooLarge',
+    'unsupported',
+    'providerUnavailable',
+    'validation',
+    'internal',
+  };
+
+  static String _safeFailureCategory(String? kind) => switch (kind) {
+    'timeout' => 'timeout',
+    'truncated' ||
+    'output_json' ||
+    'output_shape' ||
+    'envelope_json' ||
+    'envelope_shape' ||
+    'content_missing' ||
+    'completion_stopped' => 'responseFormat',
+    'response_size' => 'responseTooLarge',
+    'unsupported' => 'unsupported',
+    'http_error' ||
+    'transport_error' ||
+    'providerUnavailable' => 'providerUnavailable',
+    'unexpected' => 'internal',
+    _ => 'validation',
+  };
 
   static Map<String, dynamic> _generationUsage(String source) {
     try {
@@ -484,6 +541,21 @@ class Worker {
         await GenerationJob.db.updateRow(s, j, transaction: tx);
         return null;
       }
+      if (j.nextAttemptAt.isAfter(clock())) return null;
+      // A short transaction lock serializes claims across apps and processes.
+      // Never hold a database lock or a waiting Future Call slot during AI I/O.
+      await s.db.unsafeQuery(
+        "SELECT pg_advisory_xact_lock(hashtextextended('appnest-generation-slot', 41))",
+        transaction: tx,
+      );
+      final occupied = await GenerationJob.db.findFirstRow(
+        s,
+        where: (t) =>
+            t.status.inSet({'generating', 'validating'}) &
+            (t.leaseUntil > clock()),
+        transaction: tx,
+      );
+      if (occupied != null) return null;
       j.status = 'generating';
       j.attempts++;
       j.leaseGeneration++;
@@ -525,8 +597,9 @@ class Worker {
       );
       final output = parseAiOutput(result.text);
       if (output['unsupported'] is String) {
-        throw SpecException(
-          str(output['unsupported'], 'unsupported explanation', max: 1000),
+        throw const AiResponseException(
+          'unsupported',
+          'Requested capability is unavailable. Choose supported AppNest features.',
         );
       }
       if (job.mode == 'edit') {
@@ -551,6 +624,10 @@ class Worker {
           }, () => throw StateError('Appearance must not allocate IDs'));
         }
       }
+      validateGeneratedExperience(
+        candidate,
+        baseline: job.mode == 'edit' ? base : null,
+      );
     } on AiResponseException catch (e) {
       error = e.message;
       errorKind = e.kind;
@@ -559,7 +636,9 @@ class Worker {
       errorKind = 'spec_validation';
     } on NestError catch (e) {
       error = e.message;
-      errorKind = 'request_validation';
+      errorKind = e.category == 'providerUnavailable'
+          ? 'providerUnavailable'
+          : 'request_validation';
     } on FormatException {
       error = 'The generated definition contains an invalid value format. Return valid values matching the AppSpec schema.';
       errorKind = 'value_format';
@@ -603,14 +682,21 @@ class Worker {
       j.status = stale
           ? 'stale'
           : error != null
-          ? (j.attempts >= Limits.generationAttempts ? 'failed' : 'queued')
+          ? (j.attempts >= Limits.generationAttempts ||
+                    errorKind == 'unsupported'
+                ? 'failed'
+                : 'queued')
           : 'preview ready';
       j.diagnostics = error ?? '';
       j.provider = result?.provider;
       j.model = result?.model;
       // Provider metadata cannot supply or retain our private repair context.
       final usage = Map<String, dynamic>.from(result?.usage ?? {})
-        ..remove(_repairUsageKey);
+        ..remove(_repairUsageKey)
+        ..remove(_failureUsageKey);
+      if (errorKind != null) {
+        usage[_failureUsageKey] = _safeFailureCategory(errorKind);
+      }
       final output = result?.text;
       if (j.status == 'queued' &&
           {
@@ -650,6 +736,11 @@ class Worker {
         'generation_result job_id=$id status=${j.status} attempt=${j.attempts} error_kind=${errorKind ?? 'none'}',
       );
     });
+    final next = await GenerationJob.db.findById(s, id);
+    if (next?.status == 'queued') {
+      await scheduleGeneration(s, id, next!.nextAttemptAt);
+    }
+    await scheduleNextGeneration(s);
   }
 }
 
@@ -657,4 +748,6 @@ class NestWorkerFutureCall extends FutureCall {
   Future<void> reconcile(Session session) => Worker.drain(session);
   Future<void> execute(Session session, int runId) =>
       Worker.execute(session, runId);
+  Future<void> generate(Session session, int jobId) =>
+      Worker.generate(session, jobId);
 }

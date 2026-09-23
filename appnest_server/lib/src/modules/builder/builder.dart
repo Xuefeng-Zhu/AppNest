@@ -152,6 +152,7 @@ class Builder {
     final base = d.baseVersionId == null
         ? null
         : await AppVersion.db.findById(s, d.baseVersionId!, transaction: tx);
+    final candidate = AppSpec.parse(d.candidateJson);
     return BuilderSnapshot(
       appId: d.appId,
       draftId: d.id!,
@@ -164,15 +165,32 @@ class Builder {
       diagnostics: job == null || job.diagnostics.isEmpty
           ? []
           : [job.diagnostics],
-      changes: AppSpec.parse(
-        d.candidateJson,
-      ).diff(base == null ? null : AppSpec.parse(base.specJson)),
-      enabledRuleIds: (await Automation.db.find(
-        s,
-        where: (t) => t.appId.equals(d.appId) & t.enabled.equals(true),
-        transaction: tx,
-      )).map((r) => r.ruleId).toList(),
+      changes: candidate.diff(
+        base == null ? null : AppSpec.parse(base.specJson),
+      ),
+      enabledRuleIds:
+          (await Automation.db.find(
+                s,
+                where: (t) => t.appId.equals(d.appId) & t.enabled.equals(true),
+                transaction: tx,
+              ))
+              .where(
+                (approved) => candidate.automationRequests.any(
+                  (rule) =>
+                      rule.id == approved.ruleId &&
+                      canonicalJson(rule.toJson()) == approved.ruleJson,
+                ),
+              )
+              .map((r) => r.ruleId)
+              .toList(),
       publishedVersionId: d.publishedVersionId,
+      candidateReady:
+          job == null || job.mode == 'edit' || job.status == 'preview ready',
+      latestRequest: job?.requestText,
+      jobAttempts: job?.attempts ?? 0,
+      jobCreatedAt: job?.createdAt,
+      jobUpdatedAt: job?.updatedAt,
+      failureCategory: job == null ? null : Worker.failureCategory(job),
     );
   }
 
@@ -232,8 +250,8 @@ class Builder {
     int mutation,
     String request, {
     bool startFromScratch = true,
-  }) => validated(
-    () => s.db.transaction((tx) async {
+  }) => validated(() async {
+    final accepted = await s.db.transaction((tx) async {
       str(request, 'request', max: Limits.promptBytes);
       if (utf8.encode(request).length > Limits.promptBytes) {
         fail('invalidInput', 'Request exceeds the prompt byte limit.');
@@ -299,7 +317,7 @@ class Builder {
             tx: tx,
             startFromScratch: startFromScratch,
           ),
-          promptVersion: 'appnest-v1-appearance-structured',
+          promptVersion: 'appnest-v1-typed-customization-2',
           nextAttemptAt: clock(),
           diagnostics: '',
           usageJson: '{}',
@@ -309,6 +327,52 @@ class Builder {
         transaction: tx,
       );
       d.activeJobId = job.id;
+      d.updatedAt = clock();
+      await AppDraft.db.updateRow(s, d, transaction: tx);
+      return snapshot(s, d, tx: tx);
+    });
+    // The accepted job is committed before the durable wakeup. Reconciliation
+    // recovers a crash or scheduling failure in this small gap.
+    await Worker.scheduleGeneration(s, accepted.jobId!, clock());
+    return accepted;
+  });
+
+  static Future<BuilderSnapshot> abandonFailedEdit(
+    Session s,
+    int draftId,
+    int mutation,
+    int jobId,
+  ) => validated(
+    () => s.db.transaction((tx) async {
+      var d = await draft(s, draftId, tx: tx);
+      final a = await access(s, d.appId, tx: tx, lock: true);
+      a.writable();
+      d = await draft(s, draftId, tx: tx);
+      if (d.mutation != mutation ||
+          d.activeJobId != jobId ||
+          d.publishedVersionId != null ||
+          d.baseVersionId != a.app.activeVersionId) {
+        fail(
+          'recordConflict',
+          'This draft changed. Refresh it before continuing.',
+        );
+      }
+      final job = await GenerationJob.db.findById(s, jobId, transaction: tx);
+      if (job == null ||
+          job.draftId != d.id ||
+          job.mutation != mutation ||
+          job.status != 'failed' ||
+          job.mode != 'edit') {
+        fail(
+          'invalidInput',
+          'Only a failed edit can keep its previous preview.',
+        );
+      }
+      // Edit jobs begin from a validated template, earlier successful candidate,
+      // or published version. A failed create still contains only a placeholder.
+      AppSpec.parse(d.candidateJson);
+      d.activeJobId = null;
+      d.mutation++;
       d.updatedAt = clock();
       await AppDraft.db.updateRow(s, d, transaction: tx);
       return snapshot(s, d, tx: tx);

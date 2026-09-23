@@ -51,6 +51,12 @@ class BuilderEndpoint extends Endpoint {
   );
   Future<int> publish(Session session, PublishRequest request) =>
       Builder.publish(session, request);
+  Future<BuilderSnapshot> abandonFailedEdit(
+    Session session,
+    int draftId,
+    int mutation,
+    int jobId,
+  ) => Builder.abandonFailedEdit(session, draftId, mutation, jobId);
   Future<List<ActivityItem>> runs(Session session, int appId) async {
     final a = await access(session, appId);
     a.requireBuilder();

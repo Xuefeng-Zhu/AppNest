@@ -71,6 +71,7 @@ AppSpec _template(
 }
 
 Map<String, AppSpec> starterTemplates() => {
+  ...utilityStarterTemplates(),
   ...richStarterTemplates(),
   'planner': dailyPlannerTemplate(),
   'reading': _template(
@@ -574,7 +575,7 @@ List<Map<String, dynamic>> syntheticRecords(CollectionSpec c, {DateTime? now}) {
       return c.normalizeRecord(data);
     }).toList();
   }
-  if ({'projects', 'memories', 'checkins'}.contains(c.id)) {
+  if ({'projects', 'memories', 'checkins', 'events'}.contains(c.id)) {
     final local = (now ?? DateTime.now()).toLocal();
     final count = c.id == 'checkins' ? 14 : 6;
     return List.generate(count, (i) {

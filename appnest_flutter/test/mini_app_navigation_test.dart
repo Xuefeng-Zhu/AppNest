@@ -29,6 +29,7 @@ class NavigationClient extends Client {
   final events = StreamController<AppEvent>.broadcast();
   bool denied = false;
   Completer<void>? blockedGet;
+  Completer<void>? blockedBegin;
   final calls = <String>[];
   final publications = <PublishRequest>[];
   AppManifest get manifest => AppManifest(
@@ -93,6 +94,21 @@ class NavigationClient extends Client {
           aiMode: 'Template mode',
           development: true,
           actorId: 'test',
+        );
+      case 'builder.begin':
+        await blockedBegin?.future;
+        result = BuilderSnapshot(
+          appId: 1,
+          draftId: 1,
+          baseVersionId: 1,
+          mutation: 0,
+          stage: 'preview ready',
+          candidateJson: preview.spec.canonical,
+          candidateHash: preview.spec.hash,
+          diagnostics: [],
+          changes: [],
+          enabledRuleIds: [],
+          candidateReady: true,
         );
       case 'runtime.inbox':
         result = <InboxItem>[];
@@ -202,6 +218,7 @@ void main() {
     client.preview = PreviewRuntimeAdapter(dailyPlannerTemplate());
     client.denied = false;
     client.blockedGet = null;
+    client.blockedBegin = null;
     client.calls.clear();
     client.publications.clear();
   });
@@ -276,6 +293,41 @@ void main() {
     addTearDown(history.dispose);
     return (router, history);
   }
+
+  testWidgets('rapid Customize taps open a single builder', (tester) async {
+    await mount(tester, const AppNestLocation(appId: 1));
+    client.blockedBegin = Completer<void>();
+    final customize = tester
+        .widget<IconButton>(
+          find.byWidgetPredicate(
+            (widget) =>
+                widget is IconButton && widget.tooltip == 'Customize app',
+          ),
+        )
+        .onPressed!;
+    customize();
+    customize();
+    await tester.pump();
+    expect(client.calls.where((call) => call == 'builder.begin'), hasLength(1));
+    client.blockedBegin!.complete();
+    await tester.pumpAndSettle();
+    expect(find.byType(BuilderScreen), findsOneWidget);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(find.byType(BuilderScreen), findsNothing);
+    expect(
+      tester
+          .widget<IconButton>(
+            find.byWidgetPredicate(
+              (widget) =>
+                  widget is IconButton && widget.tooltip == 'Customize app',
+            ),
+          )
+          .onPressed,
+      isNotNull,
+    );
+    await tester.pumpWidget(const SizedBox());
+  });
 
   testWidgets(
     'browser stack retains parent across rejected Back, Cancel, and renderer Back',
@@ -532,6 +584,7 @@ void main() {
       addTearDown(tester.view.resetDevicePixelRatio);
       final spec = dailyPlannerTemplate();
       BuilderSnapshot snapshot(AppSpec s, int mutation) => BuilderSnapshot(
+        candidateReady: true,
         appId: 1,
         draftId: 1,
         mutation: mutation,
@@ -564,7 +617,7 @@ void main() {
       );
       await tester.tap(find.text('Build'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Publish'));
+      await tester.tap(find.text('Use app'));
       await tester.pumpAndSettle();
       expect(
         tester.widget<CheckboxListTile>(find.byType(CheckboxListTile)).value,
@@ -572,9 +625,6 @@ void main() {
       );
       await tester.ensureVisible(find.byType(CheckboxListTile));
       await tester.tap(find.byType(CheckboxListTile));
-      await tester.ensureVisible(find.text('Review & publish'));
-      await tester.tap(find.text('Review & publish'));
-      await tester.pumpAndSettle();
       final changed = spec.patch({
         'type': 'RenameLabel',
         'targetId': 'app',
@@ -586,7 +636,7 @@ void main() {
       await tester.tap(
         find.descendant(
           of: find.byType(AlertDialog),
-          matching: find.text('Publish'),
+          matching: find.text('Use app'),
         ),
       );
       await tester.pumpAndSettle();
@@ -595,15 +645,14 @@ void main() {
         find.textContaining('The preview changed during review'),
         findsOneWidget,
       );
-      await tester.tap(find.text('Publish'));
+      await tester.tap(find.text('Use app'));
       await tester.pumpAndSettle();
-      await tester.ensureVisible(find.text('Review & publish'));
-      await tester.tap(find.text('Review & publish'));
-      await tester.pumpAndSettle();
+      await tester.tap(find.byType(CheckboxListTile));
+      await tester.pump();
       await tester.tap(
         find.descendant(
           of: find.byType(AlertDialog),
-          matching: find.text('Publish'),
+          matching: find.text('Use app'),
         ),
       );
       await tester.pumpAndSettle();

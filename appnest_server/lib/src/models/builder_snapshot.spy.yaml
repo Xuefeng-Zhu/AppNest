@@ -12,3 +12,9 @@ fields:
   changes: List<String>
   enabledRuleIds: List<String>
   publishedVersionId: int?
+  candidateReady: bool, default=false
+  latestRequest: String?
+  jobAttempts: int, default=0
+  jobCreatedAt: DateTime?
+  jobUpdatedAt: DateTime?
+  failureCategory: String?

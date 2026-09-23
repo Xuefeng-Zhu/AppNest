@@ -4,6 +4,7 @@ import 'package:appnest_spec/appnest_spec.dart';
 import 'package:flutter/material.dart';
 
 const componentGroups = <String, Map<String, String>>{
+  'Everyday utilities': {'clock': 'Clock', 'timer': 'Focus timer'},
   'Data and planning': {
     'list': 'List',
     'table': 'Table',
@@ -29,9 +30,13 @@ const componentGroups = <String, Map<String, String>>{
   },
 };
 
-bool isContentComponent(String type) => type == 'banner' || type == 'richText';
+bool isContentComponent(String type) =>
+    const {'banner', 'richText', 'clock', 'timer'}.contains(type);
 
-Future<String?> chooseComponent(BuildContext context) => showDialog<String>(
+Future<String?> chooseComponent(
+  BuildContext context, {
+  bool hasCollections = true,
+}) => showDialog<String>(
   context: context,
   builder: (context) => AlertDialog(
     title: const Text('Choose a component'),
@@ -54,10 +59,11 @@ Future<String?> chooseComponent(BuildContext context) => showDialog<String>(
                 runSpacing: 8,
                 children: [
                   for (final component in group.value.entries)
-                    ActionChip(
-                      label: Text(component.value),
-                      onPressed: () => Navigator.pop(context, component.key),
-                    ),
+                    if (hasCollections || isContentComponent(component.key))
+                      ActionChip(
+                        label: Text(component.value),
+                        onPressed: () => Navigator.pop(context, component.key),
+                      ),
                 ],
               ),
             ],
@@ -583,6 +589,55 @@ class _ComponentOptionsEditorState extends State<ComponentOptionsEditor> {
   Widget build(BuildContext context) => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
+      if (widget.type == 'clock') ...[
+        select('Clock display', 'style', const {
+          'digital': 'Digital',
+          'analog': 'Analog',
+        }, fallback: 'digital'),
+        select('Time format', 'hourFormat', const {
+          'system': 'Device setting',
+          '12': '12-hour',
+          '24': '24-hour',
+        }, fallback: 'system'),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Show seconds'),
+          value: options['showSeconds'] as bool? ?? false,
+          onChanged: widget.enabled ? (v) => change('showSeconds', v) : null,
+        ),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Show date'),
+          value: options['showDate'] as bool? ?? true,
+          onChanged: widget.enabled ? (v) => change('showDate', v) : null,
+        ),
+      ],
+      if (widget.type == 'timer') ...[
+        TextFormField(
+          key: const ValueKey('timer-duration'),
+          initialValue: (options['durationMinutes'] ?? 25).toString(),
+          enabled: widget.enabled,
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(
+            labelText: 'Focus minutes',
+            helperText: '1–180 minutes. Applies to the next focus session.',
+          ),
+          autovalidateMode: AutovalidateMode.onUserInteraction,
+          validator: (value) {
+            final minutes = int.tryParse(value ?? '');
+            return minutes == null || minutes < 1 || minutes > 180
+                ? 'Enter a whole number from 1 to 180.'
+                : null;
+          },
+          onChanged: (value) => change('durationMinutes', int.tryParse(value)),
+        ),
+        const Padding(
+          padding: EdgeInsets.symmetric(vertical: 12),
+          child: Text(
+            'Your focus session stays on this device. Completion appears when AppNest is open; phone alerts are not included.',
+          ),
+        ),
+      ],
       if (['calendar', 'timeline'].contains(widget.type))
         field('Date field', 'dateFieldId', {FieldType.timestamp}),
       if (['chart', 'metric'].contains(widget.type)) ...[

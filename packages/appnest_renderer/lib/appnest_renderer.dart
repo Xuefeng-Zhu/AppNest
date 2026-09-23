@@ -15,6 +15,8 @@ part 'src/rich_runtime.dart';
 part 'src/editor.dart';
 part 'src/visual_edit.dart';
 part 'src/rich_components.dart';
+part 'src/utility_timer.dart';
+part 'src/utility_components.dart';
 
 class RuntimeItem {
   final int id, revision;
@@ -43,6 +45,8 @@ class RuntimePage {
 }
 
 abstract class RuntimeAdapter {
+  late final UtilityTimerController _timerController = UtilityTimerController();
+  UtilityTimerController get timerController => _timerController;
   AppSpec get spec;
   bool get preview;
   bool get readOnly;
@@ -674,6 +678,8 @@ class PreviewRuntimeAdapter extends RuntimeAdapter {
   Map<String, dynamic> _bindingOptions(Map<String, dynamic> view) {
     final options = Map<String, dynamic>.from(view['options'] as Map? ?? {});
     final presentationKeys = switch (view['type']) {
+      'clock' => ['style', 'hourFormat', 'showSeconds', 'showDate'],
+      'timer' => ['durationMinutes'],
       'chart' => ['style'],
       'metric' => ['target'],
       'richText' => ['markdown'],
@@ -695,6 +701,7 @@ class PreviewRuntimeAdapter extends RuntimeAdapter {
   }
 
   void dispose() {
+    timerController.dispose();
     _imageAssets.clear();
     _presentationChanges.close();
     _changes.close();

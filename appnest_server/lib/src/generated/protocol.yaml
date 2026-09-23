@@ -33,6 +33,7 @@ builder:
   - patch:
   - generate:
   - publish:
+  - abandonFailedEdit:
   - runs:
 media:
   - beginUpload:

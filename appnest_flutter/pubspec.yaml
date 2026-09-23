@@ -41,6 +41,7 @@ dependencies:
   flutter_driver:
     sdk: flutter
   file_selector: ^1.1.0
+  shared_preferences: ^2.5.5
 dev_dependencies:
   # Used for agents to drive the app through the Dart MCP
   flutter_lints: '>=3.0.0 <7.0.0'

@@ -38,10 +38,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   int? guidanceWorkspace;
   bool guidanceFallback = false;
   String? guidanceNotice;
-  int? preparedGuidanceWorkspace;
-  String? preparedGuidanceText;
-  String? assessedIdea;
-  int? assessedWorkspace;
   ({int workspaceId, BuilderSnapshot draft, String request})? pendingCreation;
   bool invitationHandled = false;
   int loadGeneration = 0;
@@ -128,8 +124,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         setState(() {
           if (workspaceId != selectedWorkspace) {
             guidanceQuestions = null;
-            preparedGuidanceWorkspace = null;
-            preparedGuidanceText = null;
           }
           workspaceId = selectedWorkspace;
           workspaces = ws;
@@ -177,6 +171,61 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     load();
   }
 
+  Future<void> shapeIdea() async {
+    final request = prompt.text.trim();
+    final selectedWorkspace = workspaceId;
+    if (creating || selectedWorkspace == null || request.isEmpty) return;
+    setState(() => creating = true);
+    try {
+      final questions = canAssessIdea(request)
+          ? cleanGuidanceQuestions(
+              await client.builder.suggestQuestions(
+                request,
+                selectedWorkspace,
+                null,
+              ),
+            )
+          : null;
+      if (!mounted ||
+          workspaceId != selectedWorkspace ||
+          prompt.text.trim() != request) {
+        return;
+      }
+      showGuidance(
+        questions == null || questions.isEmpty
+            ? builtInGuidanceQuestions
+            : questions,
+        request,
+        selectedWorkspace,
+        fallback: questions == null,
+        notice: questions?.isEmpty == true
+            ? 'Your idea is ready to build. Add optional details or create it now.'
+            : questions == null
+            ? 'Try these built-in questions.'
+            : null,
+      );
+    } catch (e) {
+      if (!mounted ||
+          workspaceId != selectedWorkspace ||
+          prompt.text.trim() != request) {
+        return;
+      }
+      if (!canOfferBuiltInGuidance(e)) {
+        showError(e);
+      } else {
+        showGuidance(
+          builtInGuidanceQuestions,
+          request,
+          selectedWorkspace,
+          fallback: true,
+          notice: 'AI questions are unavailable. Add details or continue with your original idea.',
+        );
+      }
+    } finally {
+      if (mounted) setState(() => creating = false);
+    }
+  }
+
   Future<void> builder(String templateKey, {bool generate = false}) async {
     final request = prompt.text.trim();
     if (creating || workspaceId == null) return;
@@ -195,61 +244,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         // A lost response may hide a successful enqueue. Recover that request
         // instead of creating another app or submitting the same idea twice.
         alreadyAccepted =
-            d.jobId != null && d.mutation > pending.draft.mutation;
+            d.jobId != null &&
+            d.jobId != pending.draft.jobId &&
+            d.mutation > pending.draft.mutation &&
+            d.latestRequest == pending.request;
         if (alreadyAccepted) submittedRequest = pending.request;
       }
       if (generate && !alreadyAccepted) {
-        final prepared =
-            preparedGuidanceWorkspace == selectedWorkspace &&
-            preparedGuidanceText != null &&
-            request.startsWith(preparedGuidanceText!);
-        final assessed =
-            assessedWorkspace == selectedWorkspace && assessedIdea == request;
-        if (!prepared && !assessed && canAssessIdea(request)) {
-          try {
-            final questions = cleanGuidanceQuestions(
-              await client.builder.suggestQuestions(
-                request,
-                selectedWorkspace,
-                null,
-              ),
-            );
-            if (!mounted ||
-                workspaceId != selectedWorkspace ||
-                prompt.text.trim() != request) {
-              return;
-            }
-            if (questions == null || questions.isNotEmpty) {
-              showGuidance(
-                questions ?? builtInGuidanceQuestions,
-                request,
-                selectedWorkspace,
-                fallback: questions == null,
-                notice: questions == null
-                    ? 'AI questions were incomplete. Try these built-in questions.'
-                    : null,
-              );
-              return;
-            }
-            assessedIdea = request;
-            assessedWorkspace = selectedWorkspace;
-          } catch (e) {
-            if (!mounted ||
-                workspaceId != selectedWorkspace ||
-                prompt.text.trim() != request) {
-              return;
-            }
-            if (!canOfferBuiltInGuidance(e)) rethrow;
-            showGuidance(
-              builtInGuidanceQuestions,
-              request,
-              selectedWorkspace,
-              fallback: true,
-              notice: 'AI questions are unavailable. Try these built-in questions, or continue with your original idea.',
-            );
-            return;
-          }
-        }
         if (pending == null || pending.workspaceId != selectedWorkspace) {
           d = await client.builder.begin(selectedWorkspace, templateKey, null);
         }
@@ -272,8 +273,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         );
       }
       if (mounted) {
-        preparedGuidanceWorkspace = null;
-        preparedGuidanceText = null;
         guidanceQuestions = null;
         final navigation = Navigator.push<int>(
           context,
@@ -299,7 +298,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   void showError(Object e) {
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            e is NestError ? e.message : 'Couldn’t connect to AppNest. Your idea is still here; try again when connected.',
+          ),
+        ),
+      );
     }
   }
 
@@ -361,8 +366,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         setState(() {
           workspaceId = createdWorkspace;
           guidanceQuestions = null;
-          preparedGuidanceWorkspace = null;
-          preparedGuidanceText = null;
         });
         load();
       } catch (e) {
@@ -389,8 +392,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             setState(() {
               workspaceId = v;
               guidanceQuestions = null;
-              preparedGuidanceWorkspace = null;
-              preparedGuidanceText = null;
             });
             load();
           },
@@ -579,10 +580,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             valueListenable: prompt,
             builder: (context, value, _) => FilledButton.icon(
               key: const ValueKey('create-app'),
-              onPressed:
-                  creating ||
-                      guidanceQuestions != null ||
-                      (canGenerate && value.text.trim().isEmpty)
+              onPressed: creating || (canGenerate && value.text.trim().isEmpty)
                   ? null
                   : () {
                       if (canGenerate) {
@@ -600,7 +598,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   : Icon(canGenerate ? Icons.arrow_upward : Icons.grid_view),
               label: Text(
                 creating
-                    ? 'Checking your idea…'
+                    ? 'Creating your app…'
                     : canGenerate
                     ? 'Create app'
                     : 'Browse templates',
@@ -625,7 +623,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               ),
               const SizedBox(height: 16),
               Text(
-                'Describe your idea. Bring it to life, then make it your own.',
+                'Describe the app you want. Try it. Make it yours.',
                 textAlign: TextAlign.center,
                 style: theme.textTheme.titleMedium?.copyWith(
                   color: const Color(0xff617069),
@@ -659,7 +657,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         maxLines: 7,
                         textCapitalization: TextCapitalization.sentences,
                         decoration: const InputDecoration(
-                          hintText: 'An app for my book club to track books, share notes, and plan our next read…',
+                          hintText: 'A notes app with categories, a calendar for my projects, or a clock that helps me focus…',
                           hintMaxLines: 4,
                           semanticCounterText:
                               'Describe the app you want to build',
@@ -688,8 +686,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                             onUseAnswers: (combined) {
                               setState(() {
                                 guidanceQuestions = null;
-                                preparedGuidanceWorkspace = selectedWorkspace;
-                                preparedGuidanceText = combined;
                               });
                               prompt.value = TextEditingValue(
                                 text: combined,
@@ -701,13 +697,29 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                             onContinueOriginal: () {
                               setState(() {
                                 guidanceQuestions = null;
-                                preparedGuidanceWorkspace = selectedWorkspace;
-                                preparedGuidanceText = prompt.text.trim();
                               });
                               unawaited(builder('volunteer', generate: true));
                             },
                             onEditIdea: () =>
                                 setState(() => guidanceQuestions = null),
+                          ),
+                        ),
+                      if (canGenerate)
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: ValueListenableBuilder<TextEditingValue>(
+                            valueListenable: prompt,
+                            builder: (context, value, _) => TextButton.icon(
+                              key: const ValueKey('shape-idea'),
+                              onPressed: creating || value.text.trim().isEmpty
+                                  ? null
+                                  : shapeIdea,
+                              icon: const Icon(
+                                Icons.lightbulb_outline,
+                                size: 18,
+                              ),
+                              label: const Text('Help shape my idea'),
+                            ),
                           ),
                         ),
                       if (compact)
@@ -720,7 +732,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                           children: [
                             Expanded(
                               child: Text(
-                                'Start with an idea. Refine it together.',
+                                'A useful first version, ready to customize.',
                                 style: theme.textTheme.bodySmall?.copyWith(
                                   color: const Color(0xff617069),
                                 ),
@@ -742,24 +754,24 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 children: [
                   for (final starter in const [
                     (
-                      'Daily planner',
-                      Icons.today_outlined,
-                      'Build a daily planner where I can organize tasks by day, set priorities, and track what I finish.',
+                      'Notes',
+                      Icons.notes_outlined,
+                      'Build a personal notes app with titles, multiline notes, categories, search, and easy add and edit.',
                     ),
                     (
-                      'Reading journal',
-                      Icons.menu_book_outlined,
-                      'Build a reading journal to track books I want to read, what I am reading, and my notes and ratings.',
+                      'Reminders',
+                      Icons.notifications_outlined,
+                      'Build a personal reminders app with open and completed items, optional due dates, and a separate optional reminder time for my AppNest inbox.',
                     ),
                     (
-                      'Shared chores',
-                      Icons.home_outlined,
-                      'Build a shared chores app for my household with assigned tasks, due dates, and a view of what still needs doing.',
+                      'Calendar',
+                      Icons.calendar_month_outlined,
+                      'Build a personal event calendar with a month view, selected-day agenda, categories, and easy event creation and editing.',
                     ),
                     (
-                      'Volunteer shifts',
-                      Icons.people_outline,
-                      'Build an app for volunteers to browse upcoming shifts, see available places, and sign up together.',
+                      'Clock & focus',
+                      Icons.timer_outlined,
+                      'Build a personal clock and focus app with a local digital clock and a 25-minute countdown that I can start, pause, resume, and reset.',
                     ),
                   ])
                     ActionChip(
@@ -828,6 +840,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                             'capacity.v1',
                           )
                         ? '${app.availablePlaces} places available'
+                        : AppSpec.parse(app.specJson!).collections.isEmpty
+                        ? 'Personal utility'
                         : '${app.recordCount} ${app.recordCount == 1 ? 'record' : 'records'}',
                   ),
                 ],

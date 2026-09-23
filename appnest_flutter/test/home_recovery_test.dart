@@ -43,6 +43,7 @@ class TestClient extends Client {
       diagnostics: [],
       changes: spec.diff(null),
       enabledRuleIds: [],
+      candidateReady: true,
     );
   }
 
@@ -72,6 +73,7 @@ class TestClient extends Client {
         currentDraft = snapshot().copyWith(
           mutation: (args['mutation'] as int) + 1,
           jobId: 42,
+          latestRequest: args['request'] as String,
         );
       }
       if (generationFailure != null) throw generationFailure!;
@@ -187,16 +189,41 @@ void main() {
       expect(tester.widget<FilledButton>(create).onPressed, isNull);
       expect(testClient.methods, isNot(contains('builder.begin')));
 
-      await tester.tap(find.text('Reading journal'));
+      await tester.tap(find.text('Notes'));
       await tester.pump();
       final input = tester.widget<TextField>(idea);
-      expect(input.controller!.text, contains('reading journal'));
+      expect(input.controller!.text, contains('notes app'));
       expect(tester.widget<FilledButton>(create).onPressed, isNotNull);
       await tester.enterText(idea, 'My own reading club idea');
       expect(input.controller!.text, 'My own reading club idea');
       expect(testClient.methods, isNot(contains('builder.begin')));
     },
   );
+
+  testWidgets('all four examples only fill the editable composer', (
+    tester,
+  ) async {
+    testClient.aiAvailable = true;
+    await home(tester);
+    final idea = find.byKey(const ValueKey('app-idea'));
+    for (final example in const {
+      'Notes': 'personal notes app',
+      'Reminders': 'separate optional reminder time',
+      'Calendar': 'selected-day agenda',
+      'Clock & focus': '25-minute countdown',
+    }.entries) {
+      await tester.ensureVisible(find.widgetWithText(ActionChip, example.key));
+      await tester.tap(find.widgetWithText(ActionChip, example.key));
+      await tester.pump();
+      expect(
+        tester.widget<TextField>(idea).controller!.text,
+        contains(example.value),
+      );
+    }
+    expect(testClient.beginRequests, isEmpty);
+    expect(testClient.generationRequests, isEmpty);
+    expect(testClient.questionRequests, isEmpty);
+  });
 
   testWidgets('creation guards repeat taps and keeps the idea after failure', (
     tester,
@@ -217,7 +244,7 @@ void main() {
     submit();
     await tester.pump();
     expect(testClient.methods.where((m) => m == 'builder.begin'), hasLength(1));
-    expect(find.text('Checking your idea…'), findsOneWidget);
+    expect(find.text('Creating your app…'), findsOneWidget);
     expect(tester.widget<FilledButton>(create).onPressed, isNull);
     testClient.pendingCreation!.complete();
     await tester.pumpAndSettle();
@@ -281,8 +308,8 @@ void main() {
     await tester.enterText(idea, 'A book club app');
     await tester.pump();
     expect(testClient.questionRequests, isEmpty);
-    expect(find.byKey(const ValueKey('shape-idea')), findsNothing);
-    await tester.tap(find.byKey(const ValueKey('create-app')));
+    expect(find.byKey(const ValueKey('shape-idea')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('shape-idea')));
     await tester.pumpAndSettle();
     expect(testClient.questionRequests, hasLength(1));
     expect(testClient.questionRequests.single['idea'], 'A book club app');
@@ -294,7 +321,7 @@ void main() {
       tester
           .widget<FilledButton>(find.byKey(const ValueKey('create-app')))
           .onPressed,
-      isNull,
+      isNotNull,
     );
     expect(find.byKey(const ValueKey('guidance-answer-0')), findsNothing);
     await tester.tap(find.byKey(const ValueKey('guidance-option-0-0')));
@@ -330,7 +357,7 @@ void main() {
     await tester.pump();
     await tester.tap(find.byKey(const ValueKey('create-app')));
     await tester.pumpAndSettle();
-    expect(testClient.questionRequests, hasLength(1));
+    expect(testClient.questionRequests, isEmpty);
     expect(testClient.beginRequests, hasLength(1));
     expect(testClient.generationRequests, hasLength(1));
 
@@ -342,7 +369,7 @@ void main() {
     );
     await tester.enterText(idea, 'A club app');
     await tester.pump();
-    await tester.tap(find.byKey(const ValueKey('create-app')));
+    await tester.tap(find.byKey(const ValueKey('shape-idea')));
     await tester.pumpAndSettle();
     expect(find.text('Built-in questions'), findsOneWidget);
     expect(testClient.beginRequests, hasLength(1));
@@ -350,7 +377,7 @@ void main() {
     await tester.ensureVisible(find.byKey(const ValueKey('guidance-continue')));
     await tester.tap(find.byKey(const ValueKey('guidance-continue')));
     await tester.pumpAndSettle();
-    expect(testClient.questionRequests, hasLength(2));
+    expect(testClient.questionRequests, hasLength(1));
     expect(testClient.beginRequests, hasLength(2));
     expect(testClient.generationRequests.last['request'], 'A club app');
   });
@@ -369,7 +396,7 @@ void main() {
       'A club app',
     );
     await tester.pump();
-    await tester.tap(find.byKey(const ValueKey('create-app')));
+    await tester.tap(find.byKey(const ValueKey('shape-idea')));
     await tester.pumpAndSettle();
     expect(find.text('Built-in questions'), findsOneWidget);
     expect(find.byKey(const ValueKey('guidance-option-0-0')), findsOneWidget);
@@ -377,7 +404,7 @@ void main() {
     expect(testClient.generationRequests, isEmpty);
   });
 
-  testWidgets('a different idea after using answers is assessed again', (
+  testWidgets('a different idea can request fresh optional guidance', (
     tester,
   ) async {
     testClient.aiAvailable = true;
@@ -393,7 +420,7 @@ void main() {
     final idea = find.byKey(const ValueKey('app-idea'));
     await tester.enterText(idea, 'A club app');
     await tester.pump();
-    await tester.tap(find.byKey(const ValueKey('create-app')));
+    await tester.tap(find.byKey(const ValueKey('shape-idea')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('guidance-option-0-0')));
     await tester.pump();
@@ -403,7 +430,7 @@ void main() {
 
     await tester.enterText(idea, 'A different app for gardeners');
     await tester.pump();
-    await tester.tap(find.byKey(const ValueKey('create-app')));
+    await tester.tap(find.byKey(const ValueKey('shape-idea')));
     await tester.pumpAndSettle();
     expect(testClient.questionRequests, hasLength(2));
     expect(testClient.beginRequests, isEmpty);
@@ -419,7 +446,7 @@ void main() {
     final idea = find.byKey(const ValueKey('app-idea'));
     await tester.enterText(idea, 'A club app');
     await tester.pump();
-    await tester.tap(find.byKey(const ValueKey('create-app')));
+    await tester.tap(find.byKey(const ValueKey('shape-idea')));
     await tester.pump();
     tester.widget<TextField>(idea).controller!.text = 'A different app';
     testClient.pendingQuestions!.complete([
@@ -445,7 +472,7 @@ void main() {
       'A club app',
     );
     await tester.pump();
-    await tester.tap(find.byKey(const ValueKey('create-app')));
+    await tester.tap(find.byKey(const ValueKey('shape-idea')));
     await tester.pumpAndSettle();
     expect(find.text('Built-in questions'), findsNothing);
     expect(find.byKey(const ValueKey('guidance-continue')), findsNothing);

@@ -13,9 +13,15 @@ class LiveRuntimeAdapter extends RuntimeAdapter {
   final AppManifest manifest;
   @override
   final AppSpec spec;
+  @override
+  final UtilityTimerController timerController;
   Stream<void>? _events;
-  LiveRuntimeAdapter(this.client, this.manifest)
-    : spec = AppSpec.parse(manifest.specJson!);
+  LiveRuntimeAdapter(
+    this.client,
+    this.manifest, {
+    UtilityTimerController? timerController,
+  }) : spec = AppSpec.parse(manifest.specJson!),
+       timerController = timerController ?? UtilityTimerController();
   @override
   bool get preview => false;
   @override

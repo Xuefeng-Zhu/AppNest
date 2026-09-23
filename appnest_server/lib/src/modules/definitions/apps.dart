@@ -86,6 +86,10 @@ class Apps {
           name: e.value.name,
           specJson: e.value.canonical,
           description: switch (e.key) {
+            'notes' => 'Write and organize notes your way.',
+            'reminders' => 'Keep tasks and personal inbox reminders together.',
+            'calendar' => 'Organize your events in a calendar you can shape.',
+            'focus' => 'Make a personal clock and focus timer.',
             'reading' => 'Keep your reading life in one place.',
             'chores' => 'Make shared responsibilities clear.',
             'planner' =>

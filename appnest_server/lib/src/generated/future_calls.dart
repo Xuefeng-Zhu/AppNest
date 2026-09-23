@@ -17,6 +17,8 @@ import 'package:serverpod/serverpod.dart' as _is;
 import '../modules/automation/worker.dart' as _inz3cl7p;
 import 'future_calls_generated_models/nest_worker_future_call_execute_model.dart'
     as _i2npzse7;
+import 'future_calls_generated_models/nest_worker_future_call_generate_model.dart'
+    as _i7d9xtt1;
 
 /// Invokes a future call.
 typedef _InvokeFutureCall =
@@ -62,6 +64,7 @@ class FutureCalls extends _is.FutureCallDispatch<_FutureCallRef> {
     var registeredFutureCalls = <String, _is.InvokableFutureCall>{
       'NestWorkerReconcileFutureCall': NestWorkerReconcileFutureCall(),
       'NestWorkerExecuteFutureCall': NestWorkerExecuteFutureCall(),
+      'NestWorkerGenerateFutureCall': NestWorkerGenerateFutureCall(),
     };
     _futureCallManager = futureCallManager;
     _serverId = serverId;
@@ -204,6 +207,14 @@ class _NestWorkerFutureCallDispatcher {
       object,
     );
   }
+
+  Future<void> generate(int jobId) {
+    var object = _i7d9xtt1.NestWorkerFutureCallGenerateModel(jobId: jobId);
+    return _invokeFutureCall(
+      'NestWorkerGenerateFutureCall',
+      object,
+    );
+  }
 }
 
 class NestWorkerReconcileFutureCall extends _is.FutureCall
@@ -230,6 +241,24 @@ class NestWorkerExecuteFutureCall
       await _inz3cl7p.NestWorkerFutureCall().execute(
         session,
         object.runId,
+      );
+    }
+  }
+}
+
+class NestWorkerGenerateFutureCall
+    extends _is.FutureCall<_i7d9xtt1.NestWorkerFutureCallGenerateModel>
+    implements
+        _is.InvokableFutureCall<_i7d9xtt1.NestWorkerFutureCallGenerateModel> {
+  @override
+  _ida.Future<void> invoke(
+    _is.Session session,
+    _i7d9xtt1.NestWorkerFutureCallGenerateModel? object,
+  ) async {
+    if (object != null) {
+      await _inz3cl7p.NestWorkerFutureCall().generate(
+        session,
+        object.jobId,
       );
     }
   }

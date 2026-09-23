@@ -1,6 +1,8 @@
 part of '../appnest_spec.dart';
 
 const richViewTypes = {
+  'clock',
+  'timer',
   'table',
   'calendar',
   'timeline',
@@ -29,6 +31,8 @@ const formControls = {
 
 void _validateOptionsShape(String type, Map<String, dynamic> o) {
   final allowed = switch (type) {
+    'clock' => {'style', 'hourFormat', 'showSeconds', 'showDate'},
+    'timer' => {'durationMinutes'},
     'calendar' || 'timeline' => {'dateFieldId'},
     'chart' => {
       'style',
@@ -56,6 +60,8 @@ void _validateOptionsShape(String type, Map<String, dynamic> o) {
     _ => <String>{},
   };
   keys(o, allowed, '$type options');
+  if (type == 'clock') ClockOptions.fromJson(o);
+  if (type == 'timer') TimerOptions.fromJson(o);
   for (final key in [
     'dateFieldId',
     'valueFieldId',
@@ -508,6 +514,19 @@ Map<String, dynamic> _richOptionsSchema(String type) {
   };
   const asset = {'type': 'string', 'pattern': r'^[A-Za-z0-9_-]{1,128}$'};
   return switch (type) {
+    'clock' => obj({
+      'style': {
+        'enum': ['analog', 'digital'],
+      },
+      'hourFormat': {
+        'enum': ['system', '12', '24'],
+      },
+      'showSeconds': {'type': 'boolean'},
+      'showDate': {'type': 'boolean'},
+    }),
+    'timer' => obj({
+      'durationMinutes': {'type': 'integer', 'minimum': 1, 'maximum': 180},
+    }),
     'calendar' || 'timeline' => obj({'dateFieldId': id}, ['dateFieldId']),
     'chart' => obj(
       {

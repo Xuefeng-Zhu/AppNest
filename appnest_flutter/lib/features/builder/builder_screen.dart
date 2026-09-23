@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 import '../../client.dart';
 import '../media/image_upload.dart';
 import 'builder_chat.dart';
+import 'reminder_editor.dart';
 import 'idea_guidance.dart';
 import 'page_editor.dart';
 import 'visual_edit_session.dart';
@@ -40,18 +41,17 @@ class _BuilderScreenState extends State<BuilderScreen> {
   Object? error;
   Object? platformError;
   bool busy = false;
+  bool _reviewing = false;
   bool assessing = false;
   List<GuidanceQuestion>? guidanceQuestions;
   String? guidanceSource;
   String? guidanceContextId;
   bool guidanceFallback = false;
   String? guidanceNotice;
-  String? preparedGuidanceContext;
-  String? preparedGuidanceText;
-  String? assessedIdea;
-  String? assessedContext;
   bool polling = false;
   bool mobilePreview = false;
+  bool customizing = false;
+  ({int mutation, int? jobId, String request})? uncertainGeneration;
   late bool hasPreview;
   String? lastRequest;
   bool? ai;
@@ -128,6 +128,7 @@ class _BuilderScreenState extends State<BuilderScreen> {
       draft.stage != 'stale' &&
       draft.publishedVersionId == null;
   bool get canPublish =>
+      !_reviewing &&
       canEdit &&
       draft.stage == 'preview ready' &&
       draft.publishedVersionId == null;
@@ -138,10 +139,8 @@ class _BuilderScreenState extends State<BuilderScreen> {
     draft = widget.initial;
     enabled.addAll(draft.enabledRuleIds);
     preview = newPreview(AppSpec.parse(draft.candidateJson));
-    hasPreview =
-        !widget.startFromScratch ||
-        (draft.stage == 'preview ready' && draft.jobId != null);
-    lastRequest = widget.initialPrompt;
+    hasPreview = draft.candidateReady;
+    lastRequest = widget.initialPrompt ?? draft.latestRequest;
     prompt.addListener(onPromptChanged);
     if (lastRequest?.isNotEmpty == true) {
       conversation.add(BuilderMessage(text: lastRequest!, fromUser: true));
@@ -202,6 +201,17 @@ class _BuilderScreenState extends State<BuilderScreen> {
       }
       if (d.candidateHash != draft.candidateHash) {
         final nextSpec = AppSpec.parse(d.candidateJson);
+        final previousRules = {
+          for (final rule in preview.spec.automationRequests)
+            rule.id: canonicalJson(rule.toJson()),
+        };
+        enabled.removeWhere((id) {
+          final next = nextSpec.automationRequests
+              .where((rule) => rule.id == id)
+              .firstOrNull;
+          return next == null ||
+              previousRules[id] != canonicalJson(next.toJson());
+        });
         try {
           // AI changes and direct controls share the same presentation guard.
           // Keeping this adapter retains sample data, location and filters.
@@ -217,7 +227,8 @@ class _BuilderScreenState extends State<BuilderScreen> {
         );
       }
       draft = d;
-      if (d.stage == 'preview ready') hasPreview = true;
+      hasPreview = d.candidateReady;
+      lastRequest = d.latestRequest ?? lastRequest;
       if (completed) {
         conversation.add(
           BuilderMessage(
@@ -309,86 +320,149 @@ class _BuilderScreenState extends State<BuilderScreen> {
         request.isEmpty) {
       return;
     }
+    if (!await finishVisualEdit() || !mounted) return;
+    await perform(() async {
+      final uncertain = uncertainGeneration;
+      if (uncertain != null) {
+        final recovered = await client.builder.get(draft.draftId);
+        update(recovered);
+        if (recovered.mutation > uncertain.mutation &&
+            recovered.latestRequest == uncertain.request &&
+            recovered.jobId != null &&
+            recovered.jobId != uncertain.jobId) {
+          acceptRequest(recovered, uncertain.request);
+          return;
+        }
+        uncertainGeneration = null;
+        if (generating || draft.stage == 'stale') return;
+      }
+      final previousMutation = draft.mutation;
+      final previousJobId = draft.jobId;
+      uncertainGeneration = (
+        mutation: previousMutation,
+        jobId: previousJobId,
+        request: request,
+      );
+      try {
+        final next = await client.builder.generate(
+          draft.draftId,
+          previousMutation,
+          request,
+          startFromScratch: widget.startFromScratch,
+        );
+        acceptRequest(next, request);
+      } catch (issue) {
+        // A response can be lost after the server accepts the request. Read the
+        // durable job before offering another write, including on the next send.
+        try {
+          final recovered = await client.builder.get(draft.draftId);
+          if (recovered.mutation > previousMutation &&
+              recovered.latestRequest == request &&
+              recovered.jobId != null &&
+              recovered.jobId != previousJobId) {
+            acceptRequest(recovered, request);
+            return;
+          }
+          update(recovered);
+          uncertainGeneration = null;
+        } catch (_) {
+          // Keep the uncertain submission until a later read succeeds.
+        }
+        rethrow;
+      }
+    });
+  }
+
+  void acceptRequest(BuilderSnapshot next, String request) {
+    if (!mounted) return;
+    setState(() {
+      uncertainGeneration = null;
+      conversation.add(BuilderMessage(text: request, fromUser: true));
+      lastRequest = request;
+      guidanceQuestions = null;
+      if (prompt.text.trim() == request) prompt.clear();
+    });
+    update(next);
+    scrollConversation();
+  }
+
+  Future<void> shapeIdea() async {
+    final request = prompt.text.trim();
+    if (busy || assessing || generating || request.isEmpty || ai != true) {
+      return;
+    }
     setState(() => assessing = true);
     try {
       if (!await finishVisualEdit() || !mounted) return;
       final contextId = currentGuidanceContext();
-      if (retry == null &&
-          !(preparedGuidanceContext == contextId &&
-              preparedGuidanceText != null &&
-              request.startsWith(preparedGuidanceText!)) &&
-          !(assessedContext == contextId && assessedIdea == request) &&
-          canAssessIdea(request)) {
-        try {
-          final questions = cleanGuidanceQuestions(
-            await client.builder.suggestQuestions(request, null, draft.draftId),
-          );
-          if (!mounted ||
-              currentGuidanceContext() != contextId ||
-              prompt.text.trim() != request) {
-            return;
-          }
-          if (questions == null || questions.isNotEmpty) {
-            showGuidance(
-              questions ?? builtInEditGuidanceQuestions,
-              request,
-              contextId,
-              fallback: questions == null,
-              notice: questions == null
-                  ? 'AI questions were incomplete. Try these built-in questions.'
-                  : null,
-            );
-            return;
-          }
-          assessedContext = contextId;
-          assessedIdea = request;
-        } catch (e) {
-          if (!mounted ||
-              currentGuidanceContext() != contextId ||
-              prompt.text.trim() != request) {
-            return;
-          }
-          if (!canOfferBuiltInGuidance(e)) {
-            setState(() => error = e);
-            return;
-          }
-          showGuidance(
-            builtInEditGuidanceQuestions,
-            request,
-            contextId,
-            fallback: true,
-            notice: 'AI questions are unavailable. Try these built-in questions, or continue with your original idea.',
-          );
+      try {
+        final questions = canAssessIdea(request)
+            ? cleanGuidanceQuestions(
+                await client.builder.suggestQuestions(
+                  request,
+                  null,
+                  draft.draftId,
+                ),
+              )
+            : null;
+        if (!mounted ||
+            currentGuidanceContext() != contextId ||
+            prompt.text.trim() != request) {
           return;
         }
-      }
-      if (!mounted ||
-          currentGuidanceContext() != contextId ||
-          (retry == null && prompt.text.trim() != request)) {
-        return;
-      }
-      await perform(() async {
-        final next = await client.builder.generate(
-          draft.draftId,
-          draft.mutation,
+        showGuidance(
+          questions == null || questions.isEmpty
+              ? builtInEditGuidanceQuestions
+              : questions,
           request,
-          startFromScratch: widget.startFromScratch,
+          contextId,
+          fallback: questions == null,
+          notice: questions?.isEmpty == true
+              ? 'Your idea is ready. Add optional details or send it now.'
+              : questions == null
+              ? 'Try these built-in questions.'
+              : null,
         );
-        if (!mounted) return;
-        setState(() {
-          conversation.add(BuilderMessage(text: request, fromUser: true));
-          lastRequest = request;
-          preparedGuidanceContext = null;
-          preparedGuidanceText = null;
-          guidanceQuestions = null;
-          prompt.clear();
-        });
-        update(next);
-        scrollConversation();
-      });
+      } catch (issue) {
+        if (!mounted ||
+            currentGuidanceContext() != contextId ||
+            prompt.text.trim() != request) {
+          return;
+        }
+        if (!canOfferBuiltInGuidance(issue)) {
+          setState(() => error = issue);
+          return;
+        }
+        showGuidance(
+          builtInEditGuidanceQuestions,
+          request,
+          contextId,
+          fallback: true,
+          notice: 'AI questions are unavailable. Add details or continue with your original idea.',
+        );
+      }
     } finally {
       if (mounted) setState(() => assessing = false);
     }
+  }
+
+  Future<void> keepPreviousPreview() async {
+    final jobId = draft.jobId;
+    if (jobId == null || !hasPreview || draft.stage != 'failed') return;
+    await perform(() async {
+      update(
+        await client.builder.abandonFailedEdit(
+          draft.draftId,
+          draft.mutation,
+          jobId,
+        ),
+      );
+      conversation.add(
+        const BuilderMessage(
+          text: 'Your last working preview is ready to customize or use.',
+        ),
+      );
+    });
   }
 
   @override
@@ -423,9 +497,9 @@ class _BuilderScreenState extends State<BuilderScreen> {
     final label = TextEditingController(), choice = TextEditingController();
     var type = 'RenameLabel',
         target = 'app',
-        collection = preview.spec.collections.first.id,
+        collection = preview.spec.collections.firstOrNull?.id ?? '',
         fieldType = 'text';
-    final patch = await showDialog<Map<String, dynamic>>(
+    final route = DialogRoute<Map<String, dynamic>>(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, set) => AlertDialog(
@@ -439,12 +513,42 @@ class _BuilderScreenState extends State<BuilderScreen> {
                   DropdownButton<String>(
                     value: type,
                     items:
-                        ['RenameLabel', 'AddField', 'AddChoice', 'ReorderView']
+                        {
+                              'RenameLabel': 'Rename app or field',
+                              if (preview.spec.collections.isNotEmpty)
+                                'AddField': 'Add a field',
+                              if (preview.spec.collections.any(
+                                (c) => c.fields.any(
+                                  (f) => f.type == FieldType.choice,
+                                ),
+                              ))
+                                'AddChoice': 'Add a category or choice',
+                              if (preview.spec.views.length > 1)
+                                'ReorderView': 'Move last section to top',
+                            }.entries
                             .map(
-                              (t) => DropdownMenuItem(value: t, child: Text(t)),
+                              (entry) => DropdownMenuItem(
+                                value: entry.key,
+                                child: Text(entry.value),
+                              ),
                             )
                             .toList(),
-                    onChanged: (v) => set(() => type = v!),
+                    onChanged: (v) => set(() {
+                      type = v!;
+                      target = 'app';
+                      if (type == 'AddChoice') {
+                        final choiceCollection = preview.spec.collections
+                            .firstWhere(
+                              (c) => c.fields.any(
+                                (f) => f.type == FieldType.choice,
+                              ),
+                            );
+                        collection = choiceCollection.id;
+                        target = choiceCollection.fields
+                            .firstWhere((f) => f.type == FieldType.choice)
+                            .id;
+                      }
+                    }),
                   ),
                   if (type == 'RenameLabel')
                     DropdownButtonFormField<String>(
@@ -547,6 +651,12 @@ class _BuilderScreenState extends State<BuilderScreen> {
                   'AddField' => {
                     'type': type,
                     'collectionId': collection,
+                    'viewIds': [
+                      for (final view in preview.spec.views)
+                        if (view.collectionId == collection &&
+                            {'form', 'details'}.contains(view.type))
+                          view.id,
+                    ],
                     'field': {
                       'label': label.text,
                       'type': fieldType,
@@ -581,9 +691,12 @@ class _BuilderScreenState extends State<BuilderScreen> {
         ),
       ),
     );
+    final patch = await Navigator.of(context, rootNavigator: true).push(route);
+    // Dialog results arrive before the closing animation releases TextFields.
+    await route.completed;
     label.dispose();
     choice.dispose();
-    if (patch != null) {
+    if (patch != null && mounted) {
       await perform(
         () async => update(
           await client.builder.patch(
@@ -597,16 +710,26 @@ class _BuilderScreenState extends State<BuilderScreen> {
   }
 
   Future<void> publish() async {
+    if (!canPublish) return;
+    setState(() => _reviewing = true);
+    try {
+      await _reviewAndPublish();
+    } finally {
+      if (mounted) setState(() => _reviewing = false);
+    }
+  }
+
+  Future<void> _reviewAndPublish() async {
     if (!await finishVisualEdit()) return;
     final reviewed = draft;
     final reviewedSpec = AppSpec.parse(reviewed.candidateJson);
-    final rules = enabled.toList()..sort();
+    final selectedRules = {...enabled};
     final scope = <int>{};
     final candidates = <RuntimeRecord>[];
-    if (reviewed.baseVersionId != null && rules.isNotEmpty) {
+    if (reviewed.baseVersionId != null &&
+        reviewedSpec.automationRequests.isNotEmpty) {
       try {
         final collections = reviewedSpec.automationRequests
-            .where((r) => enabled.contains(r.id))
             .map((r) => r.collectionId)
             .toSet();
         for (final collection in collections) {
@@ -628,7 +751,11 @@ class _BuilderScreenState extends State<BuilderScreen> {
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setReview) => AlertDialog(
-          title: const Text('Publish this exact preview?'),
+          title: Text(
+            reviewed.baseVersionId == null
+                ? 'Ready to use your app?'
+                : 'Review your changes',
+          ),
           content: SizedBox(
             width: 500,
             child: SingleChildScrollView(
@@ -643,13 +770,38 @@ class _BuilderScreenState extends State<BuilderScreen> {
                     'groupWorkflow.v1' => 'Shared workflow · Members can create and update records and use approved actions.',
                     _ => 'Shared sign-ups · Members can claim and release their own places.',
                   }),
+                  const SizedBox(height: 16),
                   Text(
-                    'Enabled reminders: ${rules.isEmpty ? 'None' : rules.map((id) => reminderName(id)).join(', ')}',
+                    'Reminders',
+                    style: Theme.of(context).textTheme.titleMedium,
                   ),
-                  for (final rule in reviewedSpec.automationRequests.where(
-                    (rule) => rules.contains(rule.id),
-                  ))
-                    Text(reminderDescription(rule, reviewedSpec)),
+                  if (reviewedSpec.automationRequests.isEmpty)
+                    const Text('No reminders requested by this app.'),
+                  for (final rule in reviewedSpec.automationRequests)
+                    CheckboxListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(reminderName(rule.id)),
+                      subtitle: Text(reminderDescription(rule, reviewedSpec)),
+                      value: selectedRules.contains(rule.id),
+                      onChanged: (value) => setReview(() {
+                        if (value == true) {
+                          selectedRules.add(rule.id);
+                        } else {
+                          selectedRules.remove(rule.id);
+                        }
+                        final collections = reviewedSpec.automationRequests
+                            .where((r) => selectedRules.contains(r.id))
+                            .map((r) => r.collectionId)
+                            .toSet();
+                        scope.removeWhere(
+                          (id) => !candidates.any(
+                            (r) =>
+                                r.id == id &&
+                                collections.contains(r.collectionId),
+                          ),
+                        );
+                      }),
+                    ),
                   const Text(
                     'Existing records are preserved. Unchanged, enabled reminders retain their schedules. New or changed rules enroll only new records and the records you explicitly select below.',
                   ),
@@ -658,7 +810,13 @@ class _BuilderScreenState extends State<BuilderScreen> {
                     const Text(
                       'Optional: enroll existing records (up to 50 per collection shown). This may create a reminder immediately if its due time has passed.',
                     ),
-                    for (final record in candidates)
+                    for (final record in candidates.where(
+                      (record) => reviewedSpec.automationRequests.any(
+                        (rule) =>
+                            selectedRules.contains(rule.id) &&
+                            rule.collectionId == record.collectionId,
+                      ),
+                    ))
                       CheckboxListTile(
                         value: scope.contains(record.id),
                         title: Text(
@@ -687,7 +845,9 @@ class _BuilderScreenState extends State<BuilderScreen> {
             ),
             FilledButton(
               onPressed: () => Navigator.pop(context, true),
-              child: const Text('Publish'),
+              child: Text(
+                reviewed.baseVersionId == null ? 'Use app' : 'Apply changes',
+              ),
             ),
           ],
         ),
@@ -701,6 +861,10 @@ class _BuilderScreenState extends State<BuilderScreen> {
       );
       return;
     }
+    final rules = selectedRules.toList()..sort();
+    enabled
+      ..clear()
+      ..addAll(rules);
     await perform(() async {
       await client.builder.publish(
         PublishRequest(
@@ -715,7 +879,7 @@ class _BuilderScreenState extends State<BuilderScreen> {
             'activateExistingRecordIds': scope.toList()..sort(),
           }),
           idempotencyKey:
-              'publish-${reviewed.draftId}-${reviewed.candidateHash}',
+              'publish-${reviewed.draftId}-${hashJson({'candidateHash': reviewed.candidateHash, 'enabledRuleIds': rules, 'activateExistingRecordIds': scope.toList()..sort()})}',
         ),
       );
       if (mounted) {
@@ -756,6 +920,168 @@ class _BuilderScreenState extends State<BuilderScreen> {
     }
   }
 
+  Future<void> editReminder(AutomationSpec rule) async {
+    if (!await finishVisualEdit() || !mounted) return;
+    final patch = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (_) => ReminderEditor(spec: preview.spec, rule: rule),
+    );
+    if (patch != null && mounted) {
+      await perform(
+        () async => update(
+          await client.builder.patch(
+            draft.draftId,
+            draft.mutation,
+            jsonEncode(patch),
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<void> openCustomize() async {
+    if (!await finishVisualEdit() || !mounted) return;
+    if (MediaQuery.sizeOf(context).width >= 850) {
+      setState(() => customizing = !customizing);
+      return;
+    }
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      constraints: const BoxConstraints(maxWidth: 640),
+      builder: (sheetContext) => SafeArea(
+        child: SizedBox(
+          height: MediaQuery.sizeOf(sheetContext).height * .76,
+          child: customizationPanel(
+            onChoose: (action) {
+              Navigator.pop(sheetContext);
+              action();
+            },
+            onClose: () => Navigator.pop(sheetContext),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget customizationPanel({
+    void Function(VoidCallback action)? onChoose,
+    VoidCallback? onClose,
+  }) {
+    void choose(VoidCallback action) {
+      if (onChoose != null) {
+        onChoose(action);
+      } else {
+        action();
+      }
+    }
+
+    return Material(
+      color: Colors.white,
+      child: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Customize',
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+              ),
+              IconButton(
+                tooltip: 'Back to chat',
+                onPressed: onClose ?? () => setState(() => customizing = false),
+                icon: const Icon(Icons.close),
+              ),
+            ],
+          ),
+          const Text('Make this app feel and work the way you like.'),
+          const SizedBox(height: 16),
+          ListTile(
+            leading: const Icon(Icons.palette_outlined),
+            title: const Text('Appearance'),
+            subtitle: const Text('Colors, typography, spacing, and corners'),
+            onTap: () => choose(
+              () => selectVisualTarget(
+                const MiniAppEditTarget(MiniAppEditKind.app, 'app'),
+              ),
+            ),
+          ),
+          ListTile(
+            leading: const Icon(Icons.edit_note),
+            title: const Text('Content'),
+            subtitle: const Text('App name, fields, categories, and labels'),
+            onTap: () => choose(manual),
+          ),
+          ListTile(
+            leading: const Icon(Icons.dashboard_outlined),
+            title: const Text('Layout'),
+            subtitle: const Text('Pages, sections, navigation, and components'),
+            onTap: () => choose(editPages),
+          ),
+          const Divider(height: 24),
+          ListTile(
+            leading: const Icon(Icons.tune),
+            title: const Text('Behavior'),
+            subtitle: const Text('Reminder timing, clocks, and focus sessions'),
+          ),
+          for (final rule in preview.spec.automationRequests)
+            ListTile(
+              title: Text(reminderName(rule.id)),
+              subtitle: Text(reminderDescription(rule, preview.spec)),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => choose(() => editReminder(rule)),
+            ),
+          for (final view in preview.spec.views.where(
+            (v) => v.type == 'clock' || v.type == 'timer',
+          ))
+            ListTile(
+              title: Text(view.label),
+              subtitle: Text(
+                view.type == 'clock'
+                    ? 'Clock display and time format'
+                    : 'Default focus duration',
+              ),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => choose(
+                () => selectVisualTarget(
+                  MiniAppEditTarget(MiniAppEditKind.section, view.id),
+                ),
+              ),
+            ),
+          if (preview.spec.automationRequests.isEmpty &&
+              !preview.spec.views.any(
+                (v) => v.type == 'clock' || v.type == 'timer',
+              ))
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text(
+                'Ask AppNest to add a reminder or add a clock or focus timer in Layout.',
+              ),
+            ),
+          if (preview.spec.automationRequests.isNotEmpty)
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text(
+                'Choose which reminders to enable when you review your app.',
+              ),
+            ),
+          OutlinedButton.icon(
+            onPressed: () => choose(
+              () => selectVisualTarget(
+                const MiniAppEditTarget(MiniAppEditKind.app, 'app'),
+              ),
+            ),
+            icon: const Icon(Icons.ads_click),
+            label: const Text('Edit directly on preview'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget chat() {
     return BuilderChat(
       messages: conversation,
@@ -770,6 +1096,12 @@ class _BuilderScreenState extends State<BuilderScreen> {
       error: errorMessage,
       diagnostics: draft.diagnostics,
       onSend: send,
+      onShapeIdea: shapeIdea,
+      onKeepPreview: hasPreview && draft.stage == 'failed'
+          ? keepPreviousPreview
+          : null,
+      jobAttempts: draft.jobAttempts,
+      jobCreatedAt: draft.jobCreatedAt,
       guidanceQuestions: guidanceQuestions,
       guidancePanelKey: guidancePanelKey,
       guidanceSource: guidanceSource,
@@ -780,8 +1112,6 @@ class _BuilderScreenState extends State<BuilderScreen> {
       onUseGuidanceAnswers: (combined) {
         setState(() {
           guidanceQuestions = null;
-          preparedGuidanceContext = currentGuidanceContext();
-          preparedGuidanceText = combined;
         });
         prompt.value = TextEditingValue(
           text: combined,
@@ -791,8 +1121,6 @@ class _BuilderScreenState extends State<BuilderScreen> {
       onContinueOriginal: () {
         setState(() {
           guidanceQuestions = null;
-          preparedGuidanceContext = currentGuidanceContext();
-          preparedGuidanceText = prompt.text.trim();
         });
         unawaited(send());
       },
@@ -811,102 +1139,6 @@ class _BuilderScreenState extends State<BuilderScreen> {
     );
   }
 
-  Future<void> showChanges() async {
-    if (!await finishVisualEdit() || !mounted) return;
-    final review = await showModalBottomSheet<bool>(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      constraints: const BoxConstraints(maxWidth: 640),
-      builder: (context) => StatefulBuilder(
-        builder: (context, refresh) => SafeArea(
-          top: false,
-          child: SizedBox(
-            height: MediaQuery.sizeOf(context).height * .78,
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(24, 4, 24, 24),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text(
-                    'Ready to make it yours?',
-                    style: Theme.of(context).textTheme.headlineSmall,
-                  ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'Review your app and choose which reminders to enable before publishing to your workspace.',
-                  ),
-                  const SizedBox(height: 24),
-                  Text(
-                    'In this preview',
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                  const SizedBox(height: 12),
-                  ...describeChanges(draft).map(
-                    (change) => Padding(
-                      padding: const EdgeInsets.only(bottom: 12),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Icon(Icons.check_circle_outline, size: 18),
-                          const SizedBox(width: 10),
-                          Expanded(child: Text(change)),
-                        ],
-                      ),
-                    ),
-                  ),
-                  const Divider(height: 32),
-                  Text(
-                    'Reminders',
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                  if (preview.spec.automationRequests.isEmpty)
-                    const Padding(
-                      padding: EdgeInsets.only(top: 8),
-                      child: Text('No reminders requested by this app.'),
-                    ),
-                  ...preview.spec.automationRequests.map(
-                    (rule) => CheckboxListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: Text(reminderName(rule.id)),
-                      subtitle: Text(reminderDescription(rule, preview.spec)),
-                      value: enabled.contains(rule.id),
-                      onChanged: canEdit
-                          ? (value) {
-                              setState(() {
-                                if (value == true) {
-                                  enabled.add(rule.id);
-                                } else {
-                                  enabled.remove(rule.id);
-                                }
-                              });
-                              refresh(() {});
-                            }
-                          : null,
-                    ),
-                  ),
-                  if (preview.spec.automationRequests.isNotEmpty)
-                    const Text(
-                      'Reminders need your approval. You can choose existing records to include in the next step.',
-                    ),
-                  const SizedBox(height: 24),
-                  FilledButton.icon(
-                    onPressed: canPublish
-                        ? () => Navigator.pop(context, true)
-                        : null,
-                    icon: const Icon(Icons.publish_outlined),
-                    label: const Text('Review & publish'),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-    if (review == true && mounted && canPublish) await publish();
-  }
-
   String reminderName(String id) {
     final rule = preview.spec.automationRequests.firstWhere((r) => r.id == id);
     final collection = preview.spec.collection(rule.collectionId);
@@ -918,7 +1150,8 @@ class _BuilderScreenState extends State<BuilderScreen> {
     if (snapshot.baseVersionId == null) {
       return [
         'Create ${spec.name}',
-        'Track ${spec.collections.map((collection) => collection.label).join(', ')}',
+        if (spec.collections.isNotEmpty)
+          'Track ${spec.collections.map((collection) => collection.label).join(', ')}',
         if (spec.navigation != null)
           'Pages: ${spec.navigation!.pages.map((page) => page.title).join(', ')}'
         else
@@ -1420,29 +1653,30 @@ class _BuilderScreenState extends State<BuilderScreen> {
           ],
         ),
         actions: [
-          PopupMenuButton<String>(
-            tooltip: 'Edit app',
-            enabled: canEdit,
-            onSelected: (value) {
-              if (value == 'manual') manual();
-              if (value == 'pages') editPages();
-              if (value == 'changes') showChanges();
-            },
-            itemBuilder: (_) => const [
-              PopupMenuItem(value: 'manual', child: Text('Edit manually')),
-              PopupMenuItem(value: 'pages', child: Text('Pages & navigation')),
-              PopupMenuItem(value: 'changes', child: Text('Changes')),
-            ],
-            icon: const Icon(Icons.tune_outlined, size: 20),
-          ),
+          if (MediaQuery.sizeOf(context).width < 600)
+            IconButton(
+              key: const ValueKey('customize-app'),
+              tooltip: 'Customize',
+              onPressed: canEdit ? openCustomize : null,
+              icon: const Icon(Icons.tune_outlined),
+            )
+          else
+            TextButton.icon(
+              key: const ValueKey('customize-app'),
+              onPressed: canEdit ? openCustomize : null,
+              icon: const Icon(Icons.tune_outlined, size: 18),
+              label: const Text('Customize'),
+            ),
           Padding(
             padding: const EdgeInsets.only(right: 12),
             child: FilledButton(
               style: FilledButton.styleFrom(
                 padding: const EdgeInsets.symmetric(horizontal: 18),
               ),
-              onPressed: canPublish ? showChanges : null,
-              child: const Text('Publish'),
+              onPressed: canPublish ? publish : null,
+              child: Text(
+                draft.baseVersionId == null ? 'Use app' : 'Apply changes',
+              ),
             ),
           ),
         ],
@@ -1457,7 +1691,7 @@ class _BuilderScreenState extends State<BuilderScreen> {
                   const TabBar(
                     tabs: [
                       Tab(text: 'Chat'),
-                      Tab(text: 'Preview'),
+                      Tab(text: 'Try'),
                     ],
                   ),
                   Expanded(
@@ -1472,7 +1706,11 @@ class _BuilderScreenState extends State<BuilderScreen> {
             children: [
               SizedBox(
                 width: constraints.maxWidth < 1100 ? 330 : 380,
-                child: visualEditing ? inspector() : chat(),
+                child: visualEditing
+                    ? inspector()
+                    : customizing
+                    ? customizationPanel()
+                    : chat(),
               ),
               const VerticalDivider(width: 1),
               Expanded(child: previewPane()),
