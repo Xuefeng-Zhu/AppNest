@@ -9,6 +9,8 @@ import '../../generated/future_calls.dart';
 import '../runtime/access.dart';
 import '../builder/provider.dart';
 import '../builder/generation_quality.dart';
+import '../builder/generation_requirements.dart';
+import '../builder/repair_bindings.dart';
 import '../media/media.dart';
 
 class Worker {
@@ -609,7 +611,20 @@ class Worker {
         final errors = base.compatibilityErrors(candidate!);
         if (errors.isNotEmpty) throw SpecException(errors.join(' '));
       } else {
-        candidate = AppSpec.parse(jsonEncode(output));
+        try {
+          candidate = AppSpec.parse(jsonEncode(output));
+        } on SpecException catch (error) {
+          // Preserve strict rejection and the authored bytes. A malformed
+          // primary/form route can hide missing edit capabilities and invalid
+          // behavior bindings; aggregate only bounded identity-based evidence.
+          final raw = creationRawRepairMetadata(
+            output,
+            request: job.requestText,
+          );
+          final diagnostics = (raw['rawDiagnostics'] as List? ?? [])
+              .cast<String>();
+          throw SpecException([error.message, ...diagnostics].join(' '));
+        }
         // Fresh AI apps get a finished default design. Existing definitions and
         // edit jobs keep their exact presentation unless explicitly changed.
         if (candidate.appearance == null) {
@@ -619,10 +634,26 @@ class Worker {
           }, () => throw StateError('Appearance must not allocate IDs'));
         }
       }
-      validateGeneratedExperience(
-        candidate,
-        baseline: job.mode == 'edit' ? base : null,
-      );
+      final experienceErrors = <String>[];
+      try {
+        validateGeneratedExperience(
+          candidate,
+          baseline: job.mode == 'edit' ? base : null,
+        );
+      } on SpecException catch (error) {
+        experienceErrors.add(error.message);
+      }
+      if (job.mode != 'edit') {
+        try {
+          GenerationRequirements.fromRequest(job.requestText)
+              .validate(candidate);
+        } on SpecException catch (error) {
+          experienceErrors.add(error.message);
+        }
+      }
+      if (experienceErrors.isNotEmpty) {
+        throw SpecException(experienceErrors.join(' '));
+      }
     } on AiResponseException catch (e) {
       error = e.message;
       errorKind = e.kind;

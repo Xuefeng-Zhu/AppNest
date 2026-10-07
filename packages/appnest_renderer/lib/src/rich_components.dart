@@ -154,7 +154,7 @@ extension _RichComponents on _RichMiniAppRuntimeState {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Text(
-          view.label,
+          _recordSectionLabel(spec, view),
           style: Theme.of(context).textTheme.titleMedium?.copyWith(
             fontWeight: spec.appearance == null ? FontWeight.w700 : null,
           ),
@@ -182,26 +182,24 @@ extension _RichComponents on _RichMiniAppRuntimeState {
                 ),
               ),
             ),
-        if (!editing && view.filterFieldIds.isNotEmpty) ...[
-          if (view.titleFieldId != null &&
-              collection.field(view.titleFieldId!).type == FieldType.text)
-            TextFormField(
-              key: ValueKey('search-${view.id}'),
-              initialValue: stored.search,
-              decoration: const InputDecoration(
-                hintText: 'Search',
-                prefixIcon: Icon(Icons.search),
-              ),
-              onChanged: (value) {
-                stored.search = value;
-                stored.records = null;
-                _searchTimer?.cancel();
-                _searchTimer = Timer(
-                  const Duration(milliseconds: 250),
-                  _refresh,
-                );
-              },
+        if (!editing && _textSearchField(view) != null) ...[
+          TextFormField(
+            key: ValueKey('search-${view.id}'),
+            initialValue: stored.search,
+            decoration: const InputDecoration(
+              hintText: 'Search',
+              prefixIcon: Icon(Icons.search),
             ),
+            onChanged: (value) {
+              stored.search = value;
+              stored.records = null;
+              _searchTimer?.cancel();
+              _searchTimer = Timer(const Duration(milliseconds: 250), _refresh);
+            },
+          ),
+          const SizedBox(height: 12),
+        ],
+        if (!editing && view.filterFieldIds.isNotEmpty) ...[
           Wrap(
             spacing: 12,
             runSpacing: 8,

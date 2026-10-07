@@ -2,6 +2,10 @@ part of '../appnest_renderer.dart';
 
 typedef RecordAction = Future<void> Function(ActionSpec, RuntimeItem?);
 
+String _recordSectionLabel(AppSpec spec, ViewSpec view) => view.label == view.id
+    ? spec.collection(view.collectionId).label
+    : view.label;
+
 String _displayDate(BuildContext context, String value) {
   final date = DateTime.parse(value).toLocal(),
       l = MaterialLocalizations.of(context);
@@ -54,6 +58,7 @@ class RecordDetails extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final col = spec.collection(item.collectionId);
+    final titleFieldId = view.titleFieldId ?? col.fields.first.id;
     return Card(
       child: Padding(
         padding: EdgeInsets.all(_space(context, 20)),
@@ -63,12 +68,11 @@ class RecordDetails extends StatelessWidget {
             _editableField(
               context,
               view,
-              view.titleFieldId ?? col.fields.first.id,
+              titleFieldId,
               Text(
-                col.field(view.titleFieldId ?? col.fields.first.id).type ==
-                        FieldType.image
+                col.field(titleFieldId).type == FieldType.image
                     ? 'Image record'
-                    : '${item.data[view.titleFieldId ?? col.fields.first.id] ?? 'Untitled'}',
+                    : '${item.data[titleFieldId] ?? 'Untitled'}',
                 style: Theme.of(context).textTheme.titleLarge,
               ),
             ),
@@ -76,7 +80,7 @@ class RecordDetails extends StatelessWidget {
             for (final f in col.fields.where(
               (f) =>
                   !{'capacity', 'action'}.contains(view.type) &&
-                  f.id != view.titleFieldId &&
+                  f.id != titleFieldId &&
                   item.data[f.id] != null,
             ))
               Padding(
@@ -283,9 +287,23 @@ class _RecordFormState extends State<RecordForm> {
                     : null)
               : null);
     }
-    widget.members().then((list) {
-      if (mounted) setState(() => members = list);
-    });
+    widget.members().then(
+      (list) {
+        if (mounted) setState(() => members = list);
+      },
+      onError: (Object issue) {
+        if (mounted) {
+          setState(
+            () => error =
+                widget.adapter?.errorMessage(
+                  issue,
+                  fallback: 'Could not load eligible members. Try again.',
+                ) ??
+                'Could not load eligible members. Try again.',
+          );
+        }
+      },
+    );
   }
 
   @override
@@ -324,7 +342,11 @@ class _RecordFormState extends State<RecordForm> {
         input['capacity'] = int.parse(capacity.text);
       Navigator.pop(context, input);
     } catch (e) {
-      setState(() => error = 'Check your values: $e');
+      setState(
+        () => error = e is SpecException
+            ? e.message
+            : 'Check your values and try again.',
+      );
     }
   }
 
@@ -371,7 +393,7 @@ class _RecordFormState extends State<RecordForm> {
                     decoration: InputDecoration(
                       labelText: '${f.label}${f.required ? ' *' : ''}',
                       helperText: f.type == FieldType.timestamp
-                          ? 'Local date and time: 2026-09-22 10:00'
+                          ? 'Local date and time: YYYY-MM-DD HH:MM'
                           : null,
                     ),
                     keyboardType:
@@ -476,7 +498,10 @@ class _RecordFormState extends State<RecordForm> {
       if (mounted)
         setState(() {
           _uploading = false;
-          error = 'Could not upload image. $e';
+          error = widget.adapter!.errorMessage(
+            e,
+            fallback: 'Could not upload image. Try again.',
+          );
         });
     }
   }

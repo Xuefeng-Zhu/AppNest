@@ -357,6 +357,1054 @@ void main() {
     }
   });
 
+  test('only recognized Ultra uses efficient reasoning on compact creation and preserves edits', () {
+    for (final model in [
+      'nvidia/Nemotron-3-Ultra-550b-a55b',
+      'NVIDIA/NEMOTRON-3-ULTRA-550B-A55B',
+      'test-model',
+      'nvidia/Nemotron-3-Nano-30b-a3b',
+      'nvidia/Nemotron-3-Ultra-550b-a55b-custom',
+    ]) {
+      for (final editing in [false, true]) {
+        final body = buildAiRequest(
+          model,
+          'Synthetic app request',
+          current,
+          editing: editing,
+        );
+        expect(body['model'], model);
+        if (model.toLowerCase() == 'nvidia/nemotron-3-ultra-550b-a55b') {
+          expect(body['reasoning_effort'], 'medium');
+        } else {
+          expect(body.containsKey('reasoning_effort'), isFalse);
+        }
+      }
+      // Guidance has its own short transport contract.
+      expect(
+        buildGuidanceRequest(
+          model,
+          'Synthetic app request',
+        ).containsKey('reasoning_effort'),
+        isFalse,
+      );
+    }
+  });
+
+  test(
+    'recognized Ultra keeps bounded efficient reasoning across every repair',
+    () {
+      for (final diagnostic in <String?>[
+        null,
+        'The dedicated details page is unreachable.',
+        'AI output reached the token limit before finishing. Return a smaller complete JSON definition within 8000 tokens.',
+        'AI output reached the token limit before finishing. Return a smaller complete JSON definition within 12000 tokens.',
+      ]) {
+        for (final editing in [false, true]) {
+          final body = buildAiRequest(
+            'nvidia/Nemotron-3-Ultra-550b-a55b',
+            'A simple collection of useful items',
+            current,
+            editing: editing,
+            diagnostics: diagnostic == null ? [] : [diagnostic],
+          );
+          expect(body['reasoning_effort'], 'medium');
+          expect(body.containsKey('reasoning_budget'), isFalse);
+          expect(body.containsKey('chat_template_kwargs'), isFalse);
+          expect(
+            body['max_tokens'],
+            !editing &&
+                    diagnostic?.startsWith(
+                          'AI output reached the token limit before finishing.',
+                        ) ==
+                        true
+                ? 12000
+                : 8000,
+          );
+        }
+      }
+    },
+  );
+
+  test('known Ultra reasoning mode is stable for complete and malformed rejected output', () {
+    final invalid = jsonDecode(creationReferenceJson) as Map<String, dynamic>;
+    invalid['actions'][1]['capability'] = 'capacity.release.v1';
+    invalid['actions'][1]['behaviorId'] = 'missingBehavior';
+    final typed = jsonEncode(invalid);
+    // Strict validation still rejects this typed answer. Acceptance is not a
+    // prerequisite for reasoning about its incorrect capability references.
+    expect(() => AppSpec.parse(typed), throwsA(isA<SpecException>()));
+    const truncated =
+        'AI output reached the token limit before finishing. Return a smaller complete JSON definition within 8000 tokens.';
+    Map request(
+      String model,
+      String? rejected, {
+      bool editing = false,
+      List<String> diagnostics = const [
+        'Form views need a record creation action',
+      ],
+    }) => buildAiRequest(
+      model,
+      'A small record tracker',
+      current,
+      editing: editing,
+      diagnostics: diagnostics,
+      rejectedOutput: rejected,
+    );
+    for (final model in [
+      'nvidia/Nemotron-3-Ultra-550b-a55b',
+      'NVIDIA/NEMOTRON-3-ULTRA-550B-A55B',
+    ]) {
+      for (final rejected in [typed, '```json\n$typed\n```']) {
+        final body = request(model, rejected);
+        expect(body['reasoning_effort'], 'medium');
+        expect(body['max_tokens'], 8000);
+        expect(
+          jsonDecode(
+            body['messages'].last['content'] as String,
+          )['repairContext']['rejectedOutput'],
+          rejected,
+        );
+        expect(body.containsKey('reasoning_budget'), isFalse);
+        expect(body.containsKey('chat_template_kwargs'), isFalse);
+        // A prior complete rejected definition can still be available after a
+        // subsequent truncation; the fixed retry cap remains 12000.
+        final afterTruncation = request(
+          model,
+          rejected,
+          diagnostics: [truncated],
+        );
+        expect(afterTruncation['reasoning_effort'], 'medium');
+        expect(afterTruncation['max_tokens'], 12000);
+      }
+      for (final rejected in <String?>[
+        null,
+        typed.substring(0, typed.length - 1),
+        '{"formatVersion":1}',
+        '{"unsupported":"Cannot do this"}',
+        '[{"formatVersion":1}]',
+        jsonEncode({...invalid, 'actions': 'not an array'}),
+      ]) {
+        expect(request(model, rejected)['reasoning_effort'], 'medium');
+        expect(
+          request(
+            model,
+            rejected,
+            diagnostics: [truncated],
+          )['reasoning_effort'],
+          'medium',
+        );
+        expect(
+          request(model, rejected, diagnostics: [truncated])['max_tokens'],
+          12000,
+        );
+        expect(
+          request(model, rejected, editing: true)['reasoning_effort'],
+          'medium',
+        );
+        expect(
+          request(
+            model,
+            rejected,
+            editing: true,
+            diagnostics: [truncated],
+          )['max_tokens'],
+          8000,
+        );
+      }
+    }
+    for (final model in [
+      'test-model',
+      'nvidia/Nemotron-3-Ultra-550b-a55b-custom',
+      'nvidia/Nemotron-3-Nano-30b-a3b',
+    ]) {
+      expect(request(model, typed).containsKey('reasoning_effort'), isFalse);
+      expect(
+        request(model, typed, editing: true).containsKey('reasoning_effort'),
+        isFalse,
+      );
+    }
+    expect(jsonEncode(invalid), typed);
+  });
+
+  test('compact creation documentation retains typed enums and functional guidance without duplicating the schema', () {
+    final body = buildAiRequest(
+      'test-model',
+      'A household inventory with search and total values',
+      current,
+      editing: false,
+    );
+    final system = (body['messages'] as List).first['content'] as String;
+    expect(system.length, lessThan(25000));
+    expect(system, isNot(contains(jsonEncode(appSpecSchema()))));
+    expect(
+      system,
+      contains('response_format enforces the complete property grammar'),
+    );
+    for (final type in FieldType.values) {
+      expect(system, contains(type.name));
+    }
+    for (final property in ['theme', 'icon', 'policyPresetRequest']) {
+      final values = appSpecSchema()['properties'][property]['enum'] as List;
+      for (final value in values) {
+        expect(system, contains(value));
+      }
+    }
+    for (final requirement in [
+      'one record collection, one main list, one shared form and one details view',
+      'Preserve all requested functionality',
+      'Omit unused optional properties',
+      'Do not emit sample records',
+      'never invent a choice field merely to enable text search',
+      'complete corrected AppSpec',
+    ]) {
+      expect(system, contains(requirement));
+    }
+    // Compact documentation does not prune supported response grammar.
+    final schema =
+        body['response_format']['json_schema']['schema']['anyOf'][0] as Map;
+    expect(schema['properties']['collections']['maxItems'], Limits.collections);
+    expect(schema['properties']['views']['maxItems'], Limits.views);
+    expect(schema['properties']['actions']['maxItems'], Limits.actions);
+  });
+
+  test('route repair grammar binds existing source, details and form together without a generic branch', () {
+    final rejected = jsonDecode(creationReferenceJson) as Map<String, dynamic>;
+    final list = (rejected['views'] as List).cast<Map>().singleWhere(
+      (v) => v['id'] == 'bookList',
+    );
+    list.remove('detailPageId');
+    list['actionIds'] = ['addBook'];
+    AppSpec.parse(jsonEncode(rejected));
+    final raw = jsonEncode(rejected);
+    const request = 'A small collection of items I lend to friends';
+    Map body({
+      String? rejectedOutput,
+      bool editing = false,
+      String prompt = request,
+    }) => buildAiRequest(
+      'test-model',
+      prompt,
+      current,
+      editing: editing,
+      rejectedOutput: rejectedOutput,
+    );
+    Map creation(Map request) =>
+        request['response_format']['json_schema']['schema']['anyOf'][0] as Map;
+    List<Map> variants(Map request) =>
+        (creation(request)['properties']['views']['items']['anyOf'] as List)
+            .cast<Map>();
+    final repaired = body(rejectedOutput: raw);
+    final hints =
+        jsonDecode(
+              repaired['messages'].last['content'] as String,
+            )['repairContext']
+            as Map;
+    expect(hints['rejectedOutput'], raw);
+    final routes = hints['requiredBindings']['recordRoutes'] as List;
+    expect(routes, hasLength(3));
+    final expected = {
+      'list': [
+        'bookList',
+        ['addBook', 'editBook', 'changeReadingStatus'],
+      ],
+      'details': [
+        'bookDetails',
+        ['editBook', 'changeReadingStatus'],
+      ],
+      'form': [
+        'bookForm',
+        ['addBook', 'editBook'],
+      ],
+    };
+    for (final entry in expected.entries) {
+      final matching = variants(repaired)
+          .where((v) => v['properties']['type']['const'] == entry.key)
+          .toList();
+      expect(matching, hasLength(1));
+      final properties = matching.single['properties'] as Map;
+      expect(properties['id']['const'], entry.value.first);
+      expect(properties['collectionId']['const'], 'books');
+      expect(
+        properties['actionIds']['items']['enum'],
+        unorderedEquals(entry.value.last as List),
+      );
+      expect(properties['actionIds']['const'], entry.value.last);
+      // ViewSpec allows repeated action references, so exact cardinality and
+      // an ID enum cannot independently guarantee this union. Array const does.
+      expect(
+        properties['actionIds']['const'],
+        isNot(
+          equals(
+            List.filled(
+              (entry.value.last as List).length,
+              (entry.value.last as List).first,
+            ),
+          ),
+        ),
+      );
+      expect(
+        properties['actionIds']['minItems'],
+        (entry.value.last as List).length,
+      );
+      expect(
+        properties['actionIds']['maxItems'],
+        (entry.value.last as List).length,
+      );
+      if (entry.key != 'form') {
+        expect(properties['formPageId']['const'], 'bookFormPage');
+        expect(matching.single['required'], contains('formPageId'));
+      }
+      if (entry.key == 'list') {
+        expect(properties['detailPageId']['const'], 'bookDetailsPage');
+        expect(matching.single['required'], contains('detailPageId'));
+      }
+    }
+    for (final type in expected.keys) {
+      final initial = variants(body())
+          .singleWhere((v) => v['properties']['type']['const'] == type);
+      expect(initial['properties']['id'].containsKey('const'), isFalse);
+    }
+    expect(
+      body(editing: true, rejectedOutput: raw)['response_format'],
+      body(editing: true)['response_format'],
+    );
+    expect(
+      variants(
+        body(
+          rejectedOutput: raw,
+          prompt: 'Do not add an editing or details page',
+        ),
+      ),
+      variants(body()),
+    );
+    expect(jsonEncode(rejected), raw);
+    final duplicateRefs =
+        jsonDecode(creationReferenceJson) as Map<String, dynamic>;
+    duplicateRefs['views'][0]['actionIds'] = ['addBook', 'addBook', 'addBook'];
+    // The legacy parser accepts this array; a retry must still preserve all
+    // three distinct source controls rather than satisfy cardinality alone.
+    AppSpec.parse(jsonEncode(duplicateRefs));
+    final listActions =
+        variants(repaired).singleWhere(
+              (v) => v['properties']['type']['const'] == 'list',
+            )['properties']['actionIds']
+            as Map;
+    expect(
+      listActions['const'],
+      isNot(equals(duplicateRefs['views'][0]['actionIds'])),
+    );
+  });
+
+  test('count and numeric metric grammars enforce their distinct value-field contracts', () {
+    for (final editing in [false, true]) {
+      final schema =
+          buildAiRequest(
+                'test-model',
+                'Show useful totals',
+                current,
+                editing: editing,
+              )['response_format']['json_schema']['schema']
+              as Map;
+      final views = editing
+          ? schema[r'$defs']['view']['anyOf'] as List
+          : schema['anyOf'][0]['properties']['views']['items']['anyOf'] as List;
+      for (final type in ['chart', 'metric']) {
+        final view = views.singleWhere(
+          (v) => v['properties']['type']['const'] == type,
+        );
+        final options = view['properties']['options']['anyOf'] as List;
+        final count = options.singleWhere(
+          (v) => v['properties']['metric']['const'] == 'count',
+        ) as Map;
+        final numeric = options.singleWhere(
+          (v) => v['properties']['metric']['enum'] != null,
+        ) as Map;
+        expect(count['additionalProperties'], isFalse);
+        expect(
+          (count['properties'] as Map).containsKey('valueFieldId'),
+          isFalse,
+        );
+        expect(count['required'], isNot(contains('valueFieldId')));
+        expect(numeric['properties']['metric']['enum'], ['sum', 'average']);
+        expect(numeric['required'], contains('valueFieldId'));
+        expect(numeric['properties']['valueFieldId']['type'], 'string');
+        if (type == 'chart') {
+          expect(numeric['properties']['style']['enum'], ['bar', 'line']);
+        } else {
+          expect(
+            (view['properties'] as Map).containsKey('groupByFieldId'),
+            isFalse,
+          );
+        }
+      }
+    }
+    final raw = jsonDecode(creationReferenceJson) as Map<String, dynamic>;
+    (raw['requires'] as List).addAll([
+      'views.metric.v1',
+      'views.configured.v1',
+    ]);
+    (raw['collections'][0]['fields'] as List).add({
+      'id': 'quantity',
+      'label': 'Quantity',
+      'type': 'integer',
+      'required': false,
+    });
+    final metric = {
+      'id': 'total',
+      'type': 'metric',
+      'collectionId': 'books',
+      'actionIds': <String>[],
+      'options': <String, dynamic>{
+        'metric': 'count',
+        'valueFieldId': 'quantity',
+      },
+    };
+    (raw['views'] as List).add(metric);
+    expect(
+      () => AppSpec.parse(jsonEncode(raw)),
+      throwsA(
+        isA<SpecException>().having(
+          (e) => e.message,
+          'count rule',
+          contains('Count does not take a value field'),
+        ),
+      ),
+    );
+    (metric['options'] as Map).remove('valueFieldId');
+    AppSpec.parse(jsonEncode(raw));
+    metric['options'] = {'metric': 'sum', 'valueFieldId': 'quantity'};
+    AppSpec.parse(jsonEncode(raw));
+    metric['options'] = {'metric': 'average', 'valueFieldId': 'quantity'};
+    AppSpec.parse(jsonEncode(raw));
+  });
+
+  test('raw route repairs bind unique existing pages even when CRUD capabilities are invalid', () {
+    final raw = jsonDecode(creationReferenceJson) as Map<String, dynamic>;
+    raw['collections'][0]['behaviors'] = [];
+    for (final action in raw['actions'] as List) {
+      action['capability'] = 'records.create.v1';
+      (action as Map).remove('behaviorId');
+    }
+    (raw['views'][0] as Map).remove('detailPageId');
+    (raw['views'][0] as Map).remove('formPageId');
+    final details = (raw['views'] as List).singleWhere(
+      (v) => v['type'] == 'details',
+    ) as Map;
+    details.remove('formPageId');
+    final before = jsonEncode(raw);
+    Map body({
+      bool editing = false,
+      String prompt = 'A useful personal tracker',
+      String? rejected,
+    }) => buildAiRequest(
+      'nvidia/Nemotron-3-Ultra-550b-a55b',
+      prompt,
+      current,
+      editing: editing,
+      rejectedOutput: rejected,
+      diagnostics: const ['Page booksPage needs its shared form route'],
+    );
+    Map creation(Map request) =>
+        request['response_format']['json_schema']['schema']['anyOf'][0] as Map;
+    List<Map> variants(Map request) =>
+        (creation(request)['properties']['views']['items']['anyOf'] as List)
+            .cast<Map>();
+    final repaired = body(rejected: before);
+    final bindings =
+        jsonDecode(
+              repaired['messages'].last['content'] as String,
+            )['repairContext']['requiredBindings']
+            as Map;
+    expect(bindings['rawDiagnostics'], isNotEmpty);
+    expect(
+      (bindings['rawDiagnostics'] as List).join(' '),
+      contains('records.patch.v1'),
+    );
+    expect(bindings['recordRoutes'], isNull);
+    final rows = bindings['rawPageRoutes'] as List;
+    expect(rows, hasLength(2));
+    for (final type in ['list', 'details']) {
+      final variant = variants(repaired)
+          .singleWhere((v) => v['properties']['type']['const'] == type);
+      final properties = variant['properties'] as Map;
+      expect(
+        properties['id']['const'],
+        type == 'list' ? 'bookList' : 'bookDetails',
+      );
+      expect(properties['collectionId']['const'], 'books');
+      expect(properties['formPageId']['const'], 'bookFormPage');
+      expect(variant['required'], contains('formPageId'));
+      expect(properties['actionIds'].containsKey('const'), isFalse);
+      if (type == 'list') {
+        expect(properties['detailPageId']['const'], 'bookDetailsPage');
+        expect(variant['required'], contains('detailPageId'));
+      }
+    }
+    // Action meanings were not inferred from names or the page graph. The AI
+    // still authors capabilities while strict validation remains the gate.
+    final actions =
+        creation(repaired)['properties']['actions']['items']['anyOf'] as List;
+    expect(
+      actions.every((a) => !a['properties']['id'].containsKey('const')),
+      isTrue,
+    );
+    expect(
+      actions.any(
+        (a) => a['properties']['capability']['const'] == 'records.patch.v1',
+      ),
+      isTrue,
+    );
+    expect(jsonEncode(raw), before);
+    expect(
+      body(editing: true, rejected: before)['response_format'],
+      body(editing: true)['response_format'],
+    );
+    final initialList = variants(body())
+        .singleWhere((v) => v['properties']['type']['const'] == 'list');
+    expect(initialList['properties']['id'].containsKey('const'), isFalse);
+    final negativeList = variants(
+      body(rejected: before, prompt: 'Do not add an editing or details page'),
+    ).singleWhere((v) => v['properties']['type']['const'] == 'list');
+    expect(negativeList['properties']['id'].containsKey('const'), isFalse);
+    final ambiguous = jsonDecode(before) as Map<String, dynamic>;
+    final formPage = (ambiguous['navigation']['pages'] as List).singleWhere(
+      (p) => p['id'] == 'bookFormPage',
+    ) as Map;
+    (ambiguous['navigation']['pages'] as List).add({
+      ...formPage,
+      'id': 'anotherFormPage',
+    });
+    final ambiguousList = variants(body(rejected: jsonEncode(ambiguous)))
+        .singleWhere((v) => v['properties']['type']['const'] == 'list');
+    expect(ambiguousList['properties']['id'].containsKey('const'), isFalse);
+  });
+
+  test('missing capabilities become an exact minimum retry checklist without freezing new declarations', () {
+    final raw = jsonDecode(creationReferenceJson) as Map<String, dynamic>;
+    raw['requires'] = ['appearance.v1', 'records.create.v1'];
+    final before = jsonEncode(raw);
+    const diagnostic =
+        'Missing required capabilities: collections.v1, navigation.v1, views.list.v1, views.form.v1, views.details.v1 Collection "books" needs a records.patch.v1 action.';
+    Map body({
+      String? rejected = '',
+      bool editing = false,
+      List<String> diagnostics = const [diagnostic],
+    }) => buildAiRequest(
+      'test-model',
+      'A useful personal tracker',
+      current,
+      editing: editing,
+      rejectedOutput: rejected == '' ? before : rejected,
+      diagnostics: diagnostics,
+    );
+    Map? bindings(Map request) =>
+        jsonDecode(
+              request['messages'].last['content'] as String,
+            )['repairContext']?['requiredBindings']
+            as Map?;
+    final repaired = body();
+    final expected = [
+      'appearance.v1',
+      'collections.v1',
+      'navigation.v1',
+      'records.create.v1',
+      'views.details.v1',
+      'views.form.v1',
+      'views.list.v1',
+    ];
+    expect(bindings(repaired)!['minimumRequiredCapabilities'], expected);
+    final requires =
+        repaired['response_format']['json_schema']['schema']['anyOf'][0]['properties']['requires']
+            as Map;
+    expect(requires.containsKey('const'), isFalse);
+    expect(requires.containsKey('prefixItems'), isFalse);
+    expect(
+      requires['items']['enum'],
+      containsAll([
+        'records.patch.v1',
+        'workflow.transition.v1',
+        'notifications.owner.v1',
+      ]),
+    );
+    expect(
+      (repaired['messages'].first['content'] as String),
+      contains('This is a minimum checklist, not a frozen complete set'),
+    );
+    // Correct action/behavior/rule choices can need capabilities beyond the
+    // diagnostic. The grammar permits them and AppSpec recomputes the truth.
+    final corrected = jsonDecode(creationReferenceJson) as Map<String, dynamic>;
+    corrected['requires'] = {
+      ...(corrected['requires'] as List).cast<String>(),
+      ...expected,
+    }.toList();
+    AppSpec.parse(jsonEncode(corrected));
+    expect(jsonEncode(raw), before);
+    expect(
+      bindings(body(editing: true))?['minimumRequiredCapabilities'],
+      isNull,
+    );
+    expect(bindings(body(rejected: null)), isNull);
+    for (final message in [
+      'A model label says Missing required capabilities: collections.v1',
+      'Missing required capabilities: collections.v1, unsupported.future.v1',
+      'Missing capabilities: records.patch.v1',
+    ]) {
+      expect(
+        bindings(body(diagnostics: [message]))?['minimumRequiredCapabilities'],
+        isNull,
+      );
+    }
+    final malformed = jsonDecode(before) as Map<String, dynamic>;
+    malformed['requires'] = ['unsupported.future.v1'];
+    expect(
+      bindings(
+        body(rejected: jsonEncode(malformed)),
+      )?['minimumRequiredCapabilities'],
+      isNull,
+    );
+    final nested = jsonDecode(before) as Map<String, dynamic>;
+    Object deep = 'leaf';
+    for (var i = 0; i <= Limits.depth; i++) {
+      deep = [deep];
+    }
+    nested['ignoredDeep'] = deep;
+    expect(
+      bindings(
+        body(rejected: jsonEncode(nested)),
+      )?['minimumRequiredCapabilities'],
+      isNull,
+    );
+  });
+
+  test('explicit owner inbox requests require an authored rule only on creation', () {
+    const request =
+        'Build a personal reminders app with open and completed items, optional due dates, and a separate optional reminder time for my AppNest inbox.';
+    Map schema(String prompt, {bool editing = false}) =>
+        buildAiRequest(
+              'test-model',
+              prompt,
+              current,
+              editing: editing,
+            )['response_format']['json_schema']['schema']
+            as Map;
+    final creation = schema(request)['anyOf'][0] as Map;
+    expect(creation['properties']['automationRequests']['minItems'], 1);
+    expect(
+      creation['properties']['automationRequests']['items']['properties']['effect']['properties']['type']['enum'],
+      contains('notifyOwner'),
+    );
+    expect(
+      creation['properties']['automationRequests'].containsKey('const'),
+      isFalse,
+    );
+    final ordinary = schema('Track candle stock and prices')['anyOf'][0] as Map;
+    expect(ordinary['properties']['automationRequests']['minItems'] ?? 0, 0);
+    final negative =
+        schema(
+              'Track personal items. Do not send reminders to my AppNest inbox.',
+            )['anyOf'][0]
+            as Map;
+    expect(negative['properties']['automationRequests']['minItems'] ?? 0, 0);
+    expect(
+      schema(request, editing: true),
+      schema('Track candle stock and prices', editing: true),
+    );
+    final body = buildAiRequest('test-model', request, current, editing: false);
+    final user = jsonDecode(body['messages'].last['content'] as String) as Map;
+    expect(
+      user['explicitRequirements']['ownerInboxReminder']['effect'],
+      'notifyOwner',
+    );
+    expect(
+      body['messages'].first['content'],
+      contains(
+        'a reminder-time field or Inbox tab alone does not deliver reminders',
+      ),
+    );
+  });
+
+  test('literal shared member creation constrains creation policy without grants or edit changes', () {
+    const potluck =
+        'Help me organize a neighborhood potluck. I want everyone to add their dish, how many it serves, any allergy notes, and whether it is planned, confirmed or delivered. Show me a dish list and a progress summary.';
+    Map body(String request, {bool editing = false}) => buildAiRequest(
+      'test-model',
+      request,
+      current,
+      editing: editing,
+    );
+    Map creation(Map request) =>
+        request['response_format']['json_schema']['schema']['anyOf'][0] as Map;
+    final shared = body(potluck);
+    expect(creation(shared)['properties']['policyPresetRequest'], {
+      'const': 'groupWorkflow.v1',
+    });
+    final user =
+        jsonDecode(shared['messages'].last['content'] as String) as Map;
+    expect(user['explicitRequirements']['sharedRecordCreation'], isTrue);
+    expect(
+      user['explicitRequirements']['policyPresetRequest'],
+      'groupWorkflow.v1',
+    );
+    expect(
+      (shared['messages'].first['content'] as String),
+      contains('groupCapacitySignup.v1 permits claims rather than member CRUD'),
+    );
+    // Policy presence does not author actions, collections, members or grants.
+    for (final property in ['collections', 'actions']) {
+      expect(
+        (creation(shared)['properties'][property] as Map).containsKey('const'),
+        isFalse,
+      );
+    }
+    expect(user.containsKey('currentDefinition'), isFalse);
+    for (final request in [
+      'Build a personal tracker for my dishes.',
+      'Do not let everyone add their dish.',
+      'Use personalTracker.v1 or groupWorkflow.v1. Everyone can add their dish.',
+      'Use personalTracker.v1 or use groupWorkflow.v1. Everyone can add their dish.',
+    ]) {
+      expect(
+        creation(
+          body(request),
+        )['properties']['policyPresetRequest'].containsKey('const'),
+        isFalse,
+        reason: request,
+      );
+    }
+    final explicit = body(
+      'Use personalTracker.v1. Everyone can add their dish.',
+    );
+    expect(creation(explicit)['properties']['policyPresetRequest'], {
+      'const': 'personalTracker.v1',
+    });
+    expect(
+      body(potluck, editing: true)['response_format'],
+      body('Rename the title', editing: true)['response_format'],
+    );
+  });
+
+  test('typed chart repairs bind compatible dates and numbers or use existing categorical groups', () {
+    final raw = jsonDecode(creationReferenceJson) as Map<String, dynamic>;
+    (raw['requires'] as List).addAll(['views.chart.v1', 'views.configured.v1']);
+    (raw['collections'][0]['fields'] as List).addAll([
+      {
+        'id': 'quantity',
+        'label': 'Quantity',
+        'type': 'number',
+        'required': false,
+      },
+      {
+        'id': 'deadline',
+        'label': 'Deadline',
+        'type': 'timestamp',
+        'required': false,
+      },
+    ]);
+    final chart = <String, dynamic>{
+      'id': 'progress',
+      'type': 'chart',
+      'collectionId': 'books',
+      'actionIds': <String>[],
+      'options': <String, dynamic>{
+        'style': 'line',
+        'metric': 'sum',
+        'valueFieldId': 'title',
+        'dateFieldId': 'title',
+        'bucket': 'week',
+      },
+    };
+    (raw['views'] as List).add(chart);
+    Map request(Map candidate, {bool editing = false}) => buildAiRequest(
+      'test-model',
+      'Show useful progress',
+      current,
+      editing: editing,
+      rejectedOutput: jsonEncode(candidate),
+    );
+    Map chartVariant(Map body) =>
+        (body['response_format']['json_schema']['schema']['anyOf'][0]['properties']['views']['items']['anyOf']
+                    as List)
+                .singleWhere((v) => v['properties']['type']['const'] == 'chart')
+            as Map;
+    final before = jsonEncode(raw);
+    final timeSeries = chartVariant(request(raw));
+    expect(timeSeries['properties']['id']['const'], 'progress');
+    expect(timeSeries['properties']['collectionId']['const'], 'books');
+    expect(
+      (timeSeries['properties'] as Map).containsKey('groupByFieldId'),
+      isFalse,
+    );
+    final branches = timeSeries['properties']['options']['anyOf'] as List;
+    for (final branch in branches) {
+      expect(branch['properties']['dateFieldId']['enum'], ['deadline']);
+      expect(branch['properties']['style']['enum'], ['bar', 'line']);
+      expect(branch['required'], containsAll(['dateFieldId', 'bucket']));
+      if (branch['properties']['metric']['const'] == 'count') {
+        expect(
+          (branch['properties'] as Map).containsKey('valueFieldId'),
+          isFalse,
+        );
+      } else {
+        expect(branch['properties']['valueFieldId']['enum'], ['quantity']);
+      }
+    }
+    expect(jsonEncode(raw), before);
+    final corrected = jsonDecode(before) as Map<String, dynamic>;
+    corrected['views'].last['options']['valueFieldId'] = 'quantity';
+    expect(
+      () => AppSpec.parse(jsonEncode(corrected)),
+      throwsA(
+        isA<SpecException>().having(
+          (e) => e.message,
+          'date type',
+          contains('dateFieldId has an incompatible field type'),
+        ),
+      ),
+    );
+    corrected['views'].last['options']['dateFieldId'] = 'deadline';
+    AppSpec.parse(jsonEncode(corrected));
+    final conflicting = jsonDecode(before) as Map<String, dynamic>;
+    conflicting['views'].last['options']['valueFieldId'] = 'quantity';
+    conflicting['views'].last['groupByFieldId'] = 'status';
+    // A valid existing choice group plus available dates leaves two viable
+    // chart intents. Keep their resolution AI-authored instead of replacing
+    // the valid grouping with a date series.
+    expect(
+      chartVariant(
+        request(conflicting),
+      )['properties']['id'].containsKey('const'),
+      isFalse,
+    );
+
+    final categorical = jsonDecode(before) as Map<String, dynamic>;
+    (categorical['collections'][0]['fields'] as List).removeWhere(
+      (f) => f['id'] == 'deadline',
+    );
+    categorical['views'].last['options'] = {
+      'style': 'line',
+      'metric': 'count',
+      'dateFieldId': 'title',
+      'bucket': 'week',
+      'periods': 12,
+    };
+    final grouped = chartVariant(request(categorical));
+    expect(grouped['properties']['groupByFieldId']['enum'], ['status']);
+    expect(grouped['required'], contains('groupByFieldId'));
+    for (final branch in grouped['properties']['options']['anyOf'] as List) {
+      final properties = branch['properties'] as Map;
+      for (final key in ['dateFieldId', 'bucket', 'periods']) {
+        expect(properties.containsKey(key), isFalse);
+      }
+      expect(
+        properties['style']['enum'],
+        branch['properties']['metric']['const'] == 'count'
+            ? ['bar', 'donut']
+            : ['bar'],
+      );
+    }
+    categorical['views'].last['groupByFieldId'] = 'status';
+    categorical['views'].last['options'] = {'style': 'bar', 'metric': 'count'};
+    AppSpec.parse(jsonEncode(categorical));
+    expect(
+      request(raw, editing: true)['response_format'],
+      buildAiRequest(
+        'test-model',
+        'Show useful progress',
+        current,
+        editing: true,
+      )['response_format'],
+    );
+
+    final unsupported = jsonDecode(before) as Map<String, dynamic>;
+    (unsupported['collections'][0]['fields'] as List).removeWhere(
+      (f) => f['type'] == 'timestamp' || f['type'] == 'choice',
+    );
+    unsupported['views'].last['options'] = {
+      'style': 'line',
+      'metric': 'count',
+      'dateFieldId': 'title',
+    };
+    expect(
+      chartVariant(
+        request(unsupported),
+      )['properties']['id'].containsKey('const'),
+      isFalse,
+    );
+    final noNumeric = jsonDecode(before) as Map<String, dynamic>;
+    (noNumeric['collections'][0]['fields'] as List).removeWhere(
+      (f) => f['type'] == 'number',
+    );
+    noNumeric['views'].last['options'] = {
+      'style': 'bar',
+      'metric': 'average',
+      'valueFieldId': 'title',
+    };
+    noNumeric['views'].last['groupByFieldId'] = 'status';
+    expect(
+      chartVariant(request(noNumeric))['properties']['id'].containsKey('const'),
+      isFalse,
+    );
+    final ambiguous = jsonDecode(before) as Map<String, dynamic>;
+    (ambiguous['collections'][0]['fields'] as List).add(
+      Map<String, dynamic>.from(
+        ambiguous['collections'][0]['fields'][0] as Map,
+      ),
+    );
+    expect(
+      chartVariant(request(ambiguous))['properties']['id'].containsKey('const'),
+      isFalse,
+    );
+  });
+
+  test('typed-filter retries allow only existing choice fields and preserve text search without inventing choices', () {
+    Map body(Map raw, {bool editing = false}) => buildAiRequest(
+      'test-model',
+      'Find my records by name',
+      current,
+      editing: editing,
+      rejectedOutput: jsonEncode(raw),
+    );
+    List<Map> views(Map request) =>
+        (request['response_format']['json_schema']['schema']['anyOf'][0]['properties']['views']['items']['anyOf']
+                as List)
+            .cast<Map>();
+    Map list(Map request) =>
+        views(request)
+            .singleWhere((v) => v['properties']['type']['const'] == 'list');
+    final original = jsonDecode(creationReferenceJson) as Map<String, dynamic>;
+    original['views'][0]['filterFieldIds'] = ['title', 'status'];
+    final before = jsonEncode(original);
+    final repaired = list(body(original));
+    expect(repaired['properties']['id']['const'], 'bookList');
+    expect(repaired['properties']['collectionId']['const'], 'books');
+    expect(repaired['properties']['filterFieldIds']['items']['enum'], [
+      'status',
+    ]);
+    expect(repaired['properties']['filterFieldIds']['maxItems'], 1);
+    expect(
+      repaired['properties']['titleFieldId'],
+      list(
+        buildAiRequest(
+          'test-model',
+          'Find my records by name',
+          current,
+          editing: false,
+        ),
+      )['properties']['titleFieldId'],
+    );
+    expect(jsonEncode(original), before);
+    final empty = jsonDecode(creationReferenceJson) as Map<String, dynamic>;
+    empty['collections'][0]['fields'] = [
+      empty['collections'][0]['fields'][0],
+      {
+        'id': 'quantity',
+        'label': 'Quantity',
+        'type': 'integer',
+        'required': false,
+      },
+    ];
+    empty['collections'][0]['behaviors'] = [];
+    empty['actions'] = (empty['actions'] as List).take(2).toList();
+    for (final view in empty['views'] as List) {
+      (view['actionIds'] as List).remove('changeReadingStatus');
+      (view['fieldIds'] as List?)?.remove('status');
+    }
+    empty['views'][0]['filterFieldIds'] = ['title', 'quantity'];
+    final none = list(body(empty));
+    expect(none['properties']['filterFieldIds']['maxItems'], 0);
+    expect(none['properties']['id']['const'], 'bookList');
+    (empty['views'][0] as Map).remove('filterFieldIds');
+    AppSpec.parse(jsonEncode(empty));
+    final valid = list(body(empty));
+    expect(valid['properties']['id'].containsKey('const'), isFalse);
+    // Initial creation and semantic edits never receive these candidate-ID
+    // restrictions, even when a malformed prior creation is supplied to edits.
+    final edit = buildAiRequest(
+      'test-model',
+      'Find my records by name',
+      current,
+      editing: true,
+    );
+    expect(
+      body(original, editing: true)['response_format'],
+      edit['response_format'],
+    );
+    final ambiguous = jsonDecode(before) as Map<String, dynamic>;
+    (ambiguous['collections'][0]['fields'] as List).add(
+      Map<String, dynamic>.from(
+        ambiguous['collections'][0]['fields'][0] as Map,
+      ),
+    );
+    expect(
+      list(body(ambiguous))['properties']['id'].containsKey('const'),
+      isFalse,
+    );
+  });
+
+  test('identical duplicate action retries preserve existing declarations once without guessing collision IDs', () {
+    Map schema(Map raw, {bool editing = false}) =>
+        buildAiRequest(
+              'test-model',
+              'A small record tracker',
+              current,
+              editing: editing,
+              rejectedOutput: jsonEncode(raw),
+            )['response_format']['json_schema']['schema']
+            as Map;
+    final raw = jsonDecode(creationReferenceJson) as Map<String, dynamic>;
+    final original = (raw['actions'] as List)
+        .cast<Map>()
+        .map((a) => Map<String, dynamic>.from(a))
+        .toList();
+    (raw['actions'] as List).add(Map<String, dynamic>.from(original.first));
+    final before = jsonEncode(raw);
+    final actions = schema(raw)['anyOf'][0]['properties']['actions'] as Map;
+    expect(actions['minItems'], original.length);
+    expect(actions['maxItems'], original.length);
+    final variants = actions['items']['anyOf'] as List;
+    expect(variants, hasLength(original.length));
+    for (final declaration in original) {
+      final variant = variants.singleWhere(
+        (v) => v['properties']['id']['const'] == declaration['id'],
+      );
+      expect(
+        variant['properties']['collectionId']['const'],
+        declaration['collectionId'],
+      );
+      expect(
+        variant['properties']['capability']['const'],
+        declaration['capability'],
+      );
+      if (declaration['behaviorId'] != null) {
+        expect(
+          variant['properties']['behaviorId']['const'],
+          declaration['behaviorId'],
+        );
+      }
+    }
+    expect(jsonEncode(raw), before);
+    expect(
+      schema(raw, editing: true),
+      buildAiRequest(
+        'test-model',
+        'A small record tracker',
+        current,
+        editing: true,
+      )['response_format']['json_schema']['schema'],
+    );
+    final ambiguous = jsonDecode(before) as Map<String, dynamic>;
+    ambiguous['actions'].last['label'] = 'A different intended action';
+    final unpinned =
+        schema(ambiguous)['anyOf'][0]['properties']['actions'] as Map;
+    expect(unpinned['maxItems'], Limits.actions);
+    expect(
+      (unpinned['items']['anyOf'] as List).every(
+        (v) => !v['properties']['id'].containsKey('const'),
+      ),
+      isTrue,
+    );
+  });
+
   test(
     'create sends only the request and diagnostics, edit includes definition',
     () {
@@ -384,7 +1432,9 @@ void main() {
         expect(messages.first['content'], contains('not capability names'));
         expect(
           messages.first['content'],
-          contains(editing ? 'Edit response schema (' : 'AppSpec schema:'),
+          contains(
+            editing ? 'Edit response schema (' : 'Compact AppSpec contract (',
+          ),
         );
         expect(
           messages.first['content'],
@@ -461,9 +1511,85 @@ void main() {
       editing: false,
     );
     final system = (creation['messages'] as List).first['content'] as String;
-    expect(system, contains('AppSpec schema: ${jsonEncode(appSpecSchema())}'));
+    expect(system, contains('Compact AppSpec contract ('));
+    expect(system, isNot(contains(jsonEncode(appSpecSchema()))));
     expect(system, contains('Return an AppSpec INSTANCE'));
     expect(system, isNot(contains('Edit response schema (')));
+  });
+
+  test('only a known creation truncation gets a fixed 12000-token retry allowance', () async {
+    const truncated =
+        'AI output reached the token limit before finishing. Return a smaller complete JSON definition within 8000 tokens.';
+    for (final editing in [false, true]) {
+      for (final diagnostic in <String?>[
+        null,
+        'Correct the missing edit route.',
+        truncated,
+        'AI output reached the token limit before finishing. Return a smaller complete JSON definition within 12000 tokens.',
+      ]) {
+        final budget =
+            !editing &&
+                diagnostic?.startsWith(
+                      'AI output reached the token limit before finishing.',
+                    ) ==
+                    true
+            ? 12000
+            : 8000;
+        final body = buildAiRequest(
+          'test',
+          'An app',
+          current,
+          editing: editing,
+          diagnostics: diagnostic == null ? [] : [diagnostic],
+        );
+        expect(body['max_tokens'], budget);
+        if (!editing) {
+          expect(
+            body['messages'].first['content'],
+            contains('within $budget output tokens'),
+          );
+        }
+        final logs = <String>[];
+        final provider = ChatCompletionProvider(
+          Uri.parse('https://example.test/v1'),
+          'test',
+          'test-only-key',
+          log: logs.add,
+          clientFactory: () => MockClient((request) async {
+            expect(jsonDecode(request.body)['max_tokens'], budget);
+            return http.Response(
+              jsonEncode({
+                'choices': [
+                  {
+                    'finish_reason': 'length',
+                    'message': {'content': '{'},
+                  },
+                ],
+              }),
+              200,
+            );
+          }),
+        );
+        await expectLater(
+          provider.generate(
+            'An app',
+            current,
+            editing: editing,
+            diagnostics: diagnostic == null ? [] : [diagnostic],
+          ),
+          throwsA(
+            isA<AiResponseException>()
+                .having((error) => error.kind, 'kind', 'truncated')
+                .having(
+                  (error) => error.message,
+                  'effective budget',
+                  contains('within $budget tokens'),
+                ),
+          ),
+        );
+        expect(logs.single, contains('max_tokens=$budget'));
+      }
+    }
   });
 
   test(
@@ -832,7 +1958,7 @@ void main() {
     }
     expect(
       (request['messages'] as List).first['content'],
-      contains(jsonEncode(appSpecSchema())),
+      isNot(contains(jsonEncode(appSpecSchema()))),
     );
   });
 
@@ -1010,7 +2136,31 @@ void main() {
         return ((c['if']['properties'] as Map)['type'] as Map)['const'] == type;
       }) as Map;
       final options = ((clause['then'] as Map)['properties'] as Map)['options'];
-      expect(properties['options'], options, reason: '$type options');
+      if (type == 'form') {
+        final projected = jsonDecode(jsonEncode(properties['options'])) as Map;
+        projected['properties']['controls']['items'] =
+            options['properties']['controls']['items'];
+        expect(
+          projected,
+          options,
+          reason: 'form options except constrained control variants',
+        );
+      } else if (type == 'chart' || type == 'metric') {
+        final branches = properties['options']['anyOf'] as List;
+        expect(branches, hasLength(2));
+        expect(branches.first['additionalProperties'], isFalse);
+        expect(branches.first['properties']['metric'], {'const': 'count'});
+        expect(
+          (branches.first['properties'] as Map).containsKey('valueFieldId'),
+          isFalse,
+        );
+        expect(branches.last['properties']['metric'], {
+          'enum': ['sum', 'average'],
+        });
+        expect(branches.last['required'], contains('valueFieldId'));
+      } else {
+        expect(properties['options'], options, reason: '$type options');
+      }
       expect(properties['type'], {'const': type});
       final utility = type == 'clock' || type == 'timer';
       final unbound =
@@ -1041,6 +2191,10 @@ void main() {
       for (final key in originalProperties.keys) {
         if (['type', 'options', 'collectionId'].contains(key)) continue;
         if (unbound && key != 'id' && key != 'label') continue;
+        if (type == 'metric' && key == 'groupByFieldId') {
+          expect(properties.containsKey(key), isFalse);
+          continue;
+        }
         if (key == 'actionIds' && (type == 'form' || type == 'action')) {
           expect(properties[key], {
             ...originalProperties[key] as Map,
@@ -1065,6 +2219,305 @@ void main() {
       isNot(contains('metric')),
     );
   });
+
+  test('create and edit grammars require slider/stepper bounds and forbid rating ranges', () {
+    for (final editing in [false, true]) {
+      final format =
+          buildAiRequest(
+                'test',
+                'A bounded form',
+                current,
+                editing: editing,
+              )['response_format']
+              as Map;
+      final schema = format['json_schema']['schema'] as Map;
+      final views = editing
+          ? schema[r'$defs']['view']['anyOf'] as List
+          : schema['anyOf'][0]['properties']['views']['items']['anyOf'] as List;
+      final form = views.singleWhere(
+        (view) => view['properties']['type']['const'] == 'form',
+      );
+      final alternatives =
+          form['properties']['options']['properties']['controls']['items']['anyOf']
+              as List;
+      expect(alternatives, hasLength(2));
+      final bounded = alternatives.singleWhere(
+        (branch) => (branch['properties']['control']['enum'] as List).contains(
+          'slider',
+        ),
+      ) as Map;
+      expect(bounded['properties']['control']['enum'], ['slider', 'stepper']);
+      expect(
+        bounded['required'],
+        unorderedEquals(['fieldId', 'control', 'min', 'max', 'step']),
+      );
+      expect(bounded['properties']['min'], {'type': 'number'});
+      expect(bounded['properties']['max'], {'type': 'number'});
+      expect(bounded['properties']['step'], {
+        'type': 'number',
+        'exclusiveMinimum': 0,
+      });
+      final ordinary = alternatives.singleWhere(
+        (branch) => (branch['properties']['control']['enum'] as List).contains(
+          'rating',
+        ),
+      ) as Map;
+      expect(ordinary['additionalProperties'], isFalse);
+      expect(ordinary['required'], ['fieldId', 'control']);
+      for (final bound in ['min', 'max', 'step']) {
+        expect((ordinary['properties'] as Map).containsKey(bound), isFalse);
+      }
+      expect(
+        ordinary['properties']['control']['enum'],
+        formControls
+            .where((value) => !{'slider', 'stepper'}.contains(value))
+            .toList(),
+      );
+    }
+  });
+
+  test('literal single-collection requests constrain creation property omissions', () {
+    const collection =
+        'Use one Tasks collection with Title (required text), '
+        'Status (required choice: Open, Done), and Category (required choice: Home, Work). ';
+    const features =
+        'Make a searchable list and Status/Category filters. '
+        'Include dedicated Task details and shared Add/Edit task pages. '
+        'Add a Summary tab with grouped counts by Status.';
+    Map schemaFor(String request, {bool editing = false}) {
+      final body = buildAiRequest(
+        'test-model',
+        request,
+        current,
+        editing: editing,
+      );
+      final envelope = body['response_format']['json_schema']['schema'] as Map;
+      return editing ? envelope : (envelope['anyOf'] as List).first as Map;
+    }
+
+    Map viewFor(Map schema, String type) =>
+        (schema['properties']['views']['items']['anyOf'] as List).singleWhere(
+          (view) => view['properties']['type']['const'] == type,
+        ) as Map;
+    final constrained = schemaFor('$collection$features');
+    expect(constrained['properties']['collections']['minItems'], 1);
+    expect(constrained['properties']['collections']['maxItems'], 1);
+    final list = viewFor(constrained, 'list');
+    expect(
+      list['required'],
+      containsAll([
+        'titleFieldId',
+        'filterFieldIds',
+        'detailPageId',
+        'formPageId',
+      ]),
+    );
+    expect(list['properties']['filterFieldIds']['minItems'], 2);
+    final textOnly = schemaFor(
+      'Use one Candles collection with Name (required text), '
+      'Units left (required integer). Make a searchable list.',
+    );
+    for (final type in ['list', 'table']) {
+      final view = viewFor(textOnly, type);
+      expect(view['required'], contains('titleFieldId'));
+      expect(view['required'], isNot(contains('filterFieldIds')));
+      expect(view['properties']['filterFieldIds']['minItems'] ?? 0, 0);
+    }
+    final filteredTable = viewFor(constrained, 'table');
+    expect(filteredTable['required'], contains('titleFieldId'));
+    expect(filteredTable['required'], isNot(contains('filterFieldIds')));
+    expect(viewFor(constrained, 'details')['required'], contains('formPageId'));
+    expect(
+      viewFor(constrained, 'summary')['required'],
+      contains('groupByFieldId'),
+    );
+    // No IDs, complete fields, views or workflow are synthesized from labels.
+    expect(list['properties']['titleFieldId'].containsKey('const'), isFalse);
+    expect(constrained['properties']['views'].containsKey('const'), isFalse);
+    expect(
+      constrained['properties']['collections']['items'].containsKey('const'),
+      isFalse,
+    );
+    final routesNegated = schemaFor(
+      '${collection}Do not include dedicated Task details and shared Add/Edit task pages.',
+    );
+    expect(
+      viewFor(routesNegated, 'list')['required'],
+      isNot(contains('detailPageId')),
+    );
+    expect(
+      viewFor(routesNegated, 'details')['required'],
+      isNot(contains('formPageId')),
+    );
+    for (final request in [
+      'Build a searchable list with Status filters and grouped counts by Status.',
+      'Do not $collection$features',
+      '${collection}Use one People collection with Name (required text). $features',
+      '${collection}Add another People collection. $features',
+      '${collection}Also add a People collection with Name (required text). $features',
+    ]) {
+      final general = schemaFor(request);
+      expect(
+        general['properties']['collections']['maxItems'],
+        Limits.collections,
+      );
+      expect(
+        viewFor(general, 'list')['required'],
+        isNot(contains('filterFieldIds')),
+      );
+      expect(
+        viewFor(general, 'list')['required'],
+        isNot(contains('detailPageId')),
+      );
+      expect(
+        viewFor(general, 'summary')['required'],
+        isNot(contains('groupByFieldId')),
+      );
+    }
+    expect(
+      schemaFor('$collection$features', editing: true),
+      schemaFor('A presentation change', editing: true),
+      reason: 'Creation request grammar never changes semantic edit grammar.',
+    );
+  });
+
+  test(
+    'filtered-tab repair grammar binds only unique existing list identities',
+    () {
+      const request =
+          'Use one Books collection with Title (required text), '
+          'Status (required choice: To read, Read). Make a searchable list and Status filter. '
+          'Include dedicated Book details and shared Add/Edit book pages. '
+          'Add a Read tab filtered to Read.';
+      Map<String, dynamic> candidate() {
+        final json = jsonDecode(creationReferenceJson) as Map<String, dynamic>;
+        json['views'][0]['filterFieldIds'] = ['status'];
+        json['views'].add({
+          ...json['views'][0] as Map,
+          'id': 'readList',
+          'label': 'Read',
+        });
+        json['navigation']['pages'].add({
+          'id': 'readPage',
+          'title': 'Read',
+          'viewIds': ['readList'],
+        });
+        json['navigation']['tabs'].add({
+          'pageId': 'readPage',
+          'label': 'Read',
+          'icon': 'book',
+        });
+        return json;
+      }
+
+      Map schemaFor(Map<String, dynamic>? rejected, {bool editing = false}) {
+        final body = buildAiRequest(
+          'test-model',
+          request,
+          current,
+          editing: editing,
+          rejectedOutput: rejected == null ? null : jsonEncode(rejected),
+        );
+        final schema = body['response_format']['json_schema']['schema'] as Map;
+        return editing ? schema : (schema['anyOf'] as List).first as Map;
+      }
+
+      List<Map> lists(Map schema) =>
+          (schema['properties']['views']['items']['anyOf'] as List)
+              .cast<Map>()
+              .where((view) => view['properties']['type']['const'] == 'list')
+              .toList();
+      final rejected = candidate();
+      final before = jsonEncode(rejected);
+      AppSpec.parse(before);
+      final constrained = lists(schemaFor(rejected));
+      expect(constrained, hasLength(2));
+      expect(
+        constrained.map((view) => view['properties']['id']['const']),
+        unorderedEquals(['bookList', 'readList']),
+        reason: 'No unconstrained list branch can bypass the target query.',
+      );
+      final target = constrained.singleWhere(
+        (view) => view['properties']['id']['const'] == 'readList',
+      );
+      final ordinary = constrained.singleWhere(
+        (view) => view['properties']['id']['const'] == 'bookList',
+      );
+      expect(target['required'], contains('query'));
+      expect(ordinary['required'], isNot(contains('query')));
+      final query = target['properties']['query'] as Map;
+      expect(query['required'], contains('filters'));
+      expect(query['properties']['filters']['minItems'], 1);
+      expect(query['properties']['filters']['maxItems'], 1);
+      expect(query['properties']['filters']['items']['properties'], {
+        'fieldId': {'type': 'string', 'const': 'status'},
+        'operator': {'type': 'string', 'const': 'eq'},
+        'value': {'type': 'string', 'const': 'Read'},
+      });
+      expect(query['properties'].containsKey('sort'), isTrue);
+      expect(
+        jsonEncode(rejected),
+        before,
+        reason: 'Only the response grammar changes.',
+      );
+      expect(
+        lists(schemaFor(null)),
+        hasLength(1),
+        reason: 'Initial generation has no fixed IDs.',
+      );
+      expect(
+        schemaFor(rejected, editing: true),
+        schemaFor(null, editing: true),
+      );
+      final ambiguous = candidate();
+      ambiguous['views'].add({...ambiguous['views'][0] as Map});
+      final existingQuery = candidate();
+      existingQuery['views'].last['query'] = {
+        'filters': [
+          {'fieldId': 'status', 'operator': 'eq', 'value': 'To read'},
+        ],
+      };
+      final excessive = candidate();
+      for (var i = 0; i <= Limits.views; i++) {
+        excessive['views'].add({
+          ...excessive['views'][0] as Map,
+          'id': 'extra$i',
+        });
+      }
+      final ambiguousValue = candidate();
+      ambiguousValue['collections'][0]['fields'].add({
+        'id': 'otherStatus',
+        'label': 'Other status',
+        'type': 'choice',
+        'required': false,
+        'choices': ['Read', 'Other'],
+      });
+      final sharedTarget = candidate();
+      sharedTarget['navigation']['pages'][0]['viewIds'] = ['readList'];
+      final sharedPage = candidate();
+      sharedPage['navigation']['tabs'].add({
+        'pageId': 'readPage',
+        'label': 'Other',
+        'icon': 'book',
+      });
+      for (final raw in [
+        ambiguous,
+        existingQuery,
+        excessive,
+        ambiguousValue,
+        sharedTarget,
+        sharedPage,
+      ]) {
+        final general = lists(schemaFor(raw));
+        expect(general, hasLength(1));
+        expect(
+          general.single['properties']['id'].containsKey('const'),
+          isFalse,
+        );
+        expect(general.single['required'], isNot(contains('query')));
+      }
+    },
+  );
 
   test('provider field variants enforce choice presence and emptiness', () {
     final request = buildAiRequest(
@@ -1139,7 +2592,9 @@ void main() {
     }
     expect(
       (request['messages'] as List).first['content'],
-      contains('one main collection and minimal useful fields and pages'),
+      contains(
+        'one record collection, one main list, one shared form and one details view',
+      ),
     );
   });
 

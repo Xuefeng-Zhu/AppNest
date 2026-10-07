@@ -57,6 +57,9 @@ class _RecordEditorState extends State<_RecordEditor> {
       ].where((c) => c['fieldId'] == field.id).firstOrNull ??
       {};
   String? _error;
+  String _message(Object error, String fallback) =>
+      widget.adapter?.errorMessage(error, fallback: fallback) ??
+      (error is SpecException ? error.message : fallback);
   bool get creating => widget.initial == null;
   List<FieldSpec> get fields => widget.collection.fields
       .where(
@@ -97,7 +100,10 @@ class _RecordEditorState extends State<_RecordEditor> {
         },
         onError: (Object error) {
           if (mounted)
-            setState(() => _error = 'Could not load eligible members. $error');
+            setState(
+              () => _error =
+                  'Could not load eligible members. ${_message(error, 'Try again.')}',
+            );
         },
       );
     }
@@ -163,7 +169,7 @@ class _RecordEditorState extends State<_RecordEditor> {
       if (mounted)
         setState(() {
           _saving = false;
-          _error = 'Could not save. $error';
+          _error = 'Could not save. ${_message(error, 'Try again.')}';
         });
     }
   }
@@ -405,7 +411,10 @@ class _RecordEditorState extends State<_RecordEditor> {
         _error = null;
       });
     } catch (error) {
-      setState(() => _error = 'Please check this step. $error');
+      setState(
+        () => _error =
+            'Please check this step. ${_message(error, 'Review the entered values.')}',
+      );
     }
   }
 
@@ -641,7 +650,7 @@ class _RecordEditorState extends State<_RecordEditor> {
       if (mounted)
         setState(() {
           _uploading = false;
-          _error = 'Could not upload image. $error';
+          _error = 'Could not upload image. ${_message(error, 'Try again.')}';
         });
     }
   }

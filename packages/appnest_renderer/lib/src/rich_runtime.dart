@@ -246,16 +246,41 @@ class _RichMiniAppRuntimeState extends State<_RichMiniAppRuntime>
     return _navigate(target, kind: MiniAppNavigationKind.pop);
   }
 
+  String? _textSearchField(ViewSpec view) {
+    final fieldId = view.titleFieldId;
+    if (view.contentOnly ||
+        view.type == 'summary' ||
+        fieldId == null ||
+        spec.collection(view.collectionId).field(fieldId).type !=
+            FieldType.text)
+      return null;
+    final filters = resolveViewQuery(spec, view, now: now)['filters'] as List;
+    final componentFilters = view.type == 'calendar'
+        ? 2
+        : view.type == 'timeline' &&
+              !spec
+                  .collection(view.collectionId)
+                  .field(view.options['dateFieldId'] as String)
+                  .required
+        ? 1
+        : 0;
+    if (filters.length + view.filterFieldIds.length + componentFilters >=
+        Limits.filters)
+      return null;
+    return fieldId;
+  }
+
   Map<String, dynamic> _query(ViewSpec view, {String? cursor}) {
     final stored = state(view);
     final query = resolveViewQuery(spec, view, now: now);
+    final searchField = _textSearchField(view);
     return {
       ...query,
       'filters': [
         ...query['filters'] as List,
-        if (stored.search.isNotEmpty && view.titleFieldId != null)
+        if (stored.search.isNotEmpty && searchField != null)
           {
-            'fieldId': view.titleFieldId,
+            'fieldId': searchField,
             'operator': 'contains',
             'value': stored.search,
           },
@@ -565,7 +590,11 @@ class _RichMiniAppRuntimeState extends State<_RichMiniAppRuntime>
     } catch (error) {
       if (mounted) setState(() => _saving = false);
       if (editor || propagateError) rethrow;
-      if (mounted) _showFeedback('Could not save. $error');
+      if (mounted) {
+        _showFeedback(
+          adapter.errorMessage(error, fallback: 'Could not save. Try again.'),
+        );
+      }
     }
   }
 
@@ -677,9 +706,7 @@ class _RichMiniAppRuntimeState extends State<_RichMiniAppRuntime>
                   if (adapter.readOnly)
                     _notice(
                       context,
-                      adapter.role == 'viewer'
-                          ? 'Read-only · Viewer access'
-                          : 'Archived · This app is read-only',
+                      adapter.readOnlyMessage,
                       Icons.lock_outline,
                     ),
                   if (_loading || _saving)
@@ -840,7 +867,10 @@ class _RichMiniAppRuntimeState extends State<_RichMiniAppRuntime>
                           ),
                           const SizedBox(height: 8),
                           Text(
-                            'Your access or this app may have changed. $_error',
+                            adapter.errorMessage(
+                              _error!,
+                              fallback: 'Your access or this app may have changed. Refresh to try again.',
+                            ),
                           ),
                           const SizedBox(height: 12),
                           TextButton.icon(
@@ -1003,7 +1033,7 @@ class _RichMiniAppRuntimeState extends State<_RichMiniAppRuntime>
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Text(
-          view.label,
+          _recordSectionLabel(spec, view),
           style: Theme.of(context).textTheme.titleMedium?.copyWith(
             fontWeight: spec.appearance == null ? FontWeight.w700 : null,
           ),
@@ -1041,26 +1071,27 @@ class _RichMiniAppRuntimeState extends State<_RichMiniAppRuntime>
                   spec.collection(view.collectionId).label,
                 )
         else ...[
-          if (view.filterFieldIds.isNotEmpty) ...[
-            if (view.titleFieldId != null)
-              TextFormField(
-                key: ValueKey('search-${view.id}'),
-                initialValue: stored.search,
-                decoration: const InputDecoration(
-                  hintText: 'Search',
-                  prefixIcon: Icon(Icons.search),
-                ),
-                onChanged: (value) {
-                  stored.search = value;
-                  stored.records = null;
-                  _searchTimer?.cancel();
-                  _searchTimer = Timer(
-                    const Duration(milliseconds: 250),
-                    _refresh,
-                  );
-                },
+          if (_textSearchField(view) != null) ...[
+            TextFormField(
+              key: ValueKey('search-${view.id}'),
+              initialValue: stored.search,
+              decoration: const InputDecoration(
+                hintText: 'Search',
+                prefixIcon: Icon(Icons.search),
               ),
+              onChanged: (value) {
+                stored.search = value;
+                stored.records = null;
+                _searchTimer?.cancel();
+                _searchTimer = Timer(
+                  const Duration(milliseconds: 250),
+                  _refresh,
+                );
+              },
+            ),
             const SizedBox(height: 12),
+          ],
+          if (view.filterFieldIds.isNotEmpty) ...[
             Wrap(
               spacing: 12,
               runSpacing: 10,
@@ -1290,6 +1321,7 @@ class _RichMiniAppRuntimeState extends State<_RichMiniAppRuntime>
 
   Widget _row(BuildContext context, ViewSpec view, RuntimeItem item) {
     final collection = spec.collection(view.collectionId);
+    final titleFieldId = view.titleFieldId ?? collection.fields.first.id;
     final actions = _recordActions(view, item).toList();
     final workflow = actions
         .where((a) => a.capability == 'workflow.transition.v1')
@@ -1308,7 +1340,7 @@ class _RichMiniAppRuntimeState extends State<_RichMiniAppRuntime>
                 : view.fieldIds)
             .where(
               (id) =>
-                  id != view.titleFieldId &&
+                  id != titleFieldId &&
                   item.data[id] != null &&
                   (!{'gallery', 'imageCards'}.contains(view.type) ||
                       id != view.options['imageFieldId']),
@@ -1360,17 +1392,11 @@ class _RichMiniAppRuntimeState extends State<_RichMiniAppRuntime>
                   _editableField(
                     context,
                     view,
-                    view.titleFieldId ?? collection.fields.first.id,
+                    titleFieldId,
                     Text(
-                      collection
-                                  .field(
-                                    view.titleFieldId ??
-                                        collection.fields.first.id,
-                                  )
-                                  .type ==
-                              FieldType.image
+                      collection.field(titleFieldId).type == FieldType.image
                           ? 'Image record'
-                          : '${item.data[view.titleFieldId ?? collection.fields.first.id] ?? 'Untitled'}',
+                          : '${item.data[titleFieldId] ?? 'Untitled'}',
                       style: Theme.of(context).textTheme.titleMedium,
                     ),
                     pageId: page.id,
@@ -1450,6 +1476,7 @@ class _RichMiniAppRuntimeState extends State<_RichMiniAppRuntime>
 
   Widget _details(BuildContext context, ViewSpec view, RuntimeItem item) {
     final collection = spec.collection(item.collectionId);
+    final titleFieldId = view.titleFieldId ?? collection.fields.first.id;
     final fields = view.fieldIds.isEmpty
         ? collection.fields
         : view.fieldIds.map(collection.field);
@@ -1462,16 +1489,11 @@ class _RichMiniAppRuntimeState extends State<_RichMiniAppRuntime>
             _editableField(
               context,
               view,
-              view.titleFieldId ?? collection.fields.first.id,
+              titleFieldId,
               Text(
-                collection
-                            .field(
-                              view.titleFieldId ?? collection.fields.first.id,
-                            )
-                            .type ==
-                        FieldType.image
+                collection.field(titleFieldId).type == FieldType.image
                     ? 'Image record'
-                    : '${item.data[view.titleFieldId ?? collection.fields.first.id] ?? 'Untitled'}',
+                    : '${item.data[titleFieldId] ?? 'Untitled'}',
                 style: Theme.of(context).textTheme.headlineSmall,
               ),
               pageId: page.id,
@@ -1482,7 +1504,7 @@ class _RichMiniAppRuntimeState extends State<_RichMiniAppRuntime>
                 padding: EdgeInsets.only(bottom: _space(context, 20)),
                 child: CapacitySummary(item: item),
               ),
-            for (final field in fields.where((f) => f.id != view.titleFieldId))
+            for (final field in fields.where((f) => f.id != titleFieldId))
               Padding(
                 padding: EdgeInsets.only(bottom: _space(context, 20)),
                 child: _editableField(

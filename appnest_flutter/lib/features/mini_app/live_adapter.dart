@@ -29,6 +29,15 @@ class LiveRuntimeAdapter extends RuntimeAdapter {
   @override
   bool get preview => false;
   @override
+  bool get archived => manifest.archived;
+  @override
+  String errorMessage(
+    Object error, {
+    String fallback = 'Could not complete the request. Try again.',
+  }) => error is NestError
+      ? error.message
+      : super.errorMessage(error, fallback: fallback);
+  @override
   List<String> get approvedRuleIds => manifest.approvedRuleIds ?? const [];
   @override
   bool get readOnly =>

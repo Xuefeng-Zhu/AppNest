@@ -4,6 +4,8 @@ import 'package:appnest_server/src/generated/protocol.dart';
 import 'package:appnest_server/src/modules/automation/worker.dart';
 import 'package:appnest_server/src/modules/builder/builder.dart';
 import 'package:appnest_server/src/modules/builder/provider.dart';
+import 'package:appnest_server/src/modules/builder/generation_requirements.dart';
+import 'package:appnest_server/src/modules/builder/repair_bindings.dart';
 import 'package:appnest_server/src/modules/definitions/apps.dart';
 import 'package:appnest_server/src/modules/runtime/access.dart';
 import 'package:appnest_spec/appnest_spec.dart';
@@ -47,6 +49,7 @@ Future<GenerationJob> _queue(
   Session session,
   BuilderSnapshot draft, {
   int attempts = 0,
+  String request = 'Synthetic repair isolation test',
 }) async {
   final job = await GenerationJob.db.insertRow(
     session,
@@ -56,7 +59,7 @@ Future<GenerationJob> _queue(
       actorId: actor(session),
       mutation: draft.mutation,
       status: 'queued',
-      requestText: 'Synthetic repair isolation test',
+      requestText: request,
       mode: 'create',
       promptVersion: 'repair-test',
       attempts: attempts,
@@ -125,6 +128,265 @@ void main() {
     final invalidSpec = starterTemplates()['planner']!.toJson()
       ..['name'] = _privateMarker
       ..['requires'] = <String>[];
+    test('strict raw rejection aggregates hidden defects without repairing preview or authored bytes', () async {
+      final (owner, draft) = await fixture();
+      const request =
+          'Track the books I lend and let me edit each loan and mark it returned.';
+      final job = await _queue(owner, draft, request: request);
+      final corrected =
+          jsonDecode(creationReferenceJson) as Map<String, dynamic>;
+      final invalid = jsonDecode(jsonEncode(corrected)) as Map<String, dynamic>;
+      invalid['name'] = _privateMarker;
+      invalid['collections'][0]['behaviors'] = [];
+      for (final action in invalid['actions'] as List) {
+        action['capability'] = 'records.create.v1';
+        (action as Map).remove('behaviorId');
+      }
+      (invalid['views'][0] as Map)
+        ..remove('detailPageId')
+        ..remove('formPageId');
+      (invalid['views'][1] as Map).remove('formPageId');
+      invalid['views'][2]['fieldIds'] = ['title', 'status'];
+      final rejectedText = jsonEncode(invalid);
+      expect(
+        () => AppSpec.parse(rejectedText),
+        throwsA(
+          isA<SpecException>().having(
+            (error) => error.message,
+            'first strict diagnostic',
+            contains('primaryActionId addBook'),
+          ),
+        ),
+      );
+      final provider = _CapturingProvider([
+        rejectedText,
+        rejectedText,
+        jsonEncode(corrected),
+      ]);
+      final recordsBefore = await EntityRecord.db.count(owner);
+      final versionsBefore = await AppVersion.db.count(owner);
+      for (var attempt = 1; attempt <= 2; attempt++) {
+        await _generateWhenDue(owner, job.id!, provider: provider);
+        final rejected = await _stored(owner, job);
+        expect(rejected.status, 'queued');
+        expect(rejected.attempts, attempt);
+        expect(
+          rejected.diagnostics,
+          allOf(
+            contains('primaryActionId addBook'),
+            contains('Missing capabilities: records.patch.v1'),
+            contains('Recompute requires'),
+            isNot(contains('workflow.transition.v1')),
+          ),
+        );
+        expect(_usage(rejected)['_appnestFailureCategory'], 'validation');
+        expect(_context(rejected)['output'], rejectedText);
+        _expectNoLeak(await Builder.get(owner, draft.draftId), draft);
+        final metadata = creationRawRepairMetadata(
+          parseAiOutput(_context(rejected)['output'] as String),
+          request: request,
+        );
+        expect(metadata['rawPageRoutes'], hasLength(2));
+        expect(jsonEncode(metadata), isNot(contains(_privateMarker)));
+        expect(jsonEncode(invalid), rejectedText);
+        expect(await EntityRecord.db.count(owner), recordsBefore);
+        expect(await AppVersion.db.count(owner), versionsBefore);
+      }
+      // Repeating the same malformed AI output remains rejected. Only a newly
+      // authored, strictly valid third output reaches the preview.
+      await _generateWhenDue(owner, job.id!, provider: provider);
+      final completed = await _stored(owner, job);
+      expect(completed.status, 'preview ready');
+      expect(completed.attempts, 3);
+      expect(provider.rejected, [null, rejectedText, rejectedText]);
+      expect(provider.diagnostics[1].single, contains('records.patch.v1'));
+      expect(provider.diagnostics[2].single, contains('records.patch.v1'));
+      expect(
+        AppSpec.parse((await Builder.get(owner, draft.draftId)).candidateJson)
+            .hash,
+        AppSpec.parse(jsonEncode(corrected)).hash,
+      );
+      expect(_usage(completed), isNot(contains(_repairKey)));
+      expect(
+        (await MiniApp.db.findById(owner, draft.appId))!.activeVersionId,
+        isNull,
+      );
+      expect(await EntityRecord.db.count(owner), recordsBefore);
+      expect(await AppVersion.db.count(owner), versionsBefore);
+    });
+    test('casual orphan routes receive only existing IDs while preview and live state stay untouched', () async {
+      final (owner, draft) = await fixture();
+      const request =
+          'I lend board games to friends. Track the borrower and let me mark games returned.';
+      final job = await _queue(owner, draft, request: request);
+      final corrected =
+          jsonDecode(creationReferenceJson) as Map<String, dynamic>;
+      final invalid = jsonDecode(jsonEncode(corrected)) as Map<String, dynamic>;
+      invalid['name'] = _privateMarker;
+      (invalid['views'][0] as Map).remove('detailPageId');
+      (invalid['views'][0]['actionIds'] as List)
+        ..remove('editBook')
+        ..remove('changeReadingStatus');
+      final rejectedText = jsonEncode(invalid);
+      AppSpec.parse(rejectedText);
+      final provider = _CapturingProvider([
+        rejectedText,
+        jsonEncode(corrected),
+      ]);
+      final recordsBefore = await EntityRecord.db.count(owner);
+      final versionsBefore = await AppVersion.db.count(owner);
+      await _generateWhenDue(owner, job.id!, provider: provider);
+      final rejected = await _stored(owner, job);
+      expect(rejected.status, 'queued');
+      _expectNoLeak(await Builder.get(owner, draft.draftId), draft);
+      final bindings = creationRepairBindings(
+        parseAiOutput(_context(rejected)['output'] as String),
+        GenerationRequirements.fromRequest(request),
+        request: request,
+      );
+      final routes = (bindings['recordRoutes'] as List).cast<Map>();
+      expect(routes.map((route) => route['viewId']), [
+        'bookList',
+        'bookDetails',
+        'bookForm',
+      ]);
+      expect(routes.first['detailPageId'], 'bookDetailsPage');
+      expect(routes.first['formPageId'], 'bookFormPage');
+      expect(jsonEncode(bindings), isNot(contains(_privateMarker)));
+      expect(await EntityRecord.db.count(owner), recordsBefore);
+      expect(await AppVersion.db.count(owner), versionsBefore);
+      await _generateWhenDue(owner, job.id!, provider: provider);
+      expect((await _stored(owner, job)).status, 'preview ready');
+      expect(provider.rejected, [null, rejectedText]);
+      final preview = await Builder.get(owner, draft.draftId);
+      expect(
+        AppSpec.parse(preview.candidateJson).view('bookList').detailPageId,
+        'bookDetailsPage',
+      );
+      expect(
+        (await MiniApp.db.findById(owner, draft.appId))!.activeVersionId,
+        isNull,
+      );
+      expect(await EntityRecord.db.count(owner), recordsBefore);
+      expect(await AppVersion.db.count(owner), versionsBefore);
+    });
+    test(
+      'schema-valid wrong shared policy is repaired before reaching preview',
+      () async {
+        final (owner, draft) = await fixture();
+        final job = await _queue(
+          owner,
+          draft,
+          request: 'Use groupWorkflow.v1 for shared reading records.',
+        );
+        final wrong = starterTemplates()['reading']!;
+        final corrected = wrong.toJson()
+          ..['policyPresetRequest'] = 'groupWorkflow.v1';
+        final provider = _CapturingProvider([
+          wrong.canonical,
+          jsonEncode(corrected),
+        ]);
+        await _generateWhenDue(owner, job.id!, provider: provider);
+        final rejected = await _stored(owner, job);
+        expect(rejected.status, 'queued');
+        expect(
+          rejected.diagnostics,
+          contains('explicitly requested policyPresetRequest groupWorkflow.v1'),
+        );
+        expect(
+          (await Builder.get(owner, draft.draftId)).candidateHash,
+          draft.candidateHash,
+        );
+        await _generateWhenDue(owner, job.id!, provider: provider);
+        final completed = await _stored(owner, job);
+        expect(completed.status, 'preview ready');
+        expect(completed.attempts, 2);
+        expect(provider.rejected, [null, wrong.canonical]);
+        expect(provider.diagnostics.last.single, rejected.diagnostics);
+        expect(
+          AppSpec.parse((await Builder.get(owner, draft.draftId)).candidateJson)
+              .policyPresetRequest,
+          'groupWorkflow.v1',
+        );
+      },
+    );
+    test('one repair receives every route and literal-filter defect', () async {
+      final (owner, draft) = await fixture();
+      final job = await _queue(
+        owner,
+        draft,
+        request:
+            'Use groupWorkflow.v1. Fields: Title (required text), '
+            'Status (required choice: To read, Read), Assignee (optional member). '
+            'A searchable list with Status filters.',
+      );
+      final corrected =
+          jsonDecode(creationReferenceJson) as Map<String, dynamic>;
+      corrected['policyPresetRequest'] = 'groupWorkflow.v1';
+      corrected['requires'].addAll(['assignment.v1', 'assignment.assign.v1']);
+      corrected['collections'][0]['fields'].add({
+        'id': 'assignee',
+        'label': 'Assignee',
+        'type': 'member',
+        'required': false,
+      });
+      corrected['collections'][0]['behaviors'].add({
+        'id': 'assign',
+        'type': 'assignment.v1',
+        'fieldId': 'assignee',
+      });
+      corrected['actions'].add({
+        'id': 'assignBook',
+        'label': 'Assign',
+        'capability': 'assignment.assign.v1',
+        'collectionId': 'books',
+        'behaviorId': 'assign',
+      });
+      corrected['views'][0]['filterFieldIds'] = ['status'];
+      corrected['views'][1]['actionIds'].add('assignBook');
+      final correctedText = jsonEncode(corrected);
+      final invalid = jsonDecode(correctedText) as Map<String, dynamic>;
+      (invalid['views'][0] as Map)
+        ..remove('detailPageId')
+        ..remove('filterFieldIds')
+        ..remove('titleFieldId');
+      (invalid['views'][0]['actionIds'] as List).remove('editBook');
+      final invalidText = jsonEncode(invalid);
+      // Both outputs pass the authored schema; generation quality and literal
+      // fidelity must contribute together to the same bounded repair attempt.
+      AppSpec.parse(invalidText);
+      AppSpec.parse(correctedText);
+      final provider = _CapturingProvider([invalidText, correctedText]);
+      await _generateWhenDue(owner, job.id!, provider: provider);
+      final rejected = await _stored(owner, job);
+      expect(rejected.status, 'queued');
+      expect(
+        rejected.diagnostics,
+        allOf(
+          contains('detailPageId:"bookDetailsPage"'),
+          contains('Action "assignBook"'),
+          contains('include edit action "editBook"'),
+          contains('Expose Status with filterFieldIds'),
+          contains('requested searchable record list'),
+        ),
+      );
+      expect(
+        (await Builder.get(owner, draft.draftId)).candidateHash,
+        draft.candidateHash,
+      );
+      await _generateWhenDue(owner, job.id!, provider: provider);
+      final completed = await _stored(owner, job);
+      expect(completed.status, 'preview ready');
+      expect(completed.attempts, 2);
+      expect(provider.rejected, [null, invalidText]);
+      expect(provider.diagnostics.last.single, rejected.diagnostics);
+      expect(
+        AppSpec.parse((await Builder.get(owner, draft.draftId)).candidateJson)
+            .view('bookList')
+            .filterFieldIds,
+        ['status'],
+      );
+    });
     for (final (label, rejectedText) in [
       ('invalid JSON', 'not JSON: $_privateMarker'),
       ('invalid AppSpec', jsonEncode(invalidSpec)),

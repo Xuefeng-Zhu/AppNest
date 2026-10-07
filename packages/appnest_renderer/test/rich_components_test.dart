@@ -290,7 +290,11 @@ void main() {
     await tester.pumpAndSettle();
     expect(adapter.writes, 1);
     expect((await adapter.get(1)).revision, before.revision);
-    expect(find.textContaining('Could not save'), findsOneWidget);
+    expect(
+      find.text('This record changed. Refresh before saving.'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('SpecException'), findsNothing);
     await close(tester, adapter, controller);
   });
   testWidgets('board Move menu waits for successful acknowledgement', (

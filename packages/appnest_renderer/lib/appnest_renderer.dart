@@ -54,7 +54,20 @@ abstract class RuntimeAdapter {
   AppSpec get spec;
   bool get preview;
   bool get readOnly;
+  bool get archived => false;
   String get role;
+  String get readOnlyMessage => archived
+      ? 'Archived · This app is read-only'
+      : role == 'viewer'
+      ? 'Read-only · Viewer access'
+      : 'Read-only · Only the owner and builders can make changes';
+
+  /// Return a message suitable for the person using the app, without transport
+  /// diagnostics. Live adapters can recognize their typed service errors here.
+  String errorMessage(
+    Object error, {
+    String fallback = 'Could not complete the request. Try again.',
+  }) => error is SpecException ? error.message : fallback;
   Future<RuntimePage> query(String collectionId, Map<String, dynamic> query);
   Future<void> execute(
     ActionSpec action,

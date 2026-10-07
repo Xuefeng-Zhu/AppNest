@@ -4,8 +4,10 @@ import 'package:appnest_spec/appnest_spec.dart';
 /// These checks supplement schema validation without changing old definitions.
 void validateGeneratedExperience(AppSpec spec, {AppSpec? baseline}) {
   final existing = baseline == null ? <String, String>{} : _issues(baseline);
-  for (final issue in _issues(spec).entries) {
-    if (!existing.containsKey(issue.key)) throw SpecException(issue.value);
+  final added = _issues(spec).entries
+      .where((issue) => !existing.containsKey(issue.key));
+  if (added.isNotEmpty) {
+    throw SpecException(added.map((issue) => issue.value).join(' '));
   }
 }
 
@@ -57,18 +59,18 @@ Map<String, String> _issues(AppSpec spec) {
     final actions = spec.actions
         .where((action) => action.collectionId == collection.id)
         .toList();
-    if (!actions.any(
+    final editable = actions.any(
       (action) => {
         'records.create.v1',
         'records.patch.v1',
       }.contains(action.capability),
-    )) {
-      continue;
-    }
-    for (final capability in ['records.create.v1', 'records.patch.v1']) {
-      if (!actions.any((action) => action.capability == capability)) {
-        issues['${collection.id}:missing:$capability'] =
-            '${collection.label} needs both create and edit actions to be usable.';
+    );
+    if (editable) {
+      for (final capability in ['records.create.v1', 'records.patch.v1']) {
+        if (!actions.any((action) => action.capability == capability)) {
+          issues['${collection.id}:missing:$capability'] =
+              '${collection.label} needs both create and edit actions to be usable.';
+        }
       }
     }
     bool exposes(ViewSpec view, String capability) =>
@@ -113,15 +115,120 @@ Map<String, String> _issues(AppSpec spec) {
                 (destination) => destination.type == 'details',
               ),
     ];
-    if (!canCreate) {
+    if (navigation != null) {
+      final sources = mainViews
+          .where(
+            (view) =>
+                view.collectionId == collection.id &&
+                _recordViewTypes.contains(view.type),
+          )
+          .toList();
+      final source = _unambiguousSource(spec, sources);
+      for (final page in navigation.pages.where(
+        (page) => page.viewIds.any(
+          (id) =>
+              spec.view(id).type == 'details' &&
+              spec.view(id).collectionId == collection.id,
+        ),
+      )) {
+        if (!sources.any((view) => view.detailPageId == page.id)) {
+          issues['${collection.id}:unreachable:details:${page.id}'] =
+              'The dedicated details page "${page.id}" is unreachable. '
+              '${source == null ? 'A visible same-collection record view' : 'Visible view "${source.id}"'} '
+              'must set view.detailPageId:"${page.id}". Preserve its actions and formPageId.';
+        }
+      }
+      for (final action in actions.where(
+        (action) => {
+          'workflow.transition.v1',
+          'assignment.assign.v1',
+          'capacity.configure.v1',
+          'capacity.claim.v1',
+          'capacity.release.v1',
+        }.contains(action.capability),
+      )) {
+        if (!recordViews.any(
+          (view) =>
+              view.collectionId == collection.id &&
+              view.actionIds.contains(action.id),
+        )) {
+          issues['${collection.id}:unreachable:action:${action.id}'] =
+              'Action "${action.id}" (${action.capability}) has no visible record route. '
+              'Include it in actionIds on ${source == null ? 'a visible same-collection record view' : 'visible view "${source.id}"'} '
+              'or a details view reached through source.detailPageId. A hidden details page does not expose the action.';
+        }
+      }
+    }
+    if (editable && !canCreate) {
       issues['${collection.id}:unreachable:create'] =
           '${collection.label} needs a reachable add control on the entry page or a tab.';
     }
-    if (!recordViews.any((view) => exposes(view, 'records.patch.v1'))) {
+    if (editable &&
+        !recordViews.any((view) => exposes(view, 'records.patch.v1'))) {
       issues['${collection.id}:unreachable:edit'] =
           '${collection.label} needs a reachable edit control on a record view '
-          'or linked details page, with a matching form.';
+          'or linked details page, with a matching form. '
+          '${_editRouteHint(spec, collection, mainViews)}';
     }
   }
   return issues;
+}
+
+/// Repair the graph using the response's own stable IDs. Generic "make editing
+/// reachable" errors leave a model guessing which otherwise valid page/view
+/// bindings are missing; these hints never mutate the candidate or add IDs.
+String _editRouteHint(
+  AppSpec spec,
+  CollectionSpec collection,
+  List<ViewSpec> mainViews,
+) {
+  final edit = spec.actions
+      .where(
+        (action) =>
+            action.collectionId == collection.id &&
+            action.capability == 'records.patch.v1',
+      )
+      .singleOrNull;
+  final sources = mainViews
+      .where(
+        (view) =>
+            view.collectionId == collection.id &&
+            _recordViewTypes.contains(view.type),
+      )
+      .toList();
+  final source = _unambiguousSource(spec, sources);
+  if (edit == null || source == null) return '';
+  final forms = spec.views
+      .where(
+        (view) =>
+            view.collectionId == collection.id &&
+            view.type == 'form' &&
+            view.actionIds.contains(edit.id),
+      )
+      .map((view) => view.id)
+      .toSet();
+  final formPages =
+      spec.navigation?.pages
+          .where((page) => page.viewIds.any(forms.contains))
+          .toList() ??
+      <PageSpec>[];
+  final formPage =
+      formPages.where((page) => page.id == source.formPageId).singleOrNull ??
+      formPages.singleOrNull;
+  final form = formPage == null ? '' : ' and formPageId:"${formPage.id}"';
+  return 'On visible view "${source.id}", include edit action "${edit.id}" in actionIds$form. '
+      'A form elsewhere does not expose editing. If routing through details instead, '
+      'source.detailPageId must reference the dedicated details page, whose view exposes '
+      'the same edit action and formPageId. Preserve the existing create action and other bindings.';
+}
+
+ViewSpec? _unambiguousSource(AppSpec spec, Iterable<ViewSpec> sources) {
+  final unique = {for (final view in sources) view.id: view}.values.toList();
+  final entryIds = spec.navigation == null
+      ? <String>{}
+      : spec.page(spec.navigation!.entryPageId).viewIds.toSet();
+  final entry = unique.where((view) => entryIds.contains(view.id)).toList();
+  final candidates = entry.isEmpty ? unique : entry;
+  final lists = candidates.where((view) => view.type == 'list').toList();
+  return lists.isEmpty ? candidates.singleOrNull : lists.singleOrNull;
 }

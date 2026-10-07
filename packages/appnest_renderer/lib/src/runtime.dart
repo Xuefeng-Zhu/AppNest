@@ -220,11 +220,7 @@ class __LegacyMiniAppRuntimeState extends State<_LegacyMiniAppRuntime>
           ),
         if (adapter.readOnly)
           MaterialBanner(
-            content: Text(
-              adapter.role == 'viewer'
-                  ? 'Read-only · Viewer access'
-                  : 'Archived · This app is read-only',
-            ),
+            content: Text(adapter.readOnlyMessage),
             actions: const [SizedBox.shrink()],
           ),
         if (reconnecting)
@@ -244,8 +240,10 @@ class __LegacyMiniAppRuntimeState extends State<_LegacyMiniAppRuntime>
                 value: viewId,
                 items: adapter.spec.views
                     .map(
-                      (v) =>
-                          DropdownMenuItem(value: v.id, child: Text(v.label)),
+                      (v) => DropdownMenuItem(
+                        value: v.id,
+                        child: Text(_recordSectionLabel(adapter.spec, v)),
+                      ),
                     )
                     .toList(),
                 onChanged: (id) {
@@ -312,7 +310,7 @@ class __LegacyMiniAppRuntimeState extends State<_LegacyMiniAppRuntime>
           Padding(
             padding: EdgeInsets.all(_space(context, 16)),
             child: Text(
-              'Could not complete the request. $error',
+              adapter.errorMessage(error!),
               style: TextStyle(color: Theme.of(context).colorScheme.error),
             ),
           ),
@@ -334,7 +332,7 @@ class __LegacyMiniAppRuntimeState extends State<_LegacyMiniAppRuntime>
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Text(
-                          view.label,
+                          _recordSectionLabel(adapter.spec, view),
                           style: Theme.of(context).textTheme.headlineSmall,
                         ),
                         const SizedBox(height: 16),

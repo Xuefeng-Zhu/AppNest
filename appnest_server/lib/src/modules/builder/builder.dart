@@ -317,7 +317,7 @@ class Builder {
             tx: tx,
             startFromScratch: startFromScratch,
           ),
-          promptVersion: 'appnest-v1-typed-customization-2',
+          promptVersion: 'appnest-v1-typed-customization-13',
           nextAttemptAt: clock(),
           diagnostics: '',
           usageJson: '{}',

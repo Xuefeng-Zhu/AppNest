@@ -40,6 +40,12 @@ class MiniAppScreenState extends State<MiniAppScreen> {
   MiniAppLocation? initialLocation;
   int _loadGeneration = 0;
   bool _customizing = false;
+
+  String requestError(Object value) =>
+      adapter?.errorMessage(value) ??
+      (value is NestError
+          ? value.message
+          : 'Could not complete the request. Try again.');
   @override
   void initState() {
     super.initState();
@@ -326,7 +332,7 @@ class MiniAppScreenState extends State<MiniAppScreen> {
                 ),
                 if (token != null)
                   SelectableText('${Uri.base.origin}/?invite=$token'),
-                if (failure != null) Text('$failure'),
+                if (failure != null) Text(requestError(failure!)),
               ],
             ),
           ),
@@ -412,7 +418,7 @@ class MiniAppScreenState extends State<MiniAppScreen> {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('$e')));
+        ).showSnackBar(SnackBar(content: Text(requestError(e))));
       }
     }
   }
@@ -563,7 +569,7 @@ class MiniAppScreenState extends State<MiniAppScreen> {
                   if (context.mounted) {
                     ScaffoldMessenger.of(
                       context,
-                    ).showSnackBar(SnackBar(content: Text('$e')));
+                    ).showSnackBar(SnackBar(content: Text(requestError(e))));
                   }
                 }
               },

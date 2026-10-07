@@ -364,7 +364,15 @@ void main() {
       await tester.tap(find.text('Create shift'));
       await tester.pumpAndSettle();
       expect(find.byType(Dialog), findsOneWidget);
-      await tester.enterText(find.byType(TextField).first, 'Unsaved shift');
+      await tester.enterText(
+        find
+            .descendant(
+              of: find.byType(Dialog),
+              matching: find.byType(TextField),
+            )
+            .first,
+        'Unsaved shift',
+      );
       await tester.ensureVisible(find.text('Cancel'));
       await tester.tap(find.text('Cancel'));
       await tester.pumpAndSettle();

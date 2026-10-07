@@ -13,6 +13,7 @@ class SignInScreen extends StatefulWidget {
 
 class _SignInScreenState extends State<SignInScreen> {
   bool _isSignedIn = false;
+  final _focusScope = FocusScopeNode(debugLabel: 'AppNest authentication');
 
   @override
   void initState() {
@@ -24,12 +25,24 @@ class _SignInScreenState extends State<SignInScreen> {
   @override
   void dispose() {
     client.auth.authInfoListenable.removeListener(_updateSignedInState);
+    _focusScope.dispose();
     super.dispose();
   }
 
   void _updateSignedInState() {
+    if (!mounted) return;
+    final signedIn = client.auth.isAuthenticated;
+    if (signedIn == _isSignedIn) return;
+    // A Navigator's Focus nodes are temporarily parked on the root while its
+    // globally keyed tree is deactivated. Native view-focus traversal must not
+    // revisit their detached render boxes while the auth screen replaces it.
+    for (final node in _focusScope.descendants.toList()) {
+      node.canRequestFocus = false;
+      node.skipTraversal = true;
+    }
+    _focusScope.unfocus();
     setState(() {
-      _isSignedIn = client.auth.isAuthenticated;
+      _isSignedIn = signedIn;
     });
   }
 
@@ -37,27 +50,41 @@ class _SignInScreenState extends State<SignInScreen> {
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
 
-    return _isSignedIn
+    final content = _isSignedIn
         ? widget.child
-        : Center(
-            child: SignInWidget(
-              client: client,
-              onAuthenticated: () {
-                context.showSnackBar(
-                  message: 'User authenticated.',
-                  backgroundColor: colors.primaryContainer,
-                  foregroundColor: colors.onPrimaryContainer,
-                );
-              },
-              onError: (error) {
-                context.showSnackBar(
-                  message: 'Authentication failed: $error',
-                  backgroundColor: colors.errorContainer,
-                  foregroundColor: colors.onErrorContainer,
-                );
-              },
-            ),
+        : Navigator(
+            // MaterialApp.router does not supply a Navigator above this gate.
+            // Login text selection and the SDK's dialogs need an Overlay even
+            // before the authenticated application's Navigator is mounted.
+            pages: [
+              MaterialPage<void>(
+                key: const ValueKey('sign-in'),
+                child: Center(
+                  child: SignInWidget(
+                    client: client,
+                    onAuthenticated: () {
+                      if (!mounted) return;
+                      context.showSnackBar(
+                        message: 'User authenticated.',
+                        backgroundColor: colors.primaryContainer,
+                        foregroundColor: colors.onPrimaryContainer,
+                      );
+                    },
+                    onError: (error) {
+                      if (!mounted) return;
+                      context.showSnackBar(
+                        message: 'Authentication failed: $error',
+                        backgroundColor: colors.errorContainer,
+                        foregroundColor: colors.onErrorContainer,
+                      );
+                    },
+                  ),
+                ),
+              ),
+            ],
+            onDidRemovePage: (_) {},
           );
+    return FocusScope(node: _focusScope, child: content);
   }
 }
 
