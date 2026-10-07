@@ -18,8 +18,18 @@ preserving saved records and explicit reminder approval.
 Clock & Focus adds analog/digital local time and a countdown that can start,
 pause, resume, and reset. Timer state stays on the current device, separated by
 account and mini-app, and restores from its deadline after reopening. Completion
-is shown in AppNest; background alerts and phone integrations are not included.
+is shown in AppNest; background timer alerts are not included.
 See [the customization contract and verification record](docs/CUSTOMIZATION.md).
+
+## Mobile features
+
+Add device-information cards and flashlight, brightness, keep-screen-awake, or
+haptic controls to a mini-app. Each person enables device-local access separately;
+publication never grants it, and device readings stay on the phone. Phone Toolkit
+provides a starter with information and controls tabs. Android and iOS bridges are
+implemented; physical-device acceptance remains unverified. Browser/desktop show
+availability guidance and previews use synthetic data. See the
+[mobile capability contract and verification](docs/MOBILE_FEATURES.md).
 
 ## Personal mini-apps
 
@@ -105,6 +115,11 @@ Without provider credentials the UI explicitly says **Template mode — AI provi
 Add `AI_BASE_URL`, `AI_MODEL`, and `AI_API_KEY` under the appropriate environment in the ignored `appnest_server/config/passwords.yaml`. See `config/passwords.example.yaml`. Use an actual operator-approved chat-completion-compatible provider and its real model ID; the adapter appends `/chat/completions` to the base URL. Restart the server. Secrets are never sent to Flutter or read from an AppSpec. `.env` files alone are not read by this adapter.
 
 For new apps, the provider receives the request, schema, capability contract and repair diagnostics without starter templates or a placeholder definition. Edits also receive the current definition to preserve stable IDs. Neither flow receives private records. Output is untrusted and bounded. Generation is durable background work with validation/repair, stale-result guards and explicit publication. The deterministic `FakeAiProvider` is test-only. See the [fresh AI creation check](docs/AI_CREATION_CHECK.md) for actual browser results and limitations.
+
+Different users' AI builds can run concurrently. Each server process has eight
+background worker slots shared with reminders and reconciliation; excess work
+queues until a slot is available. Each user may have one active generation job
+and submit 30 jobs per rolling 24 hours. Provider request/token limits still apply.
 
 Creation now requests schema-constrained output; guidance and edits request JSON
 objects. The configured provider must support those response formats. AppNest

@@ -21,6 +21,7 @@ class TestClient extends Client {
   Completer<void>? pendingCreation;
   Object? creationFailure;
   Object? generationFailure;
+  Object? draftFailure;
   bool acceptBeforeGenerationFailure = false;
   BuilderSnapshot? currentDraft;
   final beginRequests = <Map<String, dynamic>>[];
@@ -78,6 +79,9 @@ class TestClient extends Client {
       }
       if (generationFailure != null) throw generationFailure!;
     }
+    if ('$endpoint.$method' == 'builder.get' && draftFailure != null) {
+      throw draftFailure!;
+    }
     if ('$endpoint.$method' == 'builder.suggestQuestions') {
       questionRequests.add(Map<String, dynamic>.from(args));
       if (questionFailure != null) throw questionFailure!;
@@ -123,6 +127,7 @@ void main() {
     testClient.pendingCreation = null;
     testClient.creationFailure = null;
     testClient.generationFailure = null;
+    testClient.draftFailure = null;
     testClient.acceptBeforeGenerationFailure = false;
     testClient.currentDraft = null;
     testClient.beginRequests.clear();
@@ -134,12 +139,18 @@ void main() {
     testClient.manifests.clear();
   });
 
-  Future<void> home(WidgetTester tester) async {
-    tester.view.physicalSize = const Size(1280, 800);
+  Future<void> home(
+    WidgetTester tester, {
+    Future<void> Function(int appId, {int? recordId})? onOpenApp,
+    Size size = const Size(1280, 800),
+  }) async {
+    tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
-    await tester.pumpWidget(const MaterialApp(home: HomeScreen()));
+    await tester.pumpWidget(
+      MaterialApp(home: HomeScreen(onOpenApp: onOpenApp)),
+    );
     await tester.pumpAndSettle();
   }
 
@@ -583,6 +594,150 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     },
   );
+
+  Future<void> leaveCreation(WidgetTester tester) async {
+    await tester.enterText(
+      find.byKey(const ValueKey('app-idea')),
+      'A reading journal',
+    );
+    await tester.pump();
+    await tester.ensureVisible(find.byKey(const ValueKey('create-app')));
+    await tester.tap(find.byKey(const ValueKey('create-app')));
+    await tester.pumpAndSettle();
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(const ValueKey('resume-build-1')));
+  }
+
+  testWidgets('resume reads the latest failed build without repeating writes', (
+    tester,
+  ) async {
+    testClient.aiAvailable = true;
+    await home(tester, size: const Size(390, 844));
+    await leaveCreation(tester);
+    expect(find.text('Resume build'), findsOneWidget);
+    testClient.currentDraft = testClient.currentDraft!.copyWith(
+      stage: 'failed',
+      mutation: 2,
+      jobId: 43,
+      candidateReady: false,
+      diagnostics: ['The generated definition could not be validated.'],
+    );
+
+    await tester.tap(find.byKey(const ValueKey('resume-build-1')));
+    await tester.pumpAndSettle();
+    final builder = tester.widget<BuilderScreen>(find.byType(BuilderScreen));
+    expect(builder.initial.stage, 'failed');
+    expect(builder.initial.jobId, 43);
+    expect(builder.initial.mutation, 2);
+    expect(find.text('Try again'), findsOneWidget);
+    expect(testClient.methods.where((m) => m == 'builder.get'), hasLength(1));
+    expect(testClient.beginRequests, hasLength(1));
+    expect(testClient.generationRequests, hasLength(1));
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('resume retains the build after a connection failure', (
+    tester,
+  ) async {
+    testClient.aiAvailable = true;
+    await home(tester);
+    await leaveCreation(tester);
+    testClient.draftFailure = const ServerpodClientNetworkException('offline');
+    await tester.tap(find.byKey(const ValueKey('resume-build-1')));
+    await tester.pumpAndSettle();
+    expect(find.byType(BuilderScreen), findsNothing);
+    expect(find.text('Resume build'), findsOneWidget);
+
+    testClient.draftFailure = null;
+    await tester.tap(find.byKey(const ValueKey('resume-build-1')));
+    await tester.pumpAndSettle();
+    expect(find.byType(BuilderScreen), findsOneWidget);
+    expect(testClient.beginRequests, hasLength(1));
+    expect(testClient.generationRequests, hasLength(1));
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('resume removes a replaced build with an explanation', (
+    tester,
+  ) async {
+    testClient.aiAvailable = true;
+    await home(tester);
+    await leaveCreation(tester);
+    testClient.currentDraft = testClient.currentDraft!.copyWith(stage: 'stale');
+    await tester.tap(find.byKey(const ValueKey('resume-build-1')));
+    await tester.pumpAndSettle();
+    expect(find.byType(BuilderScreen), findsNothing);
+    expect(find.text('Resume build'), findsNothing);
+    expect(find.textContaining('This build was replaced.'), findsOneWidget);
+    expect(testClient.beginRequests, hasLength(1));
+    expect(testClient.generationRequests, hasLength(1));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('resume opens an already published app and removes its handle', (
+    tester,
+  ) async {
+    testClient.aiAvailable = true;
+    final opened = <int>[];
+    await home(
+      tester,
+      onOpenApp: (appId, {recordId}) async => opened.add(appId),
+    );
+    await leaveCreation(tester);
+    testClient.currentDraft = testClient.currentDraft!.copyWith(
+      publishedVersionId: 12,
+    );
+    await tester.tap(find.byKey(const ValueKey('resume-build-1')));
+    await tester.pumpAndSettle();
+    expect(opened, [1]);
+    expect(find.byType(BuilderScreen), findsNothing);
+    expect(find.text('Resume build'), findsNothing);
+    expect(testClient.beginRequests, hasLength(1));
+    expect(testClient.generationRequests, hasLength(1));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('resume clears inaccessible work without opening or writing', (
+    tester,
+  ) async {
+    testClient.aiAvailable = true;
+    await home(tester);
+    await leaveCreation(tester);
+    testClient.draftFailure = NestError(
+      category: 'forbidden',
+      message: 'Draft access changed.',
+    );
+    await tester.tap(find.byKey(const ValueKey('resume-build-1')));
+    await tester.pumpAndSettle();
+    expect(find.byType(BuilderScreen), findsNothing);
+    expect(find.text('Resume build'), findsNothing);
+    expect(find.text('Draft access changed.'), findsOneWidget);
+    expect(testClient.beginRequests, hasLength(1));
+    expect(testClient.generationRequests, hasLength(1));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('publishing from a resumed build removes its home shortcut', (
+    tester,
+  ) async {
+    testClient.aiAvailable = true;
+    final opened = <int>[];
+    await home(
+      tester,
+      onOpenApp: (appId, {recordId}) async => opened.add(appId),
+    );
+    await leaveCreation(tester);
+    await tester.tap(find.byKey(const ValueKey('resume-build-1')));
+    await tester.pumpAndSettle();
+    Navigator.of(tester.element(find.byType(BuilderScreen))).pop<int>(1);
+    await tester.pumpAndSettle();
+    expect(opened, [1]);
+    expect(find.text('Resume build'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets('prompt entry fits a phone with larger text', (tester) async {
     testClient.aiAvailable = true;

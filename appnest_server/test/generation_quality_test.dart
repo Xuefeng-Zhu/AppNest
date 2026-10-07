@@ -5,6 +5,39 @@ import 'package:appnest_spec/appnest_spec.dart';
 import 'package:test/test.dart';
 
 void main() {
+  test('device-only generated apps need visible device components', () {
+    expect(
+      () => validateGeneratedExperience(phoneToolkitTemplate()),
+      returnsNormally,
+    );
+    final json = phoneToolkitTemplate().toJson();
+    json['views'].add({
+      'id': 'intro',
+      'type': 'richText',
+      'label': 'Intro',
+      'options': {'markdown': 'Hello'},
+    });
+    json['requires'].add('views.richText.v1');
+    json['navigation']['pages'].add({
+      'id': 'introPage',
+      'title': 'Intro',
+      'viewIds': ['intro'],
+    });
+    json['navigation']['entryPageId'] = 'introPage';
+    json['navigation']['tabs'] = [
+      {'pageId': 'introPage', 'label': 'Intro', 'icon': 'today'},
+    ];
+    final hidden = AppSpec.parse(jsonEncode(json));
+    expect(
+      () => validateGeneratedExperience(hidden),
+      throwsA(isA<SpecException>()),
+    );
+    expect(
+      () => validateGeneratedExperience(hidden, baseline: hidden),
+      returnsNormally,
+    );
+  });
+
   test('existing starter experiences expose their editable collections', () {
     for (final entry in starterTemplates().entries) {
       expect(

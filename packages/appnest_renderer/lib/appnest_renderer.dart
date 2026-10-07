@@ -17,6 +17,7 @@ part 'src/visual_edit.dart';
 part 'src/rich_components.dart';
 part 'src/utility_timer.dart';
 part 'src/utility_components.dart';
+part 'src/device_components.dart';
 
 class RuntimeItem {
   final int id, revision;
@@ -45,6 +46,9 @@ class RuntimePage {
 }
 
 abstract class RuntimeAdapter {
+  late final DeviceCapabilitiesAdapter _deviceCapabilities =
+      DeviceCapabilitiesAdapter();
+  DeviceCapabilitiesAdapter get deviceCapabilities => _deviceCapabilities;
   late final UtilityTimerController _timerController = UtilityTimerController();
   UtilityTimerController get timerController => _timerController;
   AppSpec get spec;
@@ -107,6 +111,9 @@ class RuntimeReminderState {
 
 /// Deliberately has no Client, HTTP, invitations, storage, or scheduler dependency.
 class PreviewRuntimeAdapter extends RuntimeAdapter {
+  @override
+  late final PreviewDeviceCapabilitiesAdapter deviceCapabilities =
+      PreviewDeviceCapabilitiesAdapter(spec);
   @override
   AppSpec get spec => _spec;
   AppSpec _spec;
@@ -582,6 +589,7 @@ class PreviewRuntimeAdapter extends RuntimeAdapter {
   void applyPresentationSpec(AppSpec next) {
     _checkPresentationSpec(next);
     _spec = next;
+    deviceCapabilities.updateSpec(next);
     _presentationChanges.add(null);
     _changes.add(null);
   }
@@ -701,6 +709,7 @@ class PreviewRuntimeAdapter extends RuntimeAdapter {
   }
 
   void dispose() {
+    deviceCapabilities.dispose();
     timerController.dispose();
     _imageAssets.clear();
     _presentationChanges.close();

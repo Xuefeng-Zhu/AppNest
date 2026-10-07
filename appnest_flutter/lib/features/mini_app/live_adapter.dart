@@ -15,13 +15,17 @@ class LiveRuntimeAdapter extends RuntimeAdapter {
   final AppSpec spec;
   @override
   final UtilityTimerController timerController;
+  @override
+  final DeviceCapabilitiesAdapter deviceCapabilities;
   Stream<void>? _events;
   LiveRuntimeAdapter(
     this.client,
     this.manifest, {
     UtilityTimerController? timerController,
+    DeviceCapabilitiesAdapter? deviceCapabilities,
   }) : spec = AppSpec.parse(manifest.specJson!),
-       timerController = timerController ?? UtilityTimerController();
+       timerController = timerController ?? UtilityTimerController(),
+       deviceCapabilities = deviceCapabilities ?? DeviceCapabilitiesAdapter();
   @override
   bool get preview => false;
   @override
@@ -231,7 +235,17 @@ class LiveRuntimeAdapter extends RuntimeAdapter {
     late final Stream<void> events;
     events = client.runtime
         .events(manifest.appId)
-        .map<void>((event) {})
+        .asyncMap<void>((event) async {
+          if (requestedDeviceCapabilities(spec).isNotEmpty) {
+            await _checkDefinition();
+            if (manifest.archived) {
+              throw NestError(
+                category: 'staleDefinition',
+                message: 'This app was archived. Reopen it to refresh.',
+              );
+            }
+          }
+        })
         .asBroadcastStream(
           onCancel: (subscription) {
             // Images and the page share one authorized upstream subscription.

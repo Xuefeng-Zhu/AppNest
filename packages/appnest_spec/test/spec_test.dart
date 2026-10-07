@@ -4,6 +4,36 @@ import 'package:appnest_spec/appnest_spec.dart';
 import 'package:test/test.dart';
 
 void main() {
+  test('action behavior diagnostics identify the binding and repair', () {
+    for (final behaviorId in <String?>[null, 'flashlight', 'missing']) {
+      final json = starterTemplates()['planner']!.toJson();
+      final action = (json['actions'] as List)
+          .cast<Map<String, dynamic>>()
+          .firstWhere(
+            (action) => action['capability'] == 'workflow.transition.v1',
+          );
+      if (behaviorId == null) {
+        action.remove('behaviorId');
+      } else {
+        action['behaviorId'] = behaviorId;
+      }
+      expect(
+        () => AppSpec.parse(jsonEncode(json)),
+        throwsA(
+          isA<SpecException>().having(
+            (e) => e.message,
+            'message',
+            allOf(
+              contains('Action ${action['id']}'),
+              contains('declared workflow.v1 behavior'),
+              contains('collection ${action['collectionId']}'),
+              contains('deviceControl views, not record actions or behaviors'),
+            ),
+          ),
+        ),
+      );
+    }
+  });
   test('choice diagnostics identify the field and the required repair', () {
     Map<String, dynamic> field(String type, [List<String>? choices]) => {
       'id': 'priority',

@@ -104,3 +104,31 @@ needs reliability work. Current connected runtime and physical-device
 interaction remain unverified. Phone actions/data access and background alerts
 are deferred. See [the live AI evaluation](CUSTOMIZATION_AI_CHECK.md).
 See [the customization contract and execution record](CUSTOMIZATION.md).
+
+### Mobile capabilities (2026-09-24)
+
+Implemented: Android/iOS device-information cards, flashlight, foreground
+brightness, keep-awake and haptic controls, manual/AI authoring, Phone Toolkit,
+and per-mini-app local consent. Preview controls are synthetic; browser/desktop
+show unsupported-platform guidance. Device values never reach the backend or AI.
+
+Verification: 539 tests, analysis/formatting and reminder restart recovery passed.
+Android release compilation and direct iOS Swift type-checking passed. Full iOS
+build/install needs the missing Xcode iOS 26.5 platform. Physical-device and
+connected app acceptance remain unverified. See [mobile features](MOBILE_FEATURES.md).
+
+### Concurrent AI generation (2026-10-07)
+
+Removed the app-wide single-generation lease gate. Independent users' builds can
+overlap, with eight shared Future Call slots per server process. Each user's
+one-active-job and 30-jobs-per-rolling-day quotas remain. Reconciliation wakes a
+bounded batch of due or expired jobs; duplicate deliveries, old leases and manual
+edits cannot overwrite the current draft.
+
+Verification: `scripts/verify.sh` passed workspace static analysis, formatting,
+all 551 tests (81 spec, 171 renderer, 174 Flutter app, 125 server), and the
+separate-process reminder restart smoke against embedded PostgreSQL. Regressions hold two users' provider
+calls open simultaneously, race same-user enqueue requests, reject duplicate and
+late worker results, and recover multiple missed wakeups. Provider responses in
+these tests are synthetic; no live-provider concurrency or load test was run.
+The server must restart to load the updated worker-pool configuration.

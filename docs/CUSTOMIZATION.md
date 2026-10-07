@@ -76,12 +76,17 @@ and expired leases. It schedules generation instead of waiting for a model
 response. Named calls are wakeups, not deduplication keys: the job's lease,
 next-attempt time, mutation, and version checks remain authoritative.
 
-Development Future Call concurrency is two. A short PostgreSQL advisory lock
-around the lease claim limits model generation to one active request across
-apps. A second generation releases its worker slot when capacity is occupied,
-leaving execution capacity for reminders. Model requests never run inside a
-database transaction. Other environments must also configure at least two
-Future Call slots before enabling this scheduling arrangement.
+Independent apps can generate concurrently. Each app's row lock and each job's
+lease fence duplicate wakeups without a global generation lock. Reconciliation
+schedules up to 100 due jobs per pass, including expired leases, so recovery
+does not wait for one build to finish before dispatching another. Each enqueue
+and retry schedules its own wakeup.
+
+All environments configure eight Future Call slots per server process, shared
+by generation, reminders and reconciliation. Further work queues when all slots
+are occupied. Model requests never run inside a database transaction. One active
+job per user and 30 generation jobs per user per rolling 24 hours remain in place.
+Provider request/token quotas are separate from the shared worker pool.
 
 `BuilderSnapshot` adds `candidateReady`, `latestRequest`, `jobAttempts`,
 `jobCreatedAt`, `jobUpdatedAt`, and `failureCategory`. The authenticated
@@ -171,5 +176,7 @@ different from the Mac's localhost; pass `http://10.0.2.2:8180/` for a locally
 configured emulator. Physical devices require a reachable LAN or HTTPS API URL.
 No deployment is part of this change.
 
-Phone actions, phone-data access, native calendar integration, background timer
-alerts and cross-device timer synchronization remain outside this phase.
+Bounded phone controls and device-information cards are now implemented in the
+[mobile capabilities extension](MOBILE_FEATURES.md), with separate local access
+grants. Native calendar integration, background timer alerts, and cross-device
+timer synchronization remain outside this phase.

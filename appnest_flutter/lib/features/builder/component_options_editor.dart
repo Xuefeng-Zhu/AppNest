@@ -4,6 +4,10 @@ import 'package:appnest_spec/appnest_spec.dart';
 import 'package:flutter/material.dart';
 
 const componentGroups = <String, Map<String, String>>{
+  'Mobile features': {
+    'deviceInfo': 'Device information',
+    'deviceControl': 'Phone control',
+  },
   'Everyday utilities': {'clock': 'Clock', 'timer': 'Focus timer'},
   'Data and planning': {
     'list': 'List',
@@ -30,8 +34,14 @@ const componentGroups = <String, Map<String, String>>{
   },
 };
 
-bool isContentComponent(String type) =>
-    const {'banner', 'richText', 'clock', 'timer'}.contains(type);
+bool isContentComponent(String type) => const {
+  'banner',
+  'richText',
+  'clock',
+  'timer',
+  'deviceInfo',
+  'deviceControl',
+}.contains(type);
 
 Future<String?> chooseComponent(
   BuildContext context, {
@@ -589,6 +599,40 @@ class _ComponentOptionsEditorState extends State<ComponentOptionsEditor> {
   Widget build(BuildContext context) => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
+      if (widget.type == 'deviceControl')
+        select(
+          'Phone control',
+          'control',
+          deviceControlLabels,
+          fallback: 'flashlight',
+        ),
+      if (widget.type == 'deviceInfo') ...[
+        const Text(
+          'Information stays on the phone. Each person enables access in their mini-app.',
+        ),
+        for (final field in deviceInfoFields.entries)
+          CheckboxListTile(
+            title: Text(field.value),
+            value:
+                (options['fields'] as List? ??
+                        const ['batteryLevel', 'charging'])
+                    .contains(field.key),
+            onChanged: widget.enabled
+                ? (enabled) {
+                    final fields = List<String>.from(
+                      options['fields'] as List? ??
+                          const ['batteryLevel', 'charging'],
+                    );
+                    if (enabled == true) {
+                      fields.add(field.key);
+                    } else {
+                      fields.remove(field.key);
+                    }
+                    change('fields', fields);
+                  }
+                : null,
+          ),
+      ],
       if (widget.type == 'clock') ...[
         select('Clock display', 'style', const {
           'digital': 'Digital',

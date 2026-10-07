@@ -39,6 +39,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool guidanceFallback = false;
   String? guidanceNotice;
   ({int workspaceId, BuilderSnapshot draft, String request})? pendingCreation;
+  final unfinishedCreations =
+      <int, ({int workspaceId, BuilderSnapshot draft})>{};
   bool invitationHandled = false;
   int loadGeneration = 0;
   @override
@@ -274,22 +276,80 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       }
       if (mounted) {
         guidanceQuestions = null;
-        final navigation = Navigator.push<int>(
-          context,
-          MaterialPageRoute<int>(
-            builder: (_) => BuilderScreen(
-              initial: d!,
-              initialPrompt: generate ? submittedRequest : null,
-              startFromScratch: generate,
-            ),
-          ),
-        );
         pendingCreation = null;
-        final published = await navigation;
-        if (published != null && mounted) await open(published);
+        await visitBuilder(
+          d!,
+          selectedWorkspace,
+          initialPrompt: generate ? submittedRequest : null,
+          trackCreation: generate,
+        );
       }
       load();
     } catch (e) {
+      showError(e);
+    } finally {
+      if (mounted) setState(() => creating = false);
+    }
+  }
+
+  Future<void> visitBuilder(
+    BuilderSnapshot draft,
+    int selectedWorkspace, {
+    String? initialPrompt,
+    required bool trackCreation,
+  }) async {
+    if (trackCreation) {
+      unfinishedCreations[draft.draftId] = (
+        workspaceId: selectedWorkspace,
+        draft: draft,
+      );
+    }
+    final published = await Navigator.push<int>(
+      context,
+      MaterialPageRoute<int>(
+        builder: (_) => BuilderScreen(
+          initial: draft,
+          initialPrompt: initialPrompt,
+          startFromScratch: trackCreation,
+        ),
+      ),
+    );
+    if (published != null) {
+      unfinishedCreations.remove(draft.draftId);
+      if (mounted) await open(published);
+    }
+  }
+
+  Future<void> resumeCreation(int draftId) async {
+    final saved = unfinishedCreations[draftId];
+    if (creating || saved == null || saved.workspaceId != workspaceId) return;
+    setState(() => creating = true);
+    try {
+      // Refresh and authorize the existing draft before reopening it. Resuming
+      // never submits generation or creates another placeholder app.
+      final draft = await client.builder.get(draftId);
+      if (!mounted) return;
+      if (draft.publishedVersionId != null) {
+        unfinishedCreations.remove(draftId);
+        await open(draft.appId);
+      } else if (draft.stage == 'stale') {
+        unfinishedCreations.remove(draftId);
+        showError(
+          'This build was replaced. Open the published app or start a new app.',
+        );
+      } else {
+        await visitBuilder(
+          draft,
+          saved.workspaceId,
+          trackCreation: true,
+        );
+      }
+      await load();
+    } catch (e) {
+      if (e is NestError &&
+          {'notFound', 'forbidden', 'unauthorized'}.contains(e.category)) {
+        unfinishedCreations.remove(draftId);
+      }
       showError(e);
     } finally {
       if (mounted) setState(() => creating = false);
@@ -301,7 +361,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            e is NestError ? e.message : 'Couldn’t connect to AppNest. Your idea is still here; try again when connected.',
+            e is NestError
+                ? e.message
+                : e is String
+                ? e
+                : 'Couldn’t connect to AppNest. Your idea is still here; try again when connected.',
           ),
         ),
       );
@@ -754,6 +818,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 children: [
                   for (final starter in const [
                     (
+                      'Phone Toolkit',
+                      Icons.phone_android,
+                      'Build a phone toolkit with device information for battery, charging, model, operating system and connection, plus flashlight, brightness, keep-screen-awake and haptic controls. Use local device components with explicit per-app access.',
+                    ),
+                    (
                       'Notes',
                       Icons.notes_outlined,
                       'Build a personal notes app with titles, multiline notes, categories, search, and easy add and edit.',
@@ -857,6 +926,29 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Widget home() => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
+      for (final saved in unfinishedCreations.values.where(
+        (saved) => saved.workspaceId == workspaceId,
+      ))
+        Padding(
+          padding: const EdgeInsets.only(bottom: 16),
+          child: Card(
+            child: ListTile(
+              title: const Text('Continue building your app'),
+              subtitle: Text(
+                saved.draft.latestRequest ?? 'Your unfinished app',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+              trailing: OutlinedButton(
+                key: ValueKey('resume-build-${saved.draft.draftId}'),
+                onPressed: creating
+                    ? null
+                    : () => resumeCreation(saved.draft.draftId),
+                child: const Text('Resume build'),
+              ),
+            ),
+          ),
+        ),
       creationEntry(),
       const SizedBox(height: 56),
       Text('Your apps', style: Theme.of(context).textTheme.headlineSmall),

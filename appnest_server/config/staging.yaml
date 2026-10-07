@@ -52,8 +52,8 @@ sessionLogs:
 
 # futureCallExecutionEnabled: true # Defaults to true
 
-#futureCall:
-#  concurrencyLimit: 1 # Defaults to 1, a negative or null value removes the limit
+futureCall:
+  concurrencyLimit: 8 # Shared per-process pool; independent AI jobs may run concurrently.
 #  scanInterval: 5000 # Unit in milliseconds, defaults to 5000
 
 # Recommended when serving web clients: keeps auth tokens in httpOnly

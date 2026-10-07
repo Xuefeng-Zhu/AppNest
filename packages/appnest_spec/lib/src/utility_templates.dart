@@ -5,6 +5,7 @@ Map<String, AppSpec> utilityStarterTemplates() => {
   'reminders': remindersTemplate(),
   'calendar': calendarTemplate(),
   'focus': focusTemplate(),
+  'phoneToolkit': phoneToolkitTemplate(),
 };
 
 AppSpec notesTemplate() => _personalUtilityRecords(

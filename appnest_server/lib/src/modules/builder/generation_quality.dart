@@ -34,6 +34,25 @@ Map<String, String> _issues(AppSpec spec) {
   final mainViews = navigation == null
       ? spec.views
       : mainPages.expand((page) => page.viewIds.map(spec.view)).toList();
+  if (spec.collections.isEmpty &&
+      spec.views.any(
+        (view) => {
+          'clock',
+          'timer',
+          'deviceInfo',
+          'deviceControl',
+        }.contains(view.type),
+      ) &&
+      !mainViews.any(
+        (view) => {
+          'clock',
+          'timer',
+          'deviceInfo',
+          'deviceControl',
+        }.contains(view.type),
+      )) {
+    issues['utility:unreachable'] = 'A utility app needs a clock, timer or device component on its entry page or tabs.';
+  }
   for (final collection in spec.collections) {
     final actions = spec.actions
         .where((action) => action.collectionId == collection.id)

@@ -7,6 +7,24 @@ import 'component_binding_options_test.dart' show mountOptions, selectOption;
 import 'page_editor_compatibility_test.dart' show editView;
 
 void main() {
+  testWidgets(
+    'device controls and information fields customize without records',
+    (tester) async {
+      final spec = phoneToolkitTemplate();
+      final options = await mountOptions(tester, spec, 'flashlight');
+      await selectOption(tester, 'control', 'flashlight', 'Keep screen awake');
+      expect(DeviceControlOptions.fromJson(options()).control, 'keepAwake');
+      final info = await mountOptions(tester, spec, 'phoneInfo');
+      await tester.tap(find.text('Battery level'));
+      await tester.pump();
+      expect(
+        DeviceInfoOptions.fromJson(info()).fields,
+        isNot(contains('batteryLevel')),
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   testWidgets('collection-free clock can be renamed from Layout', (
     tester,
   ) async {

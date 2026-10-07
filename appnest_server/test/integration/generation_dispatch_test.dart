@@ -164,7 +164,7 @@ void main() {
         owner,
         where: (t) => t.identifier.equals('appnest-generation-${stored.id}'),
       );
-      expect(await Worker.scheduleNextGeneration(owner), isTrue);
+      expect(await Worker.scheduleDueGenerations(owner), 1);
       expect(await wakeups(stored.id!), hasLength(1));
       await Worker.generate(
         owner,
@@ -222,6 +222,205 @@ void main() {
       );
       expect((await GenerationJob.db.findById(owner, job.id!))!.attempts, 2);
     });
+
+    test(
+      'concurrent enqueue preserves the per-user active-job quota',
+      () async {
+        final first = await Builder.begin(owner, workspace, 'planner', null);
+        final second = await Builder.begin(owner, workspace, 'planner', null);
+        Future<Object> enqueue(BuilderSnapshot draft) async {
+          try {
+            return await Builder.generate(
+              owner,
+              draft.draftId,
+              draft.mutation,
+              'A personal task reminder app',
+            );
+          } on NestError catch (error) {
+            return error;
+          }
+        }
+
+        final results = await Future.wait([enqueue(first), enqueue(second)]);
+        final accepted = results.whereType<BuilderSnapshot>().toList();
+        final rejected = results.whereType<NestError>().toList();
+        expect(accepted, hasLength(1));
+        expect(rejected, hasLength(1));
+        expect(rejected.single.category, 'quotaExceeded');
+        expect(
+          await GenerationJob.db.count(
+            owner,
+            where: (t) => t.actorId.equals(actor(owner)),
+          ),
+          1,
+        );
+        final rejectedDraft = accepted.single.draftId == first.draftId
+            ? second
+            : first;
+        final unchanged = await Builder.get(owner, rejectedDraft.draftId);
+        expect(unchanged.jobId, isNull);
+        expect(unchanged.mutation, rejectedDraft.mutation);
+
+        final other = sessions
+            .copyWith(
+              authentication: AuthenticationOverride.authenticationInfo(
+                'quota-other-${randomToken()}',
+                {},
+              ),
+            )
+            .build();
+        final otherWorkspace = await Apps.createWorkspace(other, 'Other quota');
+        final otherDraft = await Builder.begin(
+          other,
+          otherWorkspace,
+          'planner',
+          null,
+        );
+        final otherAccepted = await Builder.generate(
+          other,
+          otherDraft.draftId,
+          otherDraft.mutation,
+          'A personal task reminder app',
+        );
+        expect(otherAccepted.stage, 'queued');
+        expect(await wakeups(otherAccepted.jobId!), hasLength(1));
+        await Future.wait([
+          Worker.generate(
+            owner,
+            accepted.single.jobId!,
+            provider: FakeAiProvider(starterTemplates()['planner']!.canonical),
+          ),
+          Worker.generate(
+            other,
+            otherAccepted.jobId!,
+            provider: FakeAiProvider(starterTemplates()['planner']!.canonical),
+          ),
+        ]);
+        // Once the first job completes, this user's other draft can enqueue.
+        final next = await Builder.generate(
+          owner,
+          rejectedDraft.draftId,
+          rejectedDraft.mutation,
+          'A personal task reminder app',
+        );
+        await Worker.generate(
+          owner,
+          next.jobId!,
+          provider: FakeAiProvider(starterTemplates()['planner']!.canonical),
+        );
+        expect(
+          (await Builder.get(owner, rejectedDraft.draftId)).candidateReady,
+          isTrue,
+        );
+      },
+    );
+
+    test('reconciliation wakes every due job without waking active leases or future retries', () async {
+      final jobs = <GenerationJob>[];
+      for (var i = 0; i < 5; i++) {
+        final draft = await Builder.begin(owner, workspace, 'planner', null);
+        jobs.add(await queue(draft));
+      }
+      jobs[1]
+        ..status = 'generating'
+        ..leaseUntil = now.subtract(const Duration(seconds: 1));
+      jobs[2]
+        ..status = 'validating'
+        ..leaseUntil = now;
+      jobs[3]
+        ..status = 'generating'
+        ..leaseUntil = now.add(const Duration(seconds: 30));
+      jobs[4].nextAttemptAt = now.add(const Duration(seconds: 30));
+      for (final job in jobs) {
+        await GenerationJob.db.updateRow(owner, job);
+      }
+      try {
+        expect(await Worker.scheduleDueGenerations(owner), 3);
+        for (final job in jobs.take(3)) {
+          final calls = await wakeups(job.id!);
+          expect(calls, hasLength(1));
+          expect(calls.single.time, now);
+          expect(
+            (await GenerationJob.db.findById(owner, job.id!))!.attempts,
+            0,
+          );
+        }
+        for (final job in jobs.skip(3)) {
+          expect(await wakeups(job.id!), isEmpty);
+        }
+      } finally {
+        // These committed synthetic rows must not influence later reconciliation.
+        for (final job in jobs) {
+          job.status = 'failed';
+          await GenerationJob.db.updateRow(owner, job);
+        }
+      }
+    });
+
+    test(
+      'an expired claim can recover without accepting the old worker result',
+      () async {
+        final draft = await Builder.begin(owner, workspace, 'planner', null);
+        final job = await queue(draft);
+        final expiredProvider = _HeldProvider();
+        final replacementProvider = _HeldProvider();
+        final expiredRun = Worker.generate(
+          owner,
+          job.id!,
+          provider: expiredProvider,
+        );
+        Future<void>? replacementRun;
+        try {
+          await expiredProvider.started.future.timeout(
+            const Duration(seconds: 5),
+          );
+          final firstClaim = (await GenerationJob.db.findById(owner, job.id!))!;
+          now = firstClaim.leaseUntil!.add(const Duration(seconds: 1));
+          replacementRun = Worker.generate(
+            owner,
+            job.id!,
+            provider: replacementProvider,
+          );
+          await replacementProvider.started.future.timeout(
+            const Duration(seconds: 5),
+          );
+          expiredProvider.release.complete();
+          await expiredRun.timeout(const Duration(seconds: 5));
+          final replacementClaim = (await GenerationJob.db.findById(
+            owner,
+            job.id!,
+          ))!;
+          expect(replacementClaim.status, 'generating');
+          expect(
+            replacementClaim.leaseGeneration,
+            firstClaim.leaseGeneration + 1,
+          );
+          expect(replacementClaim.attempts, 2);
+          expect(replacementProvider.release.isCompleted, isFalse);
+          expect(
+            (await Builder.get(owner, draft.draftId)).candidateReady,
+            isFalse,
+          );
+        } finally {
+          if (!expiredProvider.release.isCompleted) {
+            expiredProvider.release.complete();
+          }
+          if (!replacementProvider.release.isCompleted) {
+            replacementProvider.release.complete();
+          }
+          await Future.wait([
+            expiredRun,
+            ?replacementRun,
+          ]).timeout(const Duration(seconds: 5));
+        }
+        expect(
+          (await GenerationJob.db.findById(owner, job.id!))!.status,
+          'preview ready',
+        );
+        expect(expiredProvider.calls, 1);
+        expect(replacementProvider.calls, 1);
+      },
+    );
 
     test('failed edit can keep prior candidate, stale discard and initial create are rejected', () async {
       final draft = await Builder.begin(owner, workspace, 'planner', null);
@@ -347,7 +546,7 @@ void main() {
     });
 
     test(
-      'one global AI lease leaves reminders free while another user waits',
+      'different users generate concurrently while duplicates, reminders, and edits stay safe',
       () async {
         final first = await Builder.begin(owner, workspace, 'planner', null);
         final firstJob = await queue(first);
@@ -370,27 +569,31 @@ void main() {
           null,
         );
         final secondJob = await queue(second, session: other);
-        final held = _HeldProvider();
-        final running = Worker.generate(owner, firstJob.id!, provider: held);
-        await held.started.future.timeout(const Duration(seconds: 5));
+        final firstProvider = _HeldProvider();
+        final secondProvider = _HeldProvider();
+        final running = [
+          Worker.generate(owner, firstJob.id!, provider: firstProvider),
+          Worker.generate(other, secondJob.id!, provider: secondProvider),
+        ];
         try {
-          await Worker.generate(
-            owner,
-            firstJob.id!,
-            provider: held,
-          ).timeout(const Duration(seconds: 3));
-          final waiting = _HeldProvider()..release.complete();
-          await Worker.generate(
-            other,
-            secondJob.id!,
-            provider: waiting,
-          ).timeout(const Duration(seconds: 3));
-          expect(held.calls, 1);
-          expect(waiting.calls, 0);
-          expect(
-            (await GenerationJob.db.findById(owner, secondJob.id!))!.attempts,
-            0,
-          );
+          await Future.wait([
+            firstProvider.started.future,
+            secondProvider.started.future,
+          ]).timeout(const Duration(seconds: 5));
+          // Both provider calls remain held. A serialized implementation cannot
+          // reach this point, even if it would eventually finish both jobs.
+          for (final id in [firstJob.id!, secondJob.id!]) {
+            final stored = (await GenerationJob.db.findById(owner, id))!;
+            expect(stored.status, 'generating');
+            expect(stored.attempts, 1);
+            expect(stored.leaseUntil!.isAfter(now), isTrue);
+          }
+          await Future.wait([
+            Worker.generate(owner, firstJob.id!, provider: firstProvider),
+            Worker.generate(other, secondJob.id!, provider: secondProvider),
+          ]).timeout(const Duration(seconds: 3));
+          expect(firstProvider.calls, 1);
+          expect(secondProvider.calls, 1);
 
           final reminderApp = await Apps.instantiate(
             owner,
@@ -448,10 +651,11 @@ void main() {
             ),
             1,
           );
-          expect(held.release.isCompleted, isFalse);
+          expect(firstProvider.release.isCompleted, isFalse);
+          expect(secondProvider.release.isCompleted, isFalse);
           expect(
-            (await GenerationJob.db.findById(owner, secondJob.id!))!.attempts,
-            0,
+            (await GenerationJob.db.findById(owner, secondJob.id!))!.status,
+            'generating',
           );
 
           // A manual edit during the provider call must fence off the late result.
@@ -466,8 +670,13 @@ void main() {
             }),
           );
         } finally {
-          held.release.complete();
-          await running;
+          if (!firstProvider.release.isCompleted) {
+            firstProvider.release.complete();
+          }
+          if (!secondProvider.release.isCompleted) {
+            secondProvider.release.complete();
+          }
+          await Future.wait(running).timeout(const Duration(seconds: 5));
         }
         expect(
           (await GenerationJob.db.findById(owner, firstJob.id!))!.status,
@@ -477,11 +686,6 @@ void main() {
           AppSpec.parse((await Builder.get(owner, first.draftId)).candidateJson)
               .name,
           'Kept manual title',
-        );
-        await Worker.generate(
-          other,
-          secondJob.id!,
-          provider: FakeAiProvider(starterTemplates()['planner']!.canonical),
         );
         expect(
           (await GenerationJob.db.findById(owner, secondJob.id!))!.status,

@@ -890,6 +890,97 @@ void main() {
     },
   );
 
+  test('public device component fragment validates every built-in control', () {
+    for (final control in deviceControlLabels.keys) {
+      final fragment = jsonDecode(
+        creationDeviceComponentReferenceJson,
+      ) as Map<String, dynamic>;
+      final views = (fragment['views'] as List).cast<Map<String, dynamic>>();
+      views.last['options'] = {'control': control};
+      final spec = AppSpec.parse(
+        jsonEncode({
+          'formatVersion': 1,
+          'name': 'Device contract check',
+          'theme': 'teal',
+          'icon': 'spark',
+          'requires': [
+            'navigation.v1',
+            'views.configured.v1',
+            'views.deviceInfo.v1',
+            'views.deviceControl.v1',
+          ],
+          'policyPresetRequest': 'personalTracker.v1',
+          ...fragment,
+          'navigation': {
+            'entryPageId': 'devicePage',
+            'pages': [
+              {
+                'id': 'devicePage',
+                'title': 'Device',
+                'viewIds': views.map((view) => view['id']).toList(),
+              },
+            ],
+            'tabs': [
+              {'pageId': 'devicePage', 'label': 'Device', 'icon': 'spark'},
+            ],
+          },
+        }),
+      );
+      expect(spec.collections, isEmpty);
+      expect(spec.actions, isEmpty);
+      expect(spec.automationRequests, isEmpty);
+      expect(requestedDeviceCapabilities(spec), {'battery', control});
+    }
+  });
+
+  test(
+    'device contract reaches creation and repair without seeding an app',
+    () {
+      const idea = 'A phone toolkit showing battery and a flashlight control';
+      const diagnostic = 'Unknown behavior flashlight';
+      const rejected = '{"invalid":"provider response"}';
+      for (final repair in [false, true]) {
+        final body = buildAiRequest(
+          'test-model',
+          idea,
+          current,
+          editing: false,
+          diagnostics: repair ? [diagnostic] : [],
+          rejectedOutput: repair ? rejected : null,
+        );
+        final messages = body['messages'] as List;
+        final system = messages.first['content'] as String;
+        expect(system, contains(creationDeviceComponentReferenceJson));
+        expect(
+          system,
+          contains('NOT behavior IDs, behavior types, action capabilities'),
+        );
+        expect(
+          system,
+          contains('root collections:[], actions:[] and automationRequests:[]'),
+        );
+        expect(
+          system,
+          contains('Record CRUD and workflow guidance applies only'),
+        );
+        final user = jsonDecode(messages.last['content'] as String) as Map;
+        expect(user['request'], idea);
+        expect(user['diagnostics'], repair ? [diagnostic] : isEmpty);
+        expect(user.containsKey('currentDefinition'), isFalse);
+        expect(
+          user['repairContext'],
+          repair ? {'rejectedOutput': rejected} : null,
+        );
+        expect(jsonEncode(user), isNot(contains('batteryInfo')));
+      }
+      final edit = buildAiRequest('test-model', idea, current, editing: true);
+      expect(
+        (edit['messages'] as List).first['content'],
+        isNot(contains(creationDeviceComponentReferenceJson)),
+      );
+    },
+  );
+
   test('provider view variants retain options and collection constraints', () {
     final request = buildAiRequest(
       'test-model',
@@ -922,7 +1013,12 @@ void main() {
       expect(properties['options'], options, reason: '$type options');
       expect(properties['type'], {'const': type});
       final utility = type == 'clock' || type == 'timer';
-      final unbound = type == 'banner' || type == 'richText' || utility;
+      final unbound =
+          type == 'banner' ||
+          type == 'richText' ||
+          type == 'deviceInfo' ||
+          type == 'deviceControl' ||
+          utility;
       expect(properties.containsKey('collectionId'), !unbound, reason: '$type');
       final expectedRequired = [
         'id',

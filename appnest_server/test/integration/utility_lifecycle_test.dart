@@ -99,6 +99,49 @@ void main() {
       },
     );
 
+    test(
+      'Phone Toolkit publishes definitions without device grants or data',
+      () async {
+        final draft = await Builder.begin(
+          owner,
+          workspace,
+          'phoneToolkit',
+          null,
+        );
+        final version = await publish(draft);
+        final manifest = await Apps.manifest(owner, draft.appId);
+        expect(manifest.versionId, version);
+        final spec = AppSpec.parse(manifest.specJson!);
+        expect(
+          requestedDeviceCapabilities(spec),
+          deviceCapabilityLabels.keys.toSet(),
+        );
+        expect(spec.collections, isEmpty);
+        expect(spec.automationRequests, isEmpty);
+        expect(
+          await EntityRecord.db.count(
+            owner,
+            where: (t) => t.appId.equals(draft.appId),
+          ),
+          0,
+        );
+        expect(
+          await Automation.db.count(
+            owner,
+            where: (t) => t.appId.equals(draft.appId),
+          ),
+          0,
+        );
+        final reopened = await Builder.begin(
+          owner,
+          workspace,
+          'phoneToolkit',
+          draft.appId,
+        );
+        expect(reopened.candidateHash, spec.hash);
+      },
+    );
+
     for (final key in ['notes', 'reminders', 'calendar']) {
       test('$key publishes and supports authenticated create/edit', () async {
         final draft = await Builder.begin(owner, workspace, key, null);

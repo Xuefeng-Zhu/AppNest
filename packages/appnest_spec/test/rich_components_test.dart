@@ -29,7 +29,7 @@ void main() {
         ...richStarterTemplates(),
         ...utilityStarterTemplates(),
       };
-      expect(templates.length, 7);
+      expect(templates.length, 8);
       final types = <String>{};
       for (final spec in templates.values) {
         expect(AppSpec.parse(spec.canonical).canonical, spec.canonical);

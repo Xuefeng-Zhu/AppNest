@@ -126,7 +126,14 @@ Map<String, dynamic> appSpecSchema() {
       'if': {
         'properties': {
           'type': {
-            'enum': ['richText', 'banner', 'clock', 'timer'],
+            'enum': [
+              'richText',
+              'banner',
+              'clock',
+              'timer',
+              'deviceInfo',
+              'deviceControl',
+            ],
           },
         },
       },

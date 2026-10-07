@@ -764,6 +764,17 @@ class _BuilderScreenState extends State<BuilderScreen> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   ...describeChanges(reviewed).map((c) => Text('• $c')),
+                  if (requestedDeviceCapabilities(reviewedSpec).isNotEmpty) ...[
+                    const SizedBox(height: 16),
+                    const Text('Mobile features'),
+                    for (final capability in requestedDeviceCapabilities(
+                      reviewedSpec,
+                    ))
+                      Text('• ${deviceCapabilityLabels[capability]}'),
+                    const Text(
+                      'Publishing does not enable device access. Each person chooses access on their phone. Device values stay local.',
+                    ),
+                  ],
                   const SizedBox(height: 16),
                   Text(switch (reviewedSpec.policyPresetRequest) {
                     'personalTracker.v1' => 'Personal app · You manage its records. Shared members can view them.',
@@ -1021,6 +1032,24 @@ class _BuilderScreenState extends State<BuilderScreen> {
             subtitle: const Text('Pages, sections, navigation, and components'),
             onTap: () => choose(editPages),
           ),
+          ListTile(
+            leading: const Icon(Icons.phone_android),
+            title: const Text('Mobile features'),
+            subtitle: const Text('Device information and phone controls'),
+            onTap: () => choose(editPages),
+          ),
+          for (final view in preview.spec.views.where(
+            (v) => v.type == 'deviceInfo' || v.type == 'deviceControl',
+          ))
+            ListTile(
+              title: Text(view.label),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => choose(
+                () => selectVisualTarget(
+                  MiniAppEditTarget(MiniAppEditKind.section, view.id),
+                ),
+              ),
+            ),
           const Divider(height: 24),
           ListTile(
             leading: const Icon(Icons.tune),

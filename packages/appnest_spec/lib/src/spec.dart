@@ -344,8 +344,14 @@ class ViewSpec {
   final Map<String, dynamic>? query;
   final DateFilterSpec? dateFilter;
   final Map<String, dynamic> options;
-  bool get contentOnly =>
-      const {'richText', 'banner', 'clock', 'timer'}.contains(type);
+  bool get contentOnly => const {
+    'richText',
+    'banner',
+    'clock',
+    'timer',
+    'deviceInfo',
+    'deviceControl',
+  }.contains(type);
   ClockOptions get clockOptions => ClockOptions.fromJson(options);
   TimerOptions get timerOptions => TimerOptions.fromJson(options);
   bool get configured =>
@@ -431,6 +437,8 @@ class ViewSpec {
       'banner',
       'clock',
       'timer',
+      'deviceInfo',
+      'deviceControl',
     }.contains(type);
     if (contentOnly && j.containsKey('collectionId'))
       throw const SpecException('Content blocks must omit collectionId');
@@ -543,6 +551,8 @@ const capabilities = {
   'views.checklist.v1',
   'views.clock.v1',
   'views.timer.v1',
+  'views.deviceInfo.v1',
+  'views.deviceControl.v1',
   'fields.image.v1',
   'views.interactive.v1',
   'capacity.v1',
@@ -943,8 +953,17 @@ class AppSpec {
           : null;
       if (expected != null &&
           (action.behaviorId == null ||
-              col.behavior(action.behaviorId!).type != expected))
-        throw const SpecException('Action behavior binding is invalid');
+              !col.behaviors.any(
+                (behavior) =>
+                    behavior.id == action.behaviorId &&
+                    behavior.type == expected,
+              )))
+        throw SpecException(
+          'Action ${action.id} requires behaviorId referencing a declared '
+          '$expected behavior in collection ${col.id}. '
+          'Phone controls such as flashlight belong in collection-free '
+          'deviceControl views, not record actions or behaviors.',
+        );
       if (expected == null && action.behaviorId != null)
         throw const SpecException('Record actions do not bind behaviors');
     }

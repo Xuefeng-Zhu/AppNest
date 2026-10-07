@@ -182,6 +182,10 @@ class _PageEditorState extends State<PageEditor> {
       'showDate': true,
     },
     'timer' => {'durationMinutes': 25},
+    'deviceInfo' => {
+      'fields': ['batteryLevel', 'charging'],
+    },
+    'deviceControl' => {'control': 'flashlight'},
     _ => {},
   };
 

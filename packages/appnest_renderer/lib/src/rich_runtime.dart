@@ -967,6 +967,12 @@ class _RichMiniAppRuntimeState extends State<_RichMiniAppRuntime>
         return const Text('Choose a record to open its details.');
       return _details(context, view, _record!);
     }
+    if (view.type == 'deviceInfo' || view.type == 'deviceControl')
+      return _DeviceComponent(
+        key: ValueKey(view.id),
+        view: view,
+        adapter: adapter.deviceCapabilities,
+      );
     if (view.type == 'clock')
       return _UtilityClock(
         key: ValueKey(view.id),

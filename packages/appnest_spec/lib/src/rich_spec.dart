@@ -1,6 +1,8 @@
 part of '../appnest_spec.dart';
 
 const richViewTypes = {
+  'deviceInfo',
+  'deviceControl',
   'clock',
   'timer',
   'table',
@@ -31,6 +33,8 @@ const formControls = {
 
 void _validateOptionsShape(String type, Map<String, dynamic> o) {
   final allowed = switch (type) {
+    'deviceInfo' => {'fields'},
+    'deviceControl' => {'control'},
     'clock' => {'style', 'hourFormat', 'showSeconds', 'showDate'},
     'timer' => {'durationMinutes'},
     'calendar' || 'timeline' => {'dateFieldId'},
@@ -60,6 +64,8 @@ void _validateOptionsShape(String type, Map<String, dynamic> o) {
     _ => <String>{},
   };
   keys(o, allowed, '$type options');
+  if (type == 'deviceInfo') DeviceInfoOptions.fromJson(o);
+  if (type == 'deviceControl') DeviceControlOptions.fromJson(o);
   if (type == 'clock') ClockOptions.fromJson(o);
   if (type == 'timer') TimerOptions.fromJson(o);
   for (final key in [
@@ -514,6 +520,22 @@ Map<String, dynamic> _richOptionsSchema(String type) {
   };
   const asset = {'type': 'string', 'pattern': r'^[A-Za-z0-9_-]{1,128}$'};
   return switch (type) {
+    'deviceInfo' => obj(
+      {
+        'fields': arr(
+          {'enum': deviceInfoFields.keys.toList()},
+          deviceInfoFields.length,
+          min: 1,
+        ),
+      },
+      ['fields'],
+    ),
+    'deviceControl' => obj(
+      {
+        'control': {'enum': deviceControlLabels.keys.toList()},
+      },
+      ['control'],
+    ),
     'clock' => obj({
       'style': {
         'enum': ['analog', 'digital'],

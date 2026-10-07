@@ -133,7 +133,7 @@ class Worker {
         s.log('outbox_retry event_id=${e.id} attempt=${e.attempts}');
       }
     }
-    final generationScheduled = await scheduleNextGeneration(s);
+    final generationsScheduled = await scheduleDueGenerations(s);
     final runs = await AutomationRun.db.find(
       s,
       where: (t) =>
@@ -171,9 +171,9 @@ class Worker {
             .execute(run.id!);
       }
     }
-    if (events.isNotEmpty || generationScheduled || runs.isNotEmpty) {
+    if (events.isNotEmpty || generationsScheduled > 0 || runs.isNotEmpty) {
       s.log(
-        'reconcile outbox_batch=${events.length} generation_scheduled=$generationScheduled run_batch=${runs.length}',
+        'reconcile outbox_batch=${events.length} generations_scheduled=$generationsScheduled run_batch=${runs.length}',
       );
     }
   }
@@ -410,16 +410,23 @@ class Worker {
     }
   }
 
-  static Future<bool> scheduleNextGeneration(Session s) async {
-    final job = await GenerationJob.db.findFirstRow(
+  /// Recover a bounded batch so missed wakeups for independent jobs can run
+  /// concurrently. Duplicate wakeups remain fenced by each job's lease.
+  static Future<int> scheduleDueGenerations(Session s) async {
+    final jobs = await GenerationJob.db.find(
       s,
       where: (t) =>
           t.status.inSet({'queued', 'generating', 'validating'}) &
           (t.nextAttemptAt <= clock()) &
           (t.leaseUntil.equals(null) | (t.leaseUntil <= clock())),
       orderBy: (t) => t.id,
+      limit: Limits.automationBatch,
     );
-    return job != null && await scheduleGeneration(s, job.id!, clock());
+    var scheduled = 0;
+    for (final job in jobs) {
+      if (await scheduleGeneration(s, job.id!, clock())) scheduled++;
+    }
+    return scheduled;
   }
 
   static String? failureCategory(GenerationJob job) {
@@ -542,20 +549,8 @@ class Worker {
         return null;
       }
       if (j.nextAttemptAt.isAfter(clock())) return null;
-      // A short transaction lock serializes claims across apps and processes.
-      // Never hold a database lock or a waiting Future Call slot during AI I/O.
-      await s.db.unsafeQuery(
-        "SELECT pg_advisory_xact_lock(hashtextextended('appnest-generation-slot', 41))",
-        transaction: tx,
-      );
-      final occupied = await GenerationJob.db.findFirstRow(
-        s,
-        where: (t) =>
-            t.status.inSet({'generating', 'validating'}) &
-            (t.leaseUntil > clock()),
-        transaction: tx,
-      );
-      if (occupied != null) return null;
+      // The app row lock and this job's lease fence duplicate claims. Other
+      // apps can claim their own jobs without waiting for this provider call.
       j.status = 'generating';
       j.attempts++;
       j.leaseGeneration++;
@@ -740,7 +735,6 @@ class Worker {
     if (next?.status == 'queued') {
       await scheduleGeneration(s, id, next!.nextAttemptAt);
     }
-    await scheduleNextGeneration(s);
   }
 }
 

@@ -46,7 +46,7 @@ sessionLogs:
 # futureCallExecutionEnabled: true # Defaults to true
 
 futureCall:
-  concurrencyLimit: 2
+  concurrencyLimit: 8
   scanInterval: 1000
 
 # Match the bounded image upload transport used in development.

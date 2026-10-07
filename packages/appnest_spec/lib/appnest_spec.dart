@@ -11,6 +11,7 @@ part 'src/schema.dart';
 part 'src/rich_spec.dart';
 part 'src/rich_templates.dart';
 part 'src/utility_spec.dart';
+part 'src/device_spec.dart';
 part 'src/utility_templates.dart';
 
 class SpecException implements Exception {

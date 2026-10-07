@@ -49,7 +49,7 @@ sessionLogs:
 # futureCallExecutionEnabled: true # Defaults to true
 
 futureCall:
-  concurrencyLimit: 2 # One AI lease leaves capacity for reminders and reconciliation.
+  concurrencyLimit: 8 # Shared per-process pool for generation, reminders, and reconciliation.
   scanInterval: 1000
 
 # Recommended when serving web clients: keeps auth tokens in httpOnly

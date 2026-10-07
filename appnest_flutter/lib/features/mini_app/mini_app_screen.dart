@@ -9,6 +9,7 @@ import '../../client.dart';
 import '../builder/builder_screen.dart';
 import 'live_adapter.dart';
 import 'device_timer_store.dart';
+import 'device_capabilities.dart';
 
 class MiniAppScreen extends StatefulWidget {
   final int appId;
@@ -48,6 +49,7 @@ class MiniAppScreenState extends State<MiniAppScreen> {
   @override
   void dispose() {
     _loadGeneration++;
+    adapter?.deviceCapabilities.dispose();
     adapter?.timerController.dispose();
     controller.dispose();
     super.dispose();
@@ -133,6 +135,8 @@ class MiniAppScreenState extends State<MiniAppScreen> {
         app.appId,
       );
       if (!mounted) return;
+      await _pauseDevice(true);
+      if (!mounted) return;
       await Navigator.push<int>(
         context,
         MaterialPageRoute<int>(builder: (_) => BuilderScreen(initial: draft)),
@@ -147,7 +151,43 @@ class MiniAppScreenState extends State<MiniAppScreen> {
         );
       }
     } finally {
-      if (mounted) setState(() => _customizing = false);
+      if (mounted) {
+        await _pauseDevice(false);
+        if (mounted) setState(() => _customizing = false);
+      }
+    }
+  }
+
+  Future<void> _pauseDevice(bool paused) async {
+    final device = adapter?.deviceCapabilities;
+    if (device is PhoneDeviceCapabilities) await device.setPaused(paused);
+  }
+
+  Future<void> deviceAccess() async {
+    final device = adapter?.deviceCapabilities;
+    if (device == null) return;
+    device.attach();
+    try {
+      await showDialog<void>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Device access'),
+          content: SizedBox(
+            width: 440,
+            child: SingleChildScrollView(
+              child: DeviceAccessPanel(adapter: device),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Done'),
+            ),
+          ],
+        ),
+      );
+    } finally {
+      device.detach();
     }
   }
 
@@ -180,7 +220,26 @@ class MiniAppScreenState extends State<MiniAppScreen> {
           );
         }
       }
-      final next = LiveRuntimeAdapter(client, m, timerController: timer);
+      final mobileSpec = AppSpec.parse(m.specJson!);
+      DeviceCapabilitiesAdapter? device;
+      if (!m.archived && requestedDeviceCapabilities(mobileSpec).isNotEmpty) {
+        final account = client.auth.authInfo?.authUserId.toString();
+        if (account == null) {
+          throw StateError('Sign in again to open device features.');
+        }
+        device = PhoneDeviceCapabilities(
+          server: client.host,
+          actorId: account,
+          appId: m.appId,
+          spec: mobileSpec,
+        );
+      }
+      final next = LiveRuntimeAdapter(
+        client,
+        m,
+        timerController: timer,
+        deviceCapabilities: device,
+      );
       pending = next;
       final location = await _resolveLocation(
         controller.location ?? widget.initialLocation,
@@ -188,6 +247,7 @@ class MiniAppScreenState extends State<MiniAppScreen> {
         runtime: next,
       );
       if (!mounted || generation != _loadGeneration) {
+        next.deviceCapabilities.dispose();
         if (ownsPendingController) next.timerController.dispose();
         return;
       }
@@ -201,6 +261,7 @@ class MiniAppScreenState extends State<MiniAppScreen> {
           error = null;
         });
         pending = null;
+        previous?.deviceCapabilities.dispose();
         if (!identical(previous?.timerController, next.timerController)) {
           previous?.timerController.dispose();
         }
@@ -211,8 +272,10 @@ class MiniAppScreenState extends State<MiniAppScreen> {
         });
       }
     } catch (e) {
+      pending?.deviceCapabilities.dispose();
       if (ownsPendingController) pending?.timerController.dispose();
       if (mounted && generation == _loadGeneration) {
+        adapter?.deviceCapabilities.dispose();
         adapter?.timerController.dispose();
         setState(() {
           error = e;
@@ -442,6 +505,7 @@ class MiniAppScreenState extends State<MiniAppScreen> {
               icon: const Icon(Icons.more_horiz),
               onSelected: (value) async {
                 try {
+                  if (value == 'device') await deviceAccess();
                   if (value == 'activity') await activity();
                   if (value == 'share') await share();
                   if (value == 'edit') {
@@ -512,6 +576,11 @@ class MiniAppScreenState extends State<MiniAppScreen> {
                   const PopupMenuItem(
                     value: 'share',
                     child: Text('Invite to app'),
+                  ),
+                if (requestedDeviceCapabilities(adapter!.spec).isNotEmpty)
+                  const PopupMenuItem(
+                    value: 'device',
+                    child: Text('Device access'),
                   ),
                 if (builder && !m.archived)
                   const PopupMenuItem(

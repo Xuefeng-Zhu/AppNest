@@ -55,6 +55,8 @@
           "views.checklist.v1",
           "views.clock.v1",
           "views.timer.v1",
+          "views.deviceInfo.v1",
+          "views.deviceControl.v1",
           "fields.image.v1",
           "views.interactive.v1",
           "capacity.v1",
@@ -218,6 +220,8 @@
               "summary",
               "capacity",
               "action",
+              "deviceInfo",
+              "deviceControl",
               "clock",
               "timer",
               "table",
@@ -398,7 +402,9 @@
                     "richText",
                     "banner",
                     "clock",
-                    "timer"
+                    "timer",
+                    "deviceInfo",
+                    "deviceControl"
                   ]
                 }
               }
@@ -649,6 +655,81 @@
                   "properties": {}
                 }
               }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "type": {
+                  "const": "deviceInfo"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "options": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "fields": {
+                      "type": "array",
+                      "items": {
+                        "enum": [
+                          "batteryLevel",
+                          "charging",
+                          "model",
+                          "osVersion",
+                          "connection",
+                          "language",
+                          "region",
+                          "timeZone"
+                        ]
+                      },
+                      "minItems": 1,
+                      "maxItems": 8
+                    }
+                  },
+                  "required": [
+                    "fields"
+                  ]
+                }
+              },
+              "required": [
+                "options"
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "type": {
+                  "const": "deviceControl"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "options": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "control": {
+                      "enum": [
+                        "flashlight",
+                        "brightness",
+                        "keepAwake",
+                        "haptics"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "control"
+                  ]
+                }
+              },
+              "required": [
+                "options"
+              ]
             }
           },
           {

@@ -11,6 +11,24 @@ import 'package:flutter_test/flutter_test.dart';
 /// Opt-in artifacts are synthetic renderer evidence, never live server proof.
 /// flutter test test/visual_capture_test.dart \
 ///   --dart-define=APPNEST_CAPTURE_DIR=/tmp/appnest-miniapp-captures
+class _DeviceCaptureState extends PreviewDeviceCapabilitiesAdapter {
+  @override
+  final bool supported;
+  @override
+  bool get preview => false;
+  @override
+  Set<String> get granted => {};
+  _DeviceCaptureState(super.spec, this.supported);
+}
+
+class _DeviceCaptureRuntime extends PreviewRuntimeAdapter {
+  @override
+  late final PreviewDeviceCapabilitiesAdapter deviceCapabilities =
+      _DeviceCaptureState(spec, available);
+  final bool available;
+  _DeviceCaptureRuntime(super.spec, {required this.available, super.now});
+}
+
 void main() {
   const output = String.fromEnvironment('APPNEST_CAPTURE_DIR');
   setUpAll(() async {
@@ -112,6 +130,22 @@ void main() {
     for (final (name, size, location) in cases)
       (name, size, location, dailyPlannerTemplate()),
     ...richCases,
+    for (final size in [const Size(390, 1000), const Size(1440, 1000)])
+      for (final status in ['accessOff', 'unavailable'])
+        (
+          'device-$status-${size.width.toInt()}',
+          size,
+          const MiniAppLocation('controlsPage'),
+          phoneToolkitTemplate(),
+        ),
+    for (final size in [const Size(390, 1000), const Size(1440, 1000)])
+      for (final page in ['phonePage', 'controlsPage'])
+        (
+          'device-$page-${size.width.toInt()}',
+          size,
+          MiniAppLocation(page),
+          phoneToolkitTemplate(),
+        ),
     for (final (utility, template) in [
       ('notes', notesTemplate()),
       ('reminders', remindersTemplate()),
@@ -166,7 +200,15 @@ void main() {
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
-      final adapter = PreviewRuntimeAdapter(template, now: moment);
+      final adapter =
+          name.startsWith('device-accessOff') ||
+              name.startsWith('device-unavailable')
+          ? _DeviceCaptureRuntime(
+              template,
+              now: moment,
+              available: name.startsWith('device-accessOff'),
+            )
+          : PreviewRuntimeAdapter(template, now: moment);
       final boundaryKey = GlobalKey();
       await tester.pumpWidget(
         RepaintBoundary(
