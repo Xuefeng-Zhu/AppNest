@@ -1,5 +1,7 @@
 # Mobile capabilities
 
+[Documentation index](README.md) · [Customization](CUSTOMIZATION.md) · [iPhone evidence](IPHONE_AI_CHECK.md) · [Development workflow](DEVELOPMENT.md)
+
 AppNest mini-apps can display local device information and offer bounded phone
 controls on Android and iOS. Add them through **Customize → Mobile features**,
 the component editor, or the AI builder. **Phone Toolkit** is an explicit starter
@@ -74,11 +76,21 @@ or execute native code. Serverpod validates/publishes definitions using existing
 authenticated services. There are no new device endpoints, tables, or migrations.
 Existing AppSpec hashes remain unchanged unless their definition is edited.
 
+This local-device boundary is separate from record action receipts and legacy
+record rendering. The [architecture review](ARCHITECTURE_REVIEW.md) records open
+ambiguous business-Save and legacy access-error UI findings; device session
+cleanup does not resolve them.
+
 ## Initial verification — 2026-09-24
+
+The results below describe the environment and source used on that date. They
+are not a current inventory of installed Xcode components, connected devices,
+or running services. The subsequent dated check follows the initial results.
 
 - `scripts/verify.sh` passed: analysis, formatting, **539 tests** (80 spec,
   171 renderer, 168 Flutter app, 120 server), and isolated two-process PostgreSQL
-  reminder restart recovery. Log: `/tmp/appnest-mobile-verify.log`.
+  reminder restart recovery. The run recorded its temporary log at
+  `/tmp/appnest-mobile-verify.log`; that file is not a repository artifact.
 - Tests cover bounded schemas, semantic edits, reachable generation, publication
   without device data or grants, local consent isolation, revocation, corrupt
   preferences/reset, interrupted commands, permission errors, lifecycle cleanup,

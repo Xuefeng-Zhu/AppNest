@@ -1,9 +1,16 @@
 # Rich components: connected development verification
 
+[Documentation index](README.md) · [Component contract](RICH_COMPONENTS.md) · [Verification record](VERIFICATION.md)
+
 Executed on 2026-09-23 UTC against the local development server at
 `http://localhost:8180/` and the release web app at `http://localhost:8182/`.
 All newly created data and images in this check are synthetic. Existing apps,
 credentials, databases, and uncommitted builder work were retained.
+
+This is a historical execution record. App IDs, records, process names, and
+runtime responses identify the 2026-09-23 run; they do not establish their current
+availability. Current setup and runtime-control rules are in
+[development](DEVELOPMENT.md).
 
 ## Activation
 
@@ -21,7 +28,7 @@ credentials, databases, and uncommitted builder work were retained.
 
 ## Authenticated client checks
 
-Run the opt-in, loopback-only script from `appnest_client`:
+The run used the opt-in, loopback-only script from `appnest_client`:
 
 ```sh
 dart run bin/rich_components_smoke.dart --run-rich-smoke
@@ -30,6 +37,10 @@ dart run bin/rich_components_smoke.dart --run-rich-smoke
 It signs in with the documented synthetic development accounts, creates fresh
 timestamp-labelled apps, and uses public authenticated endpoints throughout.
 This run's identifier was `2026-09-23T053536349127Z`.
+
+Rerunning requires the explicitly seeded local environment and creates new
+apps, records, and images. The script does not start the server. See
+[development](DEVELOPMENT.md) before repeating connected checks.
 
 | App | Executed result |
 | --- | --- |
@@ -110,3 +121,9 @@ AI generation of the new components, native device installation, a comprehensive
 accessibility audit, production deployment, multi-instance operation, or
 large-scale performance. Browser screenshots use normal device text scaling;
 150% text coverage comes from the automated renderer tests.
+
+The later [architecture review](ARCHITECTURE_REVIEW.md) reproduced ambiguous
+create retries and legacy-renderer UI invalidation failures. Those cases were
+not exercised by this dated happy-path save/reload run, and the successful
+receipt retry in the client table reused the same key. The historical results
+above remain evidence for their stated scenarios.

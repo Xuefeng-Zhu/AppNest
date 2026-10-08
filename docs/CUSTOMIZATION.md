@@ -1,5 +1,7 @@
 # Everyday mini-app customization
 
+[Documentation index](README.md) · [Visual editing](VISUAL_EDITING.md) · [Appearance](APPEARANCE.md) · [Mobile capabilities](MOBILE_FEATURES.md) · [Development workflow](DEVELOPMENT.md)
+
 AppNest's core loop is describe → try → customize → use. The four showcase
 definitions are Notes, Reminders, Calendar, and Clock & Focus. These are examples
 of the shared declarative engine; choosing an example prompt still asks the AI
@@ -35,6 +37,14 @@ definition while preserving its ID. It does not bypass publication or enroll
 old records automatically. Reminder delivery is still one-time and in-app only;
 calendars display AppNest records, not the phone's calendar.
 
+Draft enqueue and visual-edit saves reconcile uncertain responses against the
+saved draft. Record-action Saves use a different path: the current renderer
+allocates a new command key when a person retries after an ambiguous failure.
+A committed create with a lost reply can therefore be duplicated. Legacy
+definitions without navigation also have an access-error UI invalidation gap.
+Both are open findings in the [architecture review](ARCHITECTURE_REVIEW.md);
+the draft-recovery behavior above does not resolve them.
+
 ## Clock and timer contract
 
 `views.clock.v1` and `views.timer.v1` are collection-free views. Utility-only
@@ -65,8 +75,10 @@ errors are visible. Preferences support normal reopening; they are not a
 critical-data durability guarantee or cross-device synchronization service.
 
 Same-app authorized manifest refreshes retain the controller, including during
-appearance changes, to avoid racing pending writes. Switching scope or losing
-access releases the controller. No timer data is sent to Serverpod or the AI.
+appearance changes, to avoid racing pending writes. The host disposes it when
+the app closes, its scope changes, or a manifest reload fails. Saved local state
+remains scoped to that account for later reopening; a renderer read error does
+not erase preferences. No timer data is sent to Serverpod or the AI.
 
 ## Generation scheduling and interfaces
 
@@ -98,15 +110,20 @@ change or migration is required.
 
 Generated candidates receive an additional reachable-interaction check.
 Editable collections need usable add/edit controls; collection-free utilities
-must expose a clock or timer from their entry page or tabs. Legacy saved
-definitions are not retroactively rejected by this generation-only check.
+must expose a clock, timer, device-information or device-control component from
+their entry page or tabs. Legacy saved definitions are not retroactively rejected
+by this generation-only check.
 Edits compare against the current candidate and reject newly introduced
 usability failures, allowing older append-only apps to retain their behavior.
 Aggregate views cannot satisfy record-edit reachability.
 
-## Verification
+## Historical verification
 
-Executed on 2026-09-23:
+Executed on 2026-09-23. These counts and environment limitations belong to that
+run. Later mobile/iPhone evidence is recorded separately in
+[mobile capabilities](MOBILE_FEATURES.md) and the
+[iPhone investigation](IPHONE_AI_CHECK.md); current runtime availability is not
+inferred from any earlier build or screenshot.
 
 | Check | Result |
 | --- | --- |
@@ -120,7 +137,9 @@ Executed on 2026-09-23:
 | Unsigned iOS release | Blocked before compilation: Xcode reports its required iOS 26.5 platform component is not installed |
 | Synthetic captures | Mobile/desktop customization, Notes, Reminders, Calendar and clock/timer views captured |
 
-The final workspace suite log is `/tmp/appnest-customization-push-verify.log`. Local
+The run recorded its workspace suite log at
+`/tmp/appnest-customization-push-verify.log`; temporary logs are not repository
+artifacts and may no longer be available. Local
 automated tests and isolated screenshots do not establish physical-device,
 connected development-server, or live-model acceptance. No updated development
 runtime was activated: Serverpod/Dart MCP tools were unavailable, and no app
@@ -157,18 +176,22 @@ hashes, not candidate definitions. Those results exposed edit-envelope errors,
 missing capabilities and unusable field/view linkage. Follow-up verification
 uses exact scenario assertions and retains synthetic responses and definitions
 for offline inspection; no user records are included.
-Latest outcomes are **5/8 creations and 8/8 edits**, with three edits tested on
-explicit templates after creation failed. See the
+At the close of that evaluation, outcomes were **5/8 creations and 8/8 edits**,
+with three edits tested on explicit templates after creation failed. See the
 [live evaluation and remaining failures](CUSTOMIZATION_AI_CHECK.md). Creation
 reliability remains a product limitation.
 
-Edit requests now provide the same typed patch schema in both the system prompt
+Edit requests provide the same typed patch schema in both the system prompt
 and `response_format`. The full-app output schema remains confined to creation
 requests. This follows the provider's guidance to make the prompt and requested
 [structured output](https://docs.tokenfactory.nebius.com/ai-models-inference/json)
 agree; local validation still rejects malformed or incompatible responses.
 `--cases=...` selects scenarios, and `--edits-from=<saved-report>` reuses successful
 synthetic candidates for an edit-only recheck without regenerating them.
+
+The recorded Nebius results do not establish reliability or response-format
+support for another configured provider. See [AI setup](AI_SETUP.md) for the
+current provider-specific contract.
 
 Native verification requires a connected device and an API URL reachable from
 that device via `--dart-define=SERVER_URL=...`. Android emulator localhost is

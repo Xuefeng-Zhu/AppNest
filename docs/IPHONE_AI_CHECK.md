@@ -1,5 +1,12 @@
 # iPhone AI prompt investigation — 2026-09-24
 
+[Documentation index](README.md) · [Mobile contract](MOBILE_FEATURES.md) · [AI setup](AI_SETUP.md) · [Verification record](VERIFICATION.md)
+
+This is a historical investigation, not a current runtime or device report.
+The job IDs, provider responses, build results, and availability observations
+below belong to 2026-09-24. Consult [AI setup](AI_SETUP.md) for current source
+configuration and [development](DEVELOPMENT.md) for runtime-control rules.
+
 The signed iPhone build included the mobile component contract, but the running
 development backend still served an older contract. Its authenticated template
 catalog listed only Project Hub, Photo Journal, Habit Tracker, Daily Planner,
@@ -10,10 +17,11 @@ The Phone Toolkit example reached the configured AI provider successfully. All
 three responses returned HTTP 200, but the running backend rejected each during
 AppSpec validation. The terminal diagnostic was `Unsupported AppSpec format
 version`. Subsequent creation attempts while this job was running received the
-existing one-generation-at-a-time quota error. This was not a phone text-input
-failure or a missing provider credential.
+then-existing one-generation-at-a-time quota error. Current source permits
+independent users' generations to overlap; the one-active-job-per-user quota
+remains. This was not a phone text-input failure or a missing provider credential.
 
-Using the current source's production provider adapter, the same public Phone
+Using the source's provider adapter at the time, the same public Phone
 Toolkit example passed on its first attempt. The returned definition passed
 `AppSpec.parse` and `validateGeneratedExperience`, with a device-information
 view, flashlight, brightness, keep-awake and haptic controls, two pages, and no
@@ -38,7 +46,7 @@ cases for resuming a failed build at phone width, preserving the handle after a
 network failure, stale and denied draft handling, and publication cleanup.
 Workspace static analysis passed. The signed iOS release build and deep/strict
 code-signature verification passed. Installation could not proceed because the
-paired iPhone was unavailable. The later backend fix is active without requiring
+paired iPhone was unavailable. The later backend fix was active without requiring
 that frontend update. Physical iPhone generation and control behavior remain
 unverified.
 
@@ -59,9 +67,9 @@ starters. Browser retry job 25 still failed after three attempts, ending with
 `Unknown behavior flashlight`. Thus the outdated backend was not the only issue:
 the model sometimes confused native device controls with record behaviors.
 
-The provider contract now explicitly separates those concepts, requires empty
-collections/actions/automations for device-only apps, and includes a compact
-public device-view fragment rather than a starter fallback. Record guidance is
+The correction made the provider contract explicitly separate those concepts,
+require empty collections/actions/automations for device-only apps, and include
+a compact public device-view fragment rather than a starter fallback. Record guidance is
 scoped to apps that store records. Invalid behavior bindings still fail strict
 validation, but diagnostics now identify the action, expected behavior type and
 collection, and explain that phone controls belong in device views. All 81
@@ -75,5 +83,6 @@ preview, flashlight and keep-awake switches changed to on; brightness changed
 from 50% to 60% and **Restore brightness** returned it to 50%. The haptic preview
 button was available and clickable; browser testing does not prove physical
 haptics. Device-information cards were explicitly labeled simulated. The draft
-remains unpublished for review. This establishes the tested browser creation and
-preview flow, not universal generation reliability or native-device acceptance.
+was left unpublished for review. Its current availability was not rechecked.
+This establishes the tested browser creation and preview flow, not universal
+generation reliability or native-device acceptance.

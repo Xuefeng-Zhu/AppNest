@@ -1,12 +1,69 @@
 # Local verification
 
-## Fresh AI creation — 2026-09-22
+[Documentation index](README.md) · [Reproduce checks](DEVELOPMENT.md#verification) ·
+[Requirements](REQUIREMENTS.md)
+
+This is a dated evidence ledger. Counts, local IDs, provider names and screenshots
+belong to the build and environment recorded in each entry. They do not prove
+current runtime availability, provider quality, device behavior or production
+readiness. Documentation edits alone do not rerun these checks.
+
+## Evidence checkpoints
+
+| Date / record | Executed scope | Important limit |
+| --- | --- | --- |
+| [2026-10-07 publication validation](#publication-validation--2026-10-07) | Full verification script: 725 tests, analysis, format and separate-process reminder recovery | Local source snapshot; known architecture findings and CI mismatch remain open |
+| [2026-10-07 architecture review](ARCHITECTURE_REVIEW.md#verification-and-limits) | Static analysis; 81 spec, 259 server and 92 focused renderer tests; eight defect reproductions; live CI inspection | Focused review, not a full verification/build/browser/provider run. Six confirmed defects remain open |
+| [2026-10-07 concurrent generation](REQUIREMENTS.md#concurrent-ai-generation-2026-10-07) | Full verification script: 551 tests, analysis, format and separate-process reminder recovery | Synthetic providers; no live-provider concurrency or load test |
+| [2026-09-24 initial mobile check](MOBILE_FEATURES.md) | 539 tests, analysis, format, restart recovery, Android build and Swift type-checking | Initial iOS build was blocked; the later signed build is recorded separately below |
+| [2026-09-24 iPhone investigation](IPHONE_AI_CHECK.md) | Launcher recovery tests, signed iOS release/signature verification, and connected AI/browser preview after fixes | Later frontend installation could not proceed; physical-device generation and controls remain unverified |
+| [2026-09-23 customization](CUSTOMIZATION.md) | 505 tests, restart recovery, web/Android builds; separate [AI evaluation](CUSTOMIZATION_AI_CHECK.md) | Targeted creation/edit samples; no general success-rate or physical-device claim |
+| [2026-09-23 appearance](APPEARANCE.md) | 346 tests, restart recovery, web build and isolated captures | No connected preview-to-published parity or appearance-specific live-AI acceptance |
+| [2026-09-23 rich components](RICH_COMPONENTS_LIVE_CHECK.md) | Connected browser and authenticated client checks, including private media, forms, summaries, revocation and persistence | Synthetic development records; no native-device, rich-component live-AI or production claim |
+| [2026-09-22 fresh AI creation](AI_CREATION_CHECK.md) | Live browser creation/publication, semantic label edit and synthetic authenticated CRUD; 123 automated tests after fixes | Failures occurred during iteration; two published examples do not establish broad reliability |
+| 2026-09-22 planner and 2026-09-21 baseline, below | Historical local suites, browser captures and restart evidence | Preserve the recorded results separately from later source and known defects |
+
+These checkpoints cover different source revisions and scopes. Do not add their
+test counts together or replace an older result with a newer total. For the
+current suite's commands and exclusions, use [DEVELOPMENT.md](DEVELOPMENT.md#verification).
+The [architecture review](ARCHITECTURE_REVIEW.md) records current known gaps,
+including CI's SDK-resolution failure.
+
+## Publication validation — 2026-10-07
+
+Executed in an isolated publication worktree on 2026-10-07 Pacific time
+(2026-10-08 UTC). The tested source is recorded through
+[`faf1077`](https://github.com/Xuefeng-Zhu/AppNest/commit/faf107710341025f371367e469de7987fc9f2f82),
+including AI creation compilation/repair and numeric-control validation. Local
+credentials, database files, unfinished screenshots and Xcode workspace artifacts
+were excluded from the publication.
+
+`bash scripts/verify.sh` completed with exit code zero:
+
+| Check | Result |
+| --- | --- |
+| Workspace analysis | No issues |
+| Authored formatting | 147 files checked; zero changes |
+| AppSpec | 82 tests passed with `America/Los_Angeles` timezone |
+| Renderer | 205 tests passed |
+| Flutter host | 179 tests passed |
+| Server | 259 tests passed against managed PostgreSQL, concurrency one |
+| Restart recovery | Claimant and owner reminders recovered across independent processes; completed tasks stayed suppressed and duplicate wakeups did not resend |
+
+Total: **725 tests**, plus the restart recovery checks. Test Insights was disabled
+in the isolated configuration; PostgreSQL and reminder recovery ran successfully.
+No release build, connected browser flow, live-provider call, physical-device
+check or deployment was performed for this publication. The
+[architecture findings](ARCHITECTURE_REVIEW.md#confirmed-findings) and committed
+CI SDK mismatch remain open; this passing suite does not resolve those cases.
+
+## Historical fresh AI creation — 2026-09-22
 
 Real browser chat created and published **Plant Corner** and **Trip Kit** without selecting templates. Both have custom fields, app-owned tabs, dedicated forms/details and status summaries. Verified preview isolation, live create/edit, workflow transitions, mixed status proportions and a semantic AI label edit with exact hash evidence for preservation. Generation failures led to bounded parsing, prompt, edit-context and renderer fixes; the process was not uniformly successful on the first attempt. See [AI_CREATION_CHECK.md](AI_CREATION_CHECK.md) for prompts, job evidence, screenshots and limits.
 
 After these fixes, `scripts/verify.sh` passed **123 tests** (29 spec, 40 renderer, 25 host, 29 server/provider), both process-restart scenarios, clean analysis and formatting. The release web build and Wasm compatibility dry run passed. The earlier planner-specific result below remains historical evidence of that implementation stage.
 
-## Rich personal mini-apps — 2026-09-22
+## Historical rich personal mini-apps — 2026-09-22
 
 The Daily Planner release adds declarative pages/tabs, dedicated details/forms, authenticated locations, grouped summaries and personal inbox reminders. Source and behavior are documented in [MINI_APPS.md](MINI_APPS.md).
 
@@ -65,9 +122,9 @@ Serverpod/Dart MCP tools were unavailable. Official CLI generation, isolated tes
 
 ## Historical baseline — 2026-09-21
 
-The results below describe the earlier release. They are retained as historical evidence, not proof of the new planner's live browser flow. The earlier “no provider” and “no host tests” notes no longer describe current source: README records a separate 2026-09-22 live AI generation check, and the host now has automated navigation/builder tests.
+The results below describe the earlier release. They are retained as historical evidence, not proof of later features. The earlier “no provider” and “no host tests” notes no longer describe current source: [the AI creation check](AI_CREATION_CHECK.md) records a separate 2026-09-22 live generation check, and the host now has automated navigation/builder tests.
 
-## Executed results
+### Executed results at the 2026-09-21 baseline
 
 | Command / check | Actual result |
 | --- | --- |
@@ -86,7 +143,7 @@ The results below describe the earlier release. They are retained as historical 
 
 The live demo reported app 35 / version 36 / record 41 on its first successful run. IDs are local evidence, not API constants. Additional repeat demos intentionally create fresh synthetic apps.
 
-## Browser evidence
+### Browser evidence at the 2026-09-21 baseline
 
 Inspected the actual Flutter release build in the Codex browser at 1280×720 and 390×844:
 
@@ -100,7 +157,7 @@ Inspected the actual Flutter release build in the Codex browser at 1280×720 and
 
 Screenshots: [desktop home](evidence/home-desktop.png), [mobile home](evidence/home-mobile.png), [desktop runtime](evidence/runtime-desktop.png), [desktop builder](evidence/builder-desktop.png), [mobile builder](evidence/builder-mobile.png), [mobile runtime](evidence/runtime-mobile.png). Captures contain synthetic local data. Some were taken before final explanatory-copy refinements; the underlying flows were unchanged.
 
-## Design comparison
+### Design comparison at the 2026-09-21 baseline
 
 The frontend design skills guided a calm launcher rather than a permanent chatbot. Compared the generated [concept](design/launcher-concept.png) and real screenshots visually:
 
@@ -110,7 +167,11 @@ The frontend design skills guided a calm launcher rather than a permanent chatbo
 4. Preserved the prominent description input, app tiles, small approved icon palette and template rows. Actual record counts/layout respond to real data rather than matching fictional concept counts.
 5. Builder/runtime use the same restrained spacing and cards; the desktop preview is dominant, while mobile tabs avoid squeezing three columns into a phone. Full-width record cards and local-time date formatting were corrected during visual inspection.
 
-## Not executed / remaining gates
+### Not executed / remaining gates at the 2026-09-21 baseline
+
+These were the unverified layers on that date. Later entries above establish
+some local AI, host-test, private-image and Android-build evidence; production,
+full accessibility and physical-device acceptance remain separate gates.
 
 - Credentialed live AI generation and AI additive editing: no provider secrets configured. Template/manual mode and fake-provider failure tests are not substitutes for this gate.
 - Public/cloud deployment, production email/Redis/shared events, hosted Insights, external storage, native signed builds and device installation.

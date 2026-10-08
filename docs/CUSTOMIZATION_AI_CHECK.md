@@ -1,6 +1,20 @@
 # Live customization evaluation — 2026-09-23
 
-The approved Nebius checks are complete. Latest results across targeted reruns: **5/8 creations and 8/8 edits passed**. Five edits used saved AI-generated apps; three used explicitly selected synthetic templates after creation failed. All eight latest edits passed on the first attempt, in 2.7–5.8 seconds. **Five of eight AI-generated definition-and-edit pairs are validated.**
+[Documentation index](README.md) · [Current AI setup](AI_SETUP.md) ·
+[Customization contract](CUSTOMIZATION.md)
+
+This is a historical provider evaluation, not a current benchmark. Model
+selection, request counts, timings, assertions and build results describe the
+2026-09-23 runs. Current configuration and compiler behavior are documented in
+[AI setup](AI_SETUP.md); outstanding review findings are in the
+[architecture review](ARCHITECTURE_REVIEW.md).
+
+The approved Nebius checks completed with **5/8 creations and 8/8 edits passing**
+across the latest targeted reruns on that date. Five edits used saved
+AI-generated apps; three used explicitly selected synthetic templates after
+creation failed. All eight latest edits passed on the first attempt, in
+2.7–5.8 seconds. **Five of eight AI-generated definition-and-edit pairs were
+validated.**
 
 The configured model was `nvidia/Nemotron-3-Ultra-550b-a55b` on the approved `us-central1` Nebius endpoint. The recorded batches made 84 provider requests including retries and checks after fixes. No user records were sent, no apps were published, and no development server was started.
 
@@ -15,11 +29,17 @@ The configured model was `nvidia/Nemotron-3-Ultra-550b-a55b` on the approved `us
 | Focus — duration | Fail; 38.7s; 3 attempt(s) | Pass; 5.7s; 1 attempt(s) | Explicit template |
 | Focus — clock style | Pass; 35.7s; 3 attempt(s) | Pass; 3.1s; 1 attempt(s) | AI-generated app |
 
-## Remaining creation failures
+## Creation failures remaining at that check
 
-The notes/Source, reminder-timing, and focus-duration creation cases still exhausted their three-attempt bounds. Across those attempts, failures included missing multiline controls, incorrect action/form links, missing declared capabilities, unnecessary record data in a utility app, and truncated output. Invalid candidates were rejected. Creation reliability remains insufficient for a dependable describe-and-use promise.
+The notes/Source, reminder-timing, and focus-duration creation cases exhausted
+their three-attempt bounds. Across those attempts, failures included missing
+multiline controls, incorrect action/form links, missing declared capabilities,
+unnecessary record data in a utility app, and truncated output. Invalid
+candidates were rejected. At that point, creation reliability did not support a
+dependable describe-and-use promise. Later source changes, including
+creation-only capability closure, do not by themselves reverify these scenarios.
 
-## Changes verified
+## Changes verified in the recorded runs
 
 - Edit requests now use a typed semantic-patch schema in both the prompt and response format; full-app schema instructions are limited to creation.
 - `AddField.viewIds` binds a server-allocated field to forms/details atomically, including implicit stepped forms. Manual customization uses the same operation.
@@ -27,7 +47,7 @@ The notes/Source, reminder-timing, and focus-duration creation cases still exhau
 - Retry diagnostics identify the actual missing configuration and reminder recipient requirements.
 - The evaluator checks reachable controls, exact requested features, preserved IDs/settings, and valid initial reminder state. It retains synthetic definitions/responses for inspection.
 
-## Evidence and boundaries
+## Dated evidence and boundaries
 
 The [initial run](evidence/customization/provider-eval-initial.json) accepted 5/8 creations and 0/5 attempted edits under weaker feature checks. The [first strict run](evidence/customization/provider-eval-round2.json) accepted 3/8 creations and 2/3 attempted edits. The [creation recheck](evidence/customization/provider-eval-create-recheck.json), [saved-calendar edit recheck](evidence/customization/provider-eval-edit-recheck.json), and [explicit template edit checks](evidence/customization/provider-eval-template-edits.json) support the latest table. These batches used evolving assertions and targeted fixes; their percentages are not directly comparable.
 

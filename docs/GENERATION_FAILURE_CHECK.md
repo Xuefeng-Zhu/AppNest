@@ -1,5 +1,16 @@
 # Planner generation failure — 2026-09-23
 
+[Documentation index](README.md) · [Current AI setup](AI_SETUP.md) ·
+[Current creation flow](CREATION_FLOW.md)
+
+This is a historical failure investigation and verification record. The provider
+configuration, response-format behavior and test counts below belong to the
+2026-09-23 build. Current edits use a typed patch schema; guidance uses a JSON
+object, and one scoped development adapter omits provider response-format
+enforcement. See [AI setup](AI_SETUP.md#provider-request-contract) for those
+current distinctions. The [architecture review](ARCHITECTURE_REVIEW.md) records
+outstanding defects; this historical investigation does not mark them fixed.
+
 ## Confirmed failure
 
 The user's browser showed a failed new-app request:
@@ -16,7 +27,7 @@ provider response format. Direct, bounded checks against the configured
 development provider showed that JSON-object mode was accepted, but could still
 return an invalid AppSpec root or run out of output tokens during repair.
 
-## Changes
+## Changes made during that investigation
 
 - New-app creation supplies a provider-compatible AppSpec schema, with an
   explicit unsupported-response alternative. Instructions distinguish an app
@@ -53,10 +64,11 @@ return an invalid AppSpec root or run out of output tokens during repair.
 
 The response-format API follows [Nebius's structured-output documentation](https://docs.tokenfactory.nebius.com/ai-models-inference/json).
 The sampling parameter follows [Nebius's chat completion API](https://docs.tokenfactory.nebius.com/api-reference/inference/create-chat-completion).
-Other configured providers must support the requested response-format modes;
-there is no silent downgrade to unconstrained generation on rejection.
+At the time of the check, other configured providers needed to support the
+requested response-format modes; rejection did not silently downgrade generation.
+The current scoped OpenRouter adaptation is documented in [AI setup](AI_SETUP.md).
 
-## Verification
+## Verification recorded on 2026-09-23
 
 - Workspace analysis passed. Final provider analysis and formatting passed.
 - Flutter suite: **135 tests passed**, including visible failure explanations,
@@ -72,7 +84,7 @@ there is no silent downgrade to unconstrained generation on rejection.
 - Release Flutter web build passed and was written to the local server's
   `web/app` directory. Loading that rebuilt UI in the user's browser remains
   unverified.
-- The final production request builder, with no test-only request overrides,
+- The final application request builder, with no test-only request overrides,
   generated a valid planner through the configured Nebius
   `nvidia/Nemotron-3-Ultra-550b-a55b` provider on attempt **2 of 3**. Attempt 1 was
   rejected as truncated at 8,000 tokens; attempt 2 returned a complete definition
@@ -97,5 +109,5 @@ synthetic definition bindings were inspected locally to diagnose failures.
 Serverpod and Dart MCP tools were unavailable. No development server restart or
 server-log check was performed. The running backend must load these changes
 before a browser retry can exercise them; that runtime state has not been
-verified. An isolated provider probe does not establish recovery of the user's
-existing browser draft.
+verified in that check. An isolated provider probe does not establish recovery
+of the user's existing browser draft.

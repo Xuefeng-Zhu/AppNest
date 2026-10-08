@@ -1,6 +1,14 @@
 # Requirements and acceptance evidence
 
-Status meanings: **tested** = locally executed evidence; **implemented** = source present but a listed external/environment layer is unverified; **deferred** = intentionally unavailable, not a fake success path.
+[Documentation index](README.md) · [Architecture](../ARCHITECTURE.md) ·
+[Verification records](VERIFICATION.md)
+
+Status meanings: **tested** = locally executed evidence at a recorded checkpoint;
+**implemented** = source present but a listed external/environment layer is
+unverified; **deferred** = intentionally unavailable. A historical passing check
+does not establish current acceptance or cover the open defects below. Use
+[the development guide](DEVELOPMENT.md#verification) to reproduce the current
+verification entrypoint.
 
 | Acceptance requirement | Status | Evidence / qualification |
 | --- | --- | --- |
@@ -8,23 +16,42 @@ Status meanings: **tested** = locally executed evidence; **implemented** = sourc
 | 2. App/record/invitation/notification/media tenant isolation | Tested locally | Real-DB authorization, bound invitations, private-media authorization and cross-app reference rejection |
 | 3. Member cannot grant rights, edit counters/protected workflow | Tested | Policy tests and typed action handlers; generic patch rejects protected input |
 | 4. 20 concurrent final-place attempts → one allocation | Tested | Independent committed sessions/transactions, not a single rollback wrapper |
-| 5. Identical command retry returns stored outcome; changed input fails | Tested | Receipt regression including retry after publication |
-| 6. Cancellation and transaction rollback preserve invariants | Tested | Repeated release, failed capacity/create transaction, business/outbox checks |
+| 5. Identical command retry returns stored outcome; changed input fails | Tested at service boundary; client gap open | Same-key receipt regression including retry after publication. A second UI Save currently allocates a new key and can duplicate an ambiguously completed create |
+| 6. Capacity release and transaction rollback preserve invariants | Tested | Repeated release, failed capacity/create transaction, business/outbox checks; stream cancellation is a separate open defect |
 | 7. Preview cannot reach live writes/schedules | Tested | Network-free adapter package contract; independent preview mutation test; synthetic UI labels |
 | 8. Optional additions preserve records/claims/IDs | Tested | Spec compatibility + PostgreSQL publication test + actual endpoint demo + browser manual publish |
 | 9. Stale drafts/jobs and safe publication retries | Tested | Expected-version/hash/receipt and obsolete generation/manual mutation regressions |
 | 10. Interruption between committed run and scheduling recovers | Tested | Separate persistent PostgreSQL database and two actual processes; repeat wakeup → one durable notification |
-| 11. Rule/date/archive/grant changes suppress stale work | Tested | Execution-state tests plus rule-generation explicit re-enrollment regression |
-| 12. Reconnect/repeated invalidations recover state | Tested, bounded | Renderer reconnect/resume/duplicate-event test; stream authorization rechecked; live server restart observed. No multi-instance/load test |
-| 13. AI failure does not break apps; template mode explicit | Tested; live generation verified | Malformed output bounded to three attempts; existing app CRUD works; template mode remains explicit without credentials. Nebius Nemotron live generation reached a validated, unpublished preview on 2026-09-22; credentialed additive editing remains unverified |
+| 11. Rule/date/archive/grant changes suppress stale work | Tested, with lifecycle gaps | Execution-state tests and explicit re-enrollment regression. Reminder retry deadlines are not enforced; revoking an assignee can block unrelated edits |
+| 12. Reconnect/repeated invalidations recover state | Tested, bounded; defects open | Reconnect/resume/duplicate-event tests and historical live server restart. Legacy error handling can retain private UI state; idle endpoint cancellation can stall. No multi-instance/load acceptance |
+| 13. AI failure does not break apps; template mode explicit | Tested; dated live evidence | Bounded attempts, preserved prior apps, explicit template mode. Historical browser creation, publication, CRUD and semantic label editing are recorded in [AI_CREATION_CHECK.md](AI_CREATION_CHECK.md); broader creation/edit outcomes in [CUSTOMIZATION_AI_CHECK.md](CUSTOMIZATION_AI_CHECK.md) |
 | 14. Mobile/desktop, keyboard and large text | Tested, bounded | Renderer 390×844/1440×1000 at 150%; browser 1280×720 and 390×844; Tab focus and mobile builder publication. Full accessibility audit deferred |
 
+## Open acceptance gaps — architecture review 2026-10-07
+
+The [review](ARCHITECTURE_REVIEW.md#confirmed-findings) reproduced six defects:
+CI fails before its checks because of SDK drift; repeated Save can duplicate a
+committed create; legacy authorization errors can retain or restore private UI
+state; idle event-stream cancellation can stall; reminder retry deadlines are
+ignored; and revoked assignees can block unrelated record changes. The receipt,
+authorization and durable-work designs remain in place, but these boundary cases
+prevent treating the table as blanket acceptance. No fixes are claimed here.
+
+That review ran static analysis, 81 spec tests, 259 server tests and 92 focused
+renderer tests. Eight additional invariant checks reproduced defects rather
+than passing. It did not run the full verification script, a new release build,
+restart smoke, live provider/browser flow or device acceptance. Those results
+are distinct from the earlier full-suite checkpoints below.
+
 ## Vertical slices
+
+These describe delivered scope and its recorded evidence, subject to the open
+gaps above.
 
 - **A tested:** official Serverpod 4 scaffold; real auth; PostgreSQL dynamic serialization spike; pure-Dart AppSpec/schema; shared renderer; persistent CRUD.
 - **B tested:** workspace + explicit app grants; hashed invitations; capacity claims; idempotency/revisions; typed streams; concurrency.
 - **C tested:** atomic outbox; recurring reconciler; Future Calls; actual in-app reminder, run history and process restart proof.
-- **D implemented/tested, with live generation verified:** recoverable jobs, bounded server-only provider adapter, isolated preview, manual/semantic edits, exact review/publication, safe evolution. Nebius Nemotron creation was verified on 2026-09-22; credentialed additive editing remains unverified.
+- **D implemented/tested, with dated live evidence:** recoverable jobs, bounded server-only provider adapter, isolated preview, manual/semantic edits, exact review/publication and safe evolution. Browser creation/publication and semantic label editing were verified on 2026-09-22; the later targeted evaluation records broader outcomes without establishing a general reliability rate.
 - **E tested with limitations:** calm launcher, bounded tile request, workspace switcher, templates/inbox, shell/sharing/activity, manual field/label/choice/view order, remix/unpin/archive, responsive layouts and repeatable seed/demo.
 
 ## Additional scope
@@ -52,7 +79,7 @@ Automated coverage includes canonical compatibility, component bindings, more
 than 100-record aggregation, DST buckets, form submission and conflict behavior,
 private-media quotas/references/revocation/cleanup, actual HTTP upload transport,
 and concurrent media requests against ephemeral PostgreSQL. Renderer captures
-are isolated synthetic evidence. The development database has the media
+are isolated synthetic evidence. At that checkpoint, the development database had the media
 migrations, and the updated server and release web app were activated locally.
 Connected checks passed for authenticated creation/publication, browser image
 upload, final-only multi-step submission, image/record reload persistence,
@@ -64,7 +91,7 @@ See [component behavior](RICH_COMPONENTS.md) and the
 checks do not establish native-device, rich-component live-AI, or production
 acceptance.
 
-The central **template/manual** demo is verified end to end. Real natural-language generation through Nebius Nemotron also created and published Plant Corner and Trip Kit, with authenticated live record editing, workflow transitions and summary counts. A credentialed semantic label edit preserved the rest of the definition exactly. See [the AI creation check](AI_CREATION_CHECK.md). AI-authored additive field changes and the complete AI sharing/reminder sequence remain separate unverified layers.
+At that checkpoint, the central **template/manual** demo was verified end to end. Real natural-language generation through Nebius Nemotron also created and published Plant Corner and Trip Kit, with authenticated live record editing, workflow transitions and summary counts. A credentialed semantic label edit preserved the rest of the definition exactly. See [the AI creation check](AI_CREATION_CHECK.md). The later [customization evaluation](CUSTOMIZATION_AI_CHECK.md) records additional edits; neither record establishes the complete AI sharing/reminder sequence or current provider availability.
 
 ### App appearance and page composition (2026-09-23)
 
@@ -97,12 +124,13 @@ protected by the shared compatibility and authenticated publication contracts.
 
 Verification passed: 505 tests, analysis/formatting, PostgreSQL integration and
 two-process reminder recovery, plus web and Android release compilation. iOS
-compilation is blocked by an uninstalled Xcode platform component. Live AI checks
+compilation was blocked by an uninstalled Xcode platform component. Live AI checks
 passed 5/8 creation scenarios and all 8 edit scenarios on their latest checks;
 three edits used explicit templates because creation failed. AI creation still
-needs reliability work. Current connected runtime and physical-device
-interaction remain unverified. Phone actions/data access and background alerts
-are deferred. See [the live AI evaluation](CUSTOMIZATION_AI_CHECK.md).
+needs reliability work. At that checkpoint, connected acceptance for these
+customization changes and physical-device interaction remained unverified.
+Phone capabilities were added in the subsequent mobile milestone below;
+background alerts remain deferred. See [the live AI evaluation](CUSTOMIZATION_AI_CHECK.md).
 See [the customization contract and execution record](CUSTOMIZATION.md).
 
 ### Mobile capabilities (2026-09-24)
@@ -112,10 +140,14 @@ brightness, keep-awake and haptic controls, manual/AI authoring, Phone Toolkit,
 and per-mini-app local consent. Preview controls are synthetic; browser/desktop
 show unsupported-platform guidance. Device values never reach the backend or AI.
 
-Verification: 539 tests, analysis/formatting and reminder restart recovery passed.
-Android release compilation and direct iOS Swift type-checking passed. Full iOS
-build/install needs the missing Xcode iOS 26.5 platform. Physical-device and
-connected app acceptance remain unverified. See [mobile features](MOBILE_FEATURES.md).
+Initial verification: 539 tests, analysis/formatting and reminder restart recovery
+passed. Android release compilation and direct iOS Swift type-checking passed;
+the full iOS build was initially blocked by the missing Xcode iOS 26.5 platform.
+Later that day, the signed iOS build and signature verification passed, and Phone
+Toolkit reached a connected browser AI preview after fixes. Installation of the
+later frontend update could not proceed because the phone was unavailable.
+Physical-device generation and controls remain unverified. See
+[mobile features](MOBILE_FEATURES.md) and the [iPhone investigation](IPHONE_AI_CHECK.md).
 
 ### Concurrent AI generation (2026-10-07)
 
@@ -131,4 +163,5 @@ separate-process reminder restart smoke against embedded PostgreSQL. Regressions
 calls open simultaneously, race same-user enqueue requests, reject duplicate and
 late worker results, and recover multiple missed wakeups. Provider responses in
 these tests are synthetic; no live-provider concurrency or load test was run.
-The server must restart to load the updated worker-pool configuration.
+The server needed a restart to load the updated worker-pool configuration;
+this record does not confirm the configuration of a currently running process.

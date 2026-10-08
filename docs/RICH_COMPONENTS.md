@@ -1,5 +1,7 @@
 # Rich component library
 
+[Documentation index](README.md) · [Mini-app navigation](MINI_APPS.md) · [Visual editing](VISUAL_EDITING.md) · [Development workflow](DEVELOPMENT.md)
+
 AppNest's shared renderer supports tables, calendars, timelines, charts, metrics,
 private images, formatted content, richer forms, checklists, and draggable
 workflow boards. These are declarative platform components. They use the same
@@ -45,20 +47,35 @@ Legacy definitions retain their existing renderer and hashes.
 | `imageCards`, `gallery` | Bind an image field using `options.imageFieldId`, with optional text `captionFieldId`. Each gallery item is a record. |
 | `banner` | Collection-free title, body, approved tone, optional private image with description, and optional tab destination. |
 | `richText` | Collection-free restricted Markdown: headings, paragraphs, emphasis, lists, quotes, and inline code. No executable HTML or external embeds. |
-| `form` | Optional typed `controls` and ordered `steps`. Fields are validated before advancing; one create/patch command saves the completed form. |
+| `form` | Optional typed `controls` and ordered `steps`. Fields are validated before advancing; the final Save sends one create/patch command per attempt. |
 | `checklist` | Boolean field plus a patch action, or a two-state workflow with explicit checked/unchecked values and reversible transitions. |
 | `board` | Optional `draggable: true` plus `moveActionId`; only approved legal workflow transitions accept a move. The Move menu provides an alternative to dragging. |
 
 Form controls include text/multiline, checkbox/switch, select/segmented choices,
-slider/stepper/rating, date-time, and image upload. Numeric ranges describe the
-control; they do not narrow the collection's data model. Previously stored
-out-of-range numbers remain visible and editable without coercion. Optional
-fields preserve their unset state and provide a clear action.
+slider/stepper/rating, date-time, and image upload. Sliders and steppers require
+finite `min`, `max`, and positive `step`; integer fields require integral bounds
+and steps. Ratings use integers from 1 to 5 and accept no custom bounds.
+
+The form rejects newly entered or changed values outside the control's range,
+including before advancing a step. An unchanged, previously stored out-of-range
+value remains visible and survives an unrelated edit; using a control can
+correct it without silently clamping it on display. These form ranges do not
+add collection-level constraints to other authorized writes. Optional fields
+preserve their unset state and provide a clear action.
 
 Multi-step forms retain all local input and the existing unsaved-change guard.
 Intermediate steps never create records. Board/checklist commands retain record
 revisions, idempotency receipts, authorization, and transactional audit/outbox
 writes. Reconnection does not replay a failed business command.
+
+An ambiguous response is a separate case: if a create committed but its reply
+was lost, pressing Save again currently allocates another command key and can
+create a duplicate. See the open
+[command retry finding](ARCHITECTURE_REVIEW.md#2-p2--save-retry-can-duplicate-a-committed-create).
+Legacy definitions also have an open
+[UI invalidation finding](ARCHITECTURE_REVIEW.md#3-p2--legacy-authorization-failure-leaves-or-restores-private-ui-state)
+after access errors. The server's receipt and authorization checks do not by
+themselves resolve these client lifecycle issues.
 
 ## Aggregation contract
 
@@ -117,9 +134,12 @@ contain image bytes, filenames, storage paths, or download URLs. Previews keep
 sample uploads in memory only; the builder host can inject already-authorized
 banner bytes without granting the preview adapter network or storage access.
 
-## Verification and runtime activation
+## Historical verification and runtime activation
 
-Executed against the working tree on 2026-09-23 (UTC):
+Executed against the working tree on 2026-09-23 (UTC). The counts and activation
+details below describe that run, not a check of today's runtime or GitHub CI.
+Use [verification](VERIFICATION.md) for the wider evidence record and
+[development](DEVELOPMENT.md) for the current workflow.
 
 | Check | Result |
 | --- | --- |

@@ -1,5 +1,7 @@
 # App appearance and page layouts
 
+[Documentation index](README.md) · [Mini-app navigation](MINI_APPS.md) · [Visual editing](VISUAL_EDITING.md) · [Component contract](RICH_COMPONENTS.md)
+
 AppNest mini-apps can use a coordinated Clean, Editorial or Playful style,
 custom accent colors, heading typography, spacing and corners. Pages can stack
 sections, pair them in two columns, or feature a full-width first section.
@@ -7,8 +9,9 @@ These are validated presentation choices in the existing declarative app
 definition. They do not generate executable UI code or change business rules.
 
 Status: **implemented; automated integration checks and web build passed on
-2026-09-23 UTC**. The evidence below does not establish connected browser,
-live-provider, native-device or production acceptance for this release. Earlier
+2026-09-23 UTC**. This is a dated evidence snapshot. The evidence below does not
+establish connected browser, live-provider, native-device or production
+acceptance for this release. Earlier
 [rich-component verification](RICH_COMPONENTS_LIVE_CHECK.md) remains separate.
 
 ## Customize an app
@@ -138,6 +141,11 @@ revisions, queries, actions, permission presets, automation rules or media
 authorization. Publication continues to use candidate/review hashes and the
 existing compatibility checks. Preview records never become live records.
 
+Appearance does not change the live record-command retry path or the separate
+legacy renderer lifecycle. Their open ambiguous-Save and access-error findings
+are described in the [architecture review](ARCHITECTURE_REVIEW.md). Passing
+presentation tests does not establish that those client issues are fixed.
+
 The source of truth is `packages/appnest_spec/lib/src/appearance.dart`, the
 typed page/app models and rich-component validators. The renderer resolves
 default tokens in `packages/appnest_renderer/lib/src/appearance.dart`; the
@@ -147,7 +155,7 @@ package's `tool/export.dart` after contract changes. Do not hand-edit Serverpod
 generated models or client code for these presentation settings. App definitions
 use their existing persisted JSON; no new database model is introduced.
 
-## Verification status
+## Historical verification status
 
 Executed on 2026-09-23 UTC:
 
