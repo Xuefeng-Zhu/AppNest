@@ -8,10 +8,15 @@ import '../../generated/protocol.dart';
 import '../../generated/future_calls.dart';
 import '../runtime/access.dart';
 import '../builder/provider.dart';
+import '../builder/creation_compiler.dart';
 import '../builder/generation_quality.dart';
 import '../builder/generation_requirements.dart';
 import '../builder/repair_bindings.dart';
 import '../media/media.dart';
+
+class _ExpiredGenerationLease implements Exception {
+  const _ExpiredGenerationLease();
+}
 
 class Worker {
   /// Delivery conditions deliberately do not participate in occurrence identity:
@@ -396,6 +401,10 @@ class Worker {
   });
   static const _repairUsageKey = '_appnestRepair';
   static const _failureUsageKey = '_appnestFailureCategory';
+  static const _repairDiagnosticBytes = 8192;
+  // The free development provider can spend 90 seconds awaiting a response.
+  // Validation/commit still need headroom, and an expired result is fenced below.
+  static const _generationLease = Duration(seconds: 120);
 
   /// Named calls are wakeups, not deduplication keys. The job lease and revision
   /// checks are authoritative even when the scheduler delivers duplicates.
@@ -483,7 +492,17 @@ class Worker {
     _generationUsage(source)..remove(_repairUsageKey),
   );
 
-  static String? _rejectedOutput(
+  static String _boundedRepairDiagnostic(String value) {
+    final bytes = utf8.encode(value);
+    if (bytes.length <= _repairDiagnosticBytes) return value;
+    var end = _repairDiagnosticBytes;
+    while ((bytes[end] & 0xc0) == 0x80) {
+      end--;
+    }
+    return utf8.decode(bytes.sublist(0, end));
+  }
+
+  static Map<String, dynamic>? _repairContext(
     GenerationJob job,
     AppDraft draft,
     AppSpec base,
@@ -498,7 +517,9 @@ class Worker {
         repair['baseCandidateHash'] != draft.candidateHash ||
         repair['baseVersionId'] != draft.baseVersionId ||
         repair['mode'] != job.mode ||
-        repair['attempt'] != job.attempts - 1) {
+        repair['attempt'] is! int ||
+        (repair['attempt'] as int) < 1 ||
+        (repair['attempt'] as int) >= job.attempts) {
       return null;
     }
     final output = repair['output'];
@@ -507,7 +528,28 @@ class Worker {
         utf8.encode(output).length > Limits.definitionBytes) {
       return null;
     }
-    return output;
+    // Older persisted context did not store its diagnostic. It is safe to use
+    // the job diagnostic only while that rejection is the immediately prior
+    // attempt; after a transport error it no longer describes the rejected text.
+    final diagnostics =
+        repair['diagnostics'] ??
+        (repair['attempt'] == job.attempts - 1 ? job.diagnostics : null);
+    if (diagnostics is! String ||
+        diagnostics.isEmpty ||
+        utf8.encode(diagnostics).length > _repairDiagnosticBytes) {
+      return null;
+    }
+    return {
+      'jobId': job.id,
+      'draftId': draft.id,
+      'mutation': job.mutation,
+      'baseCandidateHash': base.hash,
+      'baseVersionId': draft.baseVersionId,
+      'mode': job.mode,
+      'attempt': repair['attempt'],
+      'output': output,
+      'diagnostics': diagnostics,
+    };
   }
 
   static Future<void> generate(
@@ -556,7 +598,7 @@ class Worker {
       j.status = 'generating';
       j.attempts++;
       j.leaseGeneration++;
-      j.leaseUntil = clock().add(const Duration(seconds: 90));
+      j.leaseUntil = clock().add(_generationLease);
       j.updatedAt = clock();
       await GenerationJob.db.updateRow(s, j, transaction: tx);
       return (j, d);
@@ -568,6 +610,10 @@ class Worker {
     String? error;
     String? errorKind;
     String? baseCandidateHash;
+    Map<String, dynamic>? repairContext;
+    CompiledGeneratedCreation? compilation;
+    bool? retryable;
+    Duration? retryAfter;
     try {
       final ai = provider ?? ChatCompletionProvider.configured(s);
       if (ai == null) {
@@ -578,18 +624,24 @@ class Worker {
       }
       final base = AppSpec.parse(draft.candidateJson);
       baseCandidateHash = base.hash;
+      repairContext = _repairContext(job, draft, base);
       result = await ai.generate(
         job.requestText,
         base,
         editing: job.mode == 'edit',
-        diagnostics: job.diagnostics.isEmpty ? [] : [job.diagnostics],
-        rejectedOutput: _rejectedOutput(job, draft, base),
+        diagnostics: repairContext != null
+            ? [repairContext['diagnostics'] as String]
+            : job.diagnostics.isEmpty
+            ? []
+            : [job.diagnostics],
+        rejectedOutput: repairContext?['output'] as String?,
       );
       await s.db.unsafeExecute(
-        'UPDATE nest_generation SET status=\'validating\' WHERE id=@id AND "leaseGeneration"=@lease',
+        'UPDATE nest_generation SET status=\'validating\' WHERE id=@id AND "leaseGeneration"=@lease AND "leaseUntil">@now',
         parameters: QueryParameters.named({
           'id': id,
           'lease': job.leaseGeneration,
+          'now': clock(),
         }),
       );
       final output = parseAiOutput(result.text);
@@ -612,7 +664,11 @@ class Worker {
         if (errors.isNotEmpty) throw SpecException(errors.join(' '));
       } else {
         try {
-          candidate = AppSpec.parse(jsonEncode(output));
+          compilation = compileGeneratedCreation(
+            jsonEncode(output),
+            rawOutput: result.text,
+          );
+          candidate = compilation.spec;
         } on SpecException catch (error) {
           // Preserve strict rejection and the authored bytes. A malformed
           // primary/form route can hide missing edit capabilities and invalid
@@ -657,6 +713,8 @@ class Worker {
     } on AiResponseException catch (e) {
       error = e.message;
       errorKind = e.kind;
+      retryable = e.retryable;
+      retryAfter = e.retryAfter;
     } on SpecException catch (e) {
       error = e.message;
       errorKind = 'spec_validation';
@@ -672,96 +730,145 @@ class Worker {
       error = 'Generation could not validate the response. Return a complete object matching the AppSpec schema.';
       errorKind = 'unexpected';
     }
-    await s.db.transaction((tx) async {
-      final app = await MiniApp.db.findFirstRow(
-            s,
-            where: (t) => t.id.equals(job.appId),
-            transaction: tx,
-            lockMode: LockMode.forUpdate,
-          ),
-          j = await GenerationJob.db.findById(s, id, transaction: tx),
-          d = await AppDraft.db.findById(s, job.draftId, transaction: tx);
-      if (j == null || j.leaseGeneration != job.leaseGeneration) return;
-      final stale =
-          app == null ||
-          app.archived ||
-          d == null ||
-          d.activeJobId != id ||
-          d.mutation != job.mutation ||
-          d.candidateHash != draft.candidateHash ||
-          d.baseVersionId != app.activeVersionId ||
-          !await hasAccess(s, app, job.actorId, tx, builder: true);
-      if (!stale && candidate != null && error == null) {
-        try {
-          await Media.syncDefinition(
-            s,
-            Access(app, 'builder'),
-            candidate,
-            tx,
-            draftId: d.id,
-          );
-        } on NestError {
-          error = 'The generated definition references an unavailable image. Preserve existing image references or omit new image references.';
-          errorKind = 'media_reference';
+    try {
+      await s.db.transaction((tx) async {
+        final app = await MiniApp.db.findFirstRow(
+              s,
+              where: (t) => t.id.equals(job.appId),
+              transaction: tx,
+              lockMode: LockMode.forUpdate,
+            ),
+            j = await GenerationJob.db.findById(s, id, transaction: tx),
+            d = await AppDraft.db.findById(s, job.draftId, transaction: tx);
+        if (j == null ||
+            j.leaseGeneration != job.leaseGeneration ||
+            !(j.leaseUntil?.isAfter(clock()) ?? false)) {
+          return;
         }
-      }
-      j.status = stale
-          ? 'stale'
-          : error != null
-          ? (j.attempts >= Limits.generationAttempts ||
-                    errorKind == 'unsupported'
-                ? 'failed'
-                : 'queued')
-          : 'preview ready';
-      j.diagnostics = error ?? '';
-      j.provider = result?.provider;
-      j.model = result?.model;
-      // Provider metadata cannot supply or retain our private repair context.
-      final usage = Map<String, dynamic>.from(result?.usage ?? {})
-        ..remove(_repairUsageKey)
-        ..remove(_failureUsageKey);
-      if (errorKind != null) {
-        usage[_failureUsageKey] = _safeFailureCategory(errorKind);
-      }
-      final output = result?.text;
-      if (j.status == 'queued' &&
-          {
-            'output_json',
-            'output_shape',
-            'spec_validation',
-            'value_format',
-            'media_reference',
-          }.contains(errorKind) &&
-          baseCandidateHash != null &&
-          output != null &&
-          output.isNotEmpty &&
-          utf8.encode(output).length <= Limits.definitionBytes) {
-        usage[_repairUsageKey] = {
-          'jobId': j.id,
-          'draftId': draft.id,
-          'mutation': job.mutation,
-          'baseCandidateHash': baseCandidateHash,
-          'baseVersionId': draft.baseVersionId,
-          'mode': job.mode,
-          'attempt': j.attempts,
-          'output': output,
-        };
-      }
-      j.usageJson = jsonEncode(usage);
-      j.leaseUntil = null;
-      j.nextAttemptAt = clock().add(Duration(seconds: 1 << j.attempts));
-      j.updatedAt = clock();
-      if (!stale && candidate != null && error == null) {
-        d.candidateJson = candidate.canonical;
-        d.candidateHash = candidate.hash;
-        d.updatedAt = clock();
-        await AppDraft.db.updateRow(s, d, transaction: tx);
-      }
-      await GenerationJob.db.updateRow(s, j, transaction: tx);
-      s.log(
-        'generation_result job_id=$id status=${j.status} attempt=${j.attempts} error_kind=${errorKind ?? 'none'}',
-      );
-    });
+        final stale =
+            app == null ||
+            app.archived ||
+            d == null ||
+            d.activeJobId != id ||
+            d.mutation != job.mutation ||
+            d.candidateHash != draft.candidateHash ||
+            d.baseVersionId != app.activeVersionId ||
+            !await hasAccess(s, app, job.actorId, tx, builder: true);
+        if (!stale && candidate != null && error == null) {
+          try {
+            await Media.syncDefinition(
+              s,
+              Access(app, 'builder'),
+              candidate,
+              tx,
+              draftId: d.id,
+            );
+          } on NestError {
+            error = 'The generated definition references an unavailable image. Preserve existing image references or omit new image references.';
+            errorKind = 'media_reference';
+          }
+        }
+        if (!(j.leaseUntil?.isAfter(clock()) ?? false)) {
+          // Media synchronisation can wait on rows after the initial lease check.
+          // Roll its reference changes back together with any late job result.
+          throw const _ExpiredGenerationLease();
+        }
+        j.status = stale
+            ? 'stale'
+            : error != null
+            ? (j.attempts >= Limits.generationAttempts ||
+                      errorKind == 'unsupported' ||
+                      retryable == false
+                  ? 'failed'
+                  : 'queued')
+            : 'preview ready';
+        j.diagnostics = error ?? '';
+        j.provider = result?.provider;
+        j.model = result?.model;
+        // Provider metadata cannot supply or retain our private repair context.
+        final usage = Map<String, dynamic>.from(result?.usage ?? {})
+          ..remove(_repairUsageKey)
+          ..remove(_failureUsageKey)
+          ..remove('_appnestCompilation');
+        if (!stale && error == null && compilation != null) {
+          usage['_appnestCompilation'] = {
+            ...compilation.toJson(),
+            'finalCandidateHash': candidate!.hash,
+          };
+        }
+        if (errorKind != null) {
+          usage[_failureUsageKey] = _safeFailureCategory(errorKind);
+        }
+        final output = result?.text;
+        if (j.status == 'queued' &&
+            {
+              'output_json',
+              'output_shape',
+              'spec_validation',
+              'value_format',
+              'media_reference',
+            }.contains(errorKind) &&
+            baseCandidateHash != null &&
+            output != null &&
+            output.isNotEmpty &&
+            utf8.encode(output).length <= Limits.definitionBytes) {
+          usage[_repairUsageKey] = {
+            'jobId': j.id,
+            'draftId': draft.id,
+            'mutation': job.mutation,
+            'baseCandidateHash': baseCandidateHash,
+            'baseVersionId': draft.baseVersionId,
+            'mode': job.mode,
+            'attempt': j.attempts,
+            'output': output,
+            'diagnostics': _boundedRepairDiagnostic(error!),
+          };
+        } else if (j.status == 'queued' &&
+            repairContext != null &&
+            (retryable == true ||
+                {
+                  'timeout',
+                  'http_error',
+                  'transport_error',
+                  'envelope_json',
+                  'envelope_shape',
+                  'content_missing',
+                  'completion_stopped',
+                  'truncated',
+                  'response_size',
+                }.contains(errorKind))) {
+          // The public latest failure can describe transport trouble while the
+          // next attempt still repairs the last bounded semantic rejection.
+          usage[_repairUsageKey] = repairContext;
+        }
+        j.usageJson = jsonEncode(usage);
+        j.leaseUntil = null;
+        final retryAfterSeconds = retryAfter == null
+            ? 0
+            : (retryAfter.inMicroseconds / Duration.microsecondsPerSecond)
+                  .ceil()
+                  .clamp(1, 120);
+        j.nextAttemptAt = clock().add(
+          Duration(seconds: max(1 << j.attempts, retryAfterSeconds)),
+        );
+        j.updatedAt = clock();
+        if (!stale && candidate != null && error == null) {
+          d.candidateJson = candidate.canonical;
+          d.candidateHash = candidate.hash;
+          d.updatedAt = clock();
+          await AppDraft.db.updateRow(s, d, transaction: tx);
+        }
+        await GenerationJob.db.updateRow(s, j, transaction: tx);
+        if (!(job.leaseUntil?.isAfter(clock()) ?? false)) {
+          throw const _ExpiredGenerationLease();
+        }
+        s.log(
+          'generation_result job_id=$id status=${j.status} attempt=${j.attempts} error_kind=${errorKind ?? 'none'}',
+        );
+      });
+    } on _ExpiredGenerationLease {
+      return;
+    }
     final next = await GenerationJob.db.findById(s, id);
     if (next?.status == 'queued') {
       await scheduleGeneration(s, id, next!.nextAttemptAt);

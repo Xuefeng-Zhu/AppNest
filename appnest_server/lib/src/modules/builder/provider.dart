@@ -1,7 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show HttpDate;
 
 import 'package:appnest_spec/appnest_spec.dart';
+import 'package:crypto/crypto.dart';
 import 'package:http/http.dart' as http;
 import 'package:serverpod/serverpod.dart';
 
@@ -18,7 +20,18 @@ class AiResult {
 /// Safe, actionable diagnostics: never includes provider response bodies.
 class AiResponseException implements Exception {
   final String kind, message;
-  const AiResponseException(this.kind, this.message);
+  final int? statusCode;
+  final String? providerErrorType;
+  final Duration? retryAfter;
+  final bool? retryable;
+  const AiResponseException(
+    this.kind,
+    this.message, {
+    this.statusCode,
+    this.providerErrorType,
+    this.retryAfter,
+    this.retryable,
+  });
 }
 
 /// Only an optional single outer JSON fence is tolerated; prose and arbitrary
@@ -1438,6 +1451,7 @@ Map<String, dynamic> buildAiRequest(
             'For basic short-field forms fieldIds are sufficient. Notes, journal entries and other long writing fields need an explicit {fieldId:"EXISTING_BODY_FIELD_ID",control:"multiline"} in form.options.controls; use the app-defined body field ID at creation. This is the normal useful notes form, even without a separate custom-controls request. Include views.interactive.v1 and views.configured.v1 for those controls. Omit options.steps unless multiple steps were requested. form options may contain controls [{fieldId,control,hint?,min?,max?,step?}] and steps [{id,title,fieldIds}]. Controls match field types: text/multiline, checkbox/switch for boolean, select for choice/member, segmented for at most six choices, slider/stepper for numbers with finite min/max/positive step, rating for integer, dateTime for timestamp, imageUpload for image. Numeric ranges are presentation hints and do not change stored data constraints. Every visible editable field appears exactly once across nonempty steps; omit workflow-managed fields from steps and controls. Save occurs once at the final step. '
             'For a number or quantity with no requested finite range, omit its controls entry and use the built-in numeric input. Do not add a slider or stepper merely because a field is integer: either control requires explicit finite min, max and positive step. Prefer the ordinary numeric input unless a bounded control was requested. '
             'For first-version trackers and planners prefer simple list, form and details views; add draggable boards only when requested. checklist options bind fieldId and actionId: that actionId must also appear in the checklist actionIds and reference an action in the same collection. A boolean checklist uses records.patch.v1; a two-choice workflow checklist uses workflow.transition.v1 with explicit checkedValue and uncheckedValue and legal transitions both ways. board options {draggable:true,moveActionId} bind a workflow.transition.v1 action for its groupByFieldId: moveActionId must also appear in the board actionIds and reference an action in the same collection. Never bypass workflow actions with a generic record patch. '
+            '${!editing && requirements.recordCheckboxes.isNotEmpty ? 'For explicitRequirements.recordCheckboxes, create an actual reachable checklist. When requireBinaryInitialization is true, use a required:true boolean field and include it in fieldIds on every reachable create/edit form (or omit fieldIds to show all fields), so the existing editor initializes it to false. There is no stored boolean default. Honor requireBinaryInitialization:false by preserving an explicitly optional checkbox field. A binary boolean representation uses a same-collection records.patch.v1 action: checklist options {"fieldId":"packed","actionId":"editItem"} bind that field and action, and checklist actionIds includes "editItem". If separate checked and unchecked counts are requested, use two metric views with options:{"metric":"count"} and query:{"filters":[{"fieldId":"packed","operator":"eq","value":true}]} for checked and the same filter with value:false for unchecked. Both metric views omit groupByFieldId and valueFieldId entirely; a boolean is not a valid grouped-summary field. These example IDs demonstrate bindings only: use the actual field/action IDs and labels for the request, and keep the normal reachable add/edit routes. If choosing a two-choice workflow representation instead, use an actual reachable checklist bound to its workflow.transition.v1 action with checkedValue/uncheckedValue and transitions both ways; grouped counts may use that choice field. Omit the workflow-managed status from form controls and steps, including required status fields; the workflow supplies its initial state and transition action. ' : ''}'
             'Daily Planner uses independent optional dueAt and reminderAt timestamps, Open/Done workflow, local-day queries and database-wide grouped summaries. notifyOwner is for personalTracker.v1 only; use a condition on status equal to Open. Reminder requests require explicit publication approval and never opt the user in automatically. '
             '${!editing && requirements.ownerInboxReminder != null ? 'An explicitRequirements.ownerInboxReminder means an actual automationRequests rule with effect:{type:"notifyOwner",channel:"inApp"} is required; a reminder-time field or Inbox tab alone does not deliver reminders. Use personalTracker.v1, bind its trigger to the declared reminder timestamp, and satisfy the listed optionalTimestamp, distinctOptionalDueDate and openCompletedCondition requirements with real field references and the exact existing open status choice. Add the rule capabilities to requires. Publication approval remains required before delivery. ' : ''}'
             'Mobile features use collection-free deviceInfo and deviceControl views with navigation.v1, views.configured.v1 and views.deviceInfo.v1 or views.deviceControl.v1. deviceInfo.options.fields is a nonempty array of strings chosen from batteryLevel, charging, model, osVersion, connection, language, region, timeZone. deviceControl.options.control is one string: flashlight, brightness, keepAwake or haptics. Each requested control is a separate deviceControl view. These are built-in local controls: flashlight, brightness, keepAwake and haptics are NOT behavior IDs, behavior types, action capabilities or requires entries. Never create a workflow, collection, action or automation to operate them. Device views have only id, type, optional label and options; omit collectionId, actionIds, query and all record bindings. When creating a device-only app, explicitly return root collections:[], actions:[] and automationRequests:[]; its pages omit primaryActionId. Record CRUD and workflow guidance applies only when the request also needs stored records; a mixed app binds record actions only to its record views. Each user separately grants device-local access; publication never grants it. Device readings stay local and are unavailable to you. Web/desktop can preview synthetic data but native actions require Android/iOS. No Wi-Fi or Bluetooth switching, identifiers, location, contacts, native calendars, background automation, or runtime chat. '
@@ -1536,18 +1550,301 @@ abstract interface class AiProvider {
   });
 }
 
+/// Only schema positions are rewritten: enum/const/default data is untouched.
+/// Repeated subtrees become local references without changing any constraint.
+/// Existing references or nested resource IDs decline compaction, because moving
+/// them could change reference resolution. The common/provider-enforced schema
+/// is never modified.
+Map<String, dynamic> _compactInstructionSchema(Map<String, dynamic> schema) {
+  // Creation's AppSpec branch is its own resource with an absolute $id. Keep
+  // references and definitions inside that resource rather than changing their
+  // base URI by hoisting them into the outer completion envelope.
+  final alternatives = schema['anyOf'];
+  if (alternatives is List &&
+      alternatives.any(
+        (branch) => branch is Map && branch.containsKey(r'$id'),
+      )) {
+    return {
+      ...schema,
+      'anyOf': [
+        for (final branch in alternatives)
+          branch is Map && branch.containsKey(r'$id')
+              ? _compactInstructionSchema(Map<String, dynamic>.from(branch))
+              : branch,
+      ],
+    };
+  }
+  const maps = {'properties', 'patternProperties', 'dependentSchemas'};
+  const singles = {
+    'items',
+    'additionalProperties',
+    'unevaluatedProperties',
+    'contains',
+    'propertyNames',
+    'not',
+    'if',
+    'then',
+    'else',
+    'unevaluatedItems',
+  };
+  const lists = {'anyOf', 'oneOf', 'allOf', 'prefixItems'};
+  final counts = <String, int>{};
+  final originals = <String, Map<String, dynamic>>{};
+  var safe = true;
+  Map<String, dynamic> visit(
+    Map<String, dynamic> node,
+    Map<String, dynamic> Function(Map<String, dynamic>) transform,
+  ) => {
+    for (final entry in node.entries)
+      entry.key: maps.contains(entry.key) && entry.value is Map
+          ? {
+              for (final child in (entry.value as Map).entries)
+                child.key: child.value is Map
+                    ? transform(Map<String, dynamic>.from(child.value as Map))
+                    : child.value,
+            }
+          : singles.contains(entry.key) && entry.value is Map
+          ? transform(Map<String, dynamic>.from(entry.value as Map))
+          : lists.contains(entry.key) && entry.value is List
+          ? [
+              for (final child in entry.value as List)
+                child is Map
+                    ? transform(Map<String, dynamic>.from(child))
+                    : child,
+            ]
+          : entry.value,
+  };
+  void count(Map<String, dynamic> node, {bool root = false}) {
+    if (node.containsKey(r'$ref') ||
+        node.containsKey(r'$defs') ||
+        node.containsKey('definitions') ||
+        node.containsKey(r'$dynamicRef') ||
+        node.containsKey(r'$anchor') ||
+        node.containsKey(r'$dynamicAnchor') ||
+        (!root && node.containsKey(r'$id'))) {
+      safe = false;
+    }
+    final encoded = jsonEncode(node);
+    if (!root && encoded.length >= 100) {
+      counts.update(encoded, (value) => value + 1, ifAbsent: () => 1);
+      originals[encoded] = node;
+    }
+    visit(node, (child) {
+      count(child);
+      return child;
+    });
+  }
+
+  count(schema, root: true);
+  if (!safe) return schema;
+  final names = <String, String>{};
+  for (final entry in counts.entries) {
+    if (entry.value > 1) names[entry.key] = 'd${names.length}';
+  }
+  if (names.isEmpty) return schema;
+  final used = <String>{};
+  Map<String, dynamic> rewrite(Map<String, dynamic> node, {bool root = false}) {
+    final name = root ? null : names[jsonEncode(node)];
+    if (name != null) {
+      used.add(name);
+      return {r'$ref': '#/\$defs/$name'};
+    }
+    return visit(node, (child) => rewrite(child));
+  }
+
+  final compacted = rewrite(schema, root: true);
+  final definitions = <String, dynamic>{};
+  // Only reachable definitions are retained, including their dependencies.
+  while (used.any((name) => !definitions.containsKey(name))) {
+    final pending = used
+        .where((name) => !definitions.containsKey(name))
+        .toList();
+    for (final name in pending) {
+      final key = names.entries.firstWhere((entry) => entry.value == name).key;
+      definitions[name] = rewrite(originals[key]!, root: true);
+    }
+  }
+  compacted[r'$defs'] = definitions;
+  return jsonEncode(compacted).length < jsonEncode(schema).length
+      ? compacted
+      : schema;
+}
+
+const _providerErrorTypes = {
+  'context_length_exceeded',
+  'max_tokens_exceeded',
+  'token_limit_exceeded',
+  'string_too_long',
+  'authentication',
+  'permission_denied',
+  'payment_required',
+  'rate_limit_exceeded',
+  'provider_overloaded',
+  'provider_unavailable',
+  'invalid_request',
+  'invalid_prompt',
+  'not_found',
+  'precondition_failed',
+  'payload_too_large',
+  'unprocessable',
+  'content_policy_violation',
+  'refusal',
+  'server',
+  'timeout',
+  'unmapped',
+};
+const _terminalProviderTypes = {
+  'context_length_exceeded',
+  'max_tokens_exceeded',
+  'token_limit_exceeded',
+  'string_too_long',
+  'authentication',
+  'permission_denied',
+  'payment_required',
+  'invalid_request',
+  'invalid_prompt',
+  'not_found',
+  'precondition_failed',
+  'payload_too_large',
+  'unprocessable',
+  'content_policy_violation',
+  'refusal',
+};
+int? _providerErrorCode(Object? code) =>
+    code is int &&
+        const {
+          400,
+          401,
+          402,
+          403,
+          404,
+          405,
+          408,
+          409,
+          412,
+          413,
+          422,
+          425,
+          429,
+          500,
+          501,
+          502,
+          503,
+          504,
+          529,
+        }.contains(code)
+    ? code
+    : null;
+
+bool _providerRetryable(int? code, String? type) =>
+    !_terminalProviderTypes.contains(type) &&
+    !(code != null &&
+        code >= 400 &&
+        code < 500 &&
+        !{408, 409, 425, 429}.contains(code));
+
+Duration? _boundedRetryAfter(String? raw) {
+  if (raw == null || raw.length > 64) return null;
+  var seconds = int.tryParse(raw.trim());
+  if (seconds == null) {
+    try {
+      seconds = HttpDate.parse(raw)
+          .difference(DateTime.now().toUtc())
+          .inSeconds;
+    } catch (_) {
+      return null;
+    }
+  }
+  if (seconds < 0) return null;
+  return Duration(seconds: seconds.clamp(1, 120));
+}
+
+/// Hash opaque correlation IDs rather than reflecting provider-controlled text.
+String? _requestIdHash(Object? value) =>
+    value is String && value.isNotEmpty && value.length <= 256
+    ? sha256.convert(utf8.encode(value)).toString().substring(0, 16)
+    : null;
+
 class ChatCompletionProvider implements AiProvider, GuidanceProvider {
   final Uri base;
   final String model, key;
   final http.Client Function() _clientFactory;
   final void Function(String)? log;
+  final Duration? generationTimeout;
   ChatCompletionProvider(
     this.base,
     this.model,
     this.key, {
     http.Client Function()? clientFactory,
+    this.generationTimeout,
     this.log,
   }) : _clientFactory = clientFactory ?? http.Client.new;
+
+  bool get _freeUltra =>
+      base.host == 'openrouter.ai' &&
+      model == 'nvidia/nemotron-3-ultra-550b-a55b:free';
+
+  /// A test may shorten, but never extend, the provider's bounded deadline.
+  Duration get generationDeadline {
+    final maximum = Duration(seconds: _freeUltra ? 90 : 45);
+    return Duration(
+      microseconds: (generationTimeout ?? maximum).inMicroseconds.clamp(
+        1,
+        maximum.inMicroseconds,
+      ),
+    );
+  }
+
+  /// This free endpoint accepts chat completions but not response_format.
+  /// Keep the shared authoring contract unchanged and move its exact schema
+  /// into model instructions only for this host/model pair. Local validation
+  /// remains authoritative; unsupported provider enforcement is not implied.
+  Map<String, dynamic> _requestForTransport(
+    Map<String, dynamic> body, {
+    required bool generation,
+  }) {
+    if (!_freeUltra) {
+      return body;
+    }
+    final adapted = Map<String, dynamic>.from(body);
+    final format = adapted.remove('response_format') as Map;
+    adapted['provider'] = {
+      'allow_fallbacks': false,
+      'max_price': {'prompt': 0, 'completion': 0},
+    };
+    if (!generation) return adapted;
+
+    adapted['reasoning'] = {'effort': 'medium'};
+    final schema =
+        (format['json_schema'] as Map)['schema'] as Map<String, dynamic>;
+    final originalSchema = jsonEncode(schema);
+    final encodedSchema = jsonEncode(_compactInstructionSchema(schema));
+    final messages = (body['messages'] as List)
+        .map((message) => Map<String, dynamic>.from(message as Map))
+        .toList();
+    final system = messages.first;
+    final contract = (system['content'] as String)
+        .replaceAll(
+          'Edit response schema (the same schema enforced by response_format; return a matching patches or unsupported object): $originalSchema',
+          'Edit response contract: return a matching patches or unsupported object.',
+        )
+        .replaceAll(
+          'response_format enforces the complete property grammar',
+          'AppNest validates the complete property grammar',
+        )
+        .replaceAll(
+          'Respect the complete response_format grammar',
+          'Respect the complete supplied response schema',
+        );
+    system['content'] =
+        '$contract This endpoint does not enforce JSON Schema. '
+        'AppNest validates every response against the complete response schema. '
+        'Return a matching response instance, never the schema itself. '
+        'Complete response schema: $encodedSchema';
+    adapted['messages'] = messages;
+    return adapted;
+  }
+
   static ChatCompletionProvider? configured(Session s) {
     final base = s.passwords['AI_BASE_URL'],
         model = s.passwords['AI_MODEL'],
@@ -1594,7 +1891,10 @@ class ChatCompletionProvider implements AiProvider, GuidanceProvider {
           'Content-Type': 'application/json',
         })
         ..body = jsonEncode(
-          buildGuidanceRequest(model, idea, definition: definition),
+          _requestForTransport(
+            buildGuidanceRequest(model, idea, definition: definition),
+            generation: false,
+          ),
         );
       final response = await client
           .send(message)
@@ -1721,14 +2021,28 @@ class ChatCompletionProvider implements AiProvider, GuidanceProvider {
     int? status;
     String finishReason = 'unknown';
     String outcome = 'transport_error';
+    String phase = 'headers';
+    int? headersMilliseconds, bodyMilliseconds, bodyStarted;
+    var bodyBytes = 0;
+    int? providerCode;
+    String? providerType, requestIdHash;
+    Duration? retryAfter;
     int? contentCharacters, completionTokens, reasoningTokens;
-    final body = buildAiRequest(
-      model,
-      request,
-      current,
-      editing: editing,
-      diagnostics: diagnostics,
-      rejectedOutput: rejectedOutput,
+    final deadline = generationDeadline;
+    Duration remaining() => Duration(
+      microseconds: (deadline.inMicroseconds - elapsed.elapsedMicroseconds)
+          .clamp(1, deadline.inMicroseconds),
+    );
+    final body = _requestForTransport(
+      buildAiRequest(
+        model,
+        request,
+        current,
+        editing: editing,
+        diagnostics: diagnostics,
+        rejectedOutput: rejectedOutput,
+      ),
+      generation: true,
     );
     final maxTokens = body['max_tokens'] as int;
     try {
@@ -1742,19 +2056,30 @@ class ChatCompletionProvider implements AiProvider, GuidanceProvider {
         })
         ..body = jsonEncode(body);
       // Bound both total duration and bytes while receiving, not after buffering.
-      final response = await client
-          .send(message)
-          .timeout(const Duration(seconds: 45));
+      final response = await client.send(message).timeout(remaining());
       status = response.statusCode;
+      headersMilliseconds = elapsed.elapsedMilliseconds;
+      requestIdHash = _requestIdHash(
+        response.headers['x-request-id'] ??
+            response.headers['x-openrouter-request-id'],
+      );
+      retryAfter = _boundedRetryAfter(response.headers['retry-after']);
       if (response.statusCode != 200) {
+        providerCode = _providerErrorCode(status);
         throw AiResponseException(
           'http_error',
           'AI provider could not complete the request (HTTP ${response.statusCode}).',
+          statusCode: status,
+          retryAfter: retryAfter,
+          retryable: _providerRetryable(status, null),
         );
       }
       final bytes = <int>[];
+      phase = 'body';
+      bodyStarted = elapsed.elapsedMilliseconds;
       await (() async {
         await for (final chunk in response.stream) {
+          bodyBytes += chunk.length;
           if (bytes.length + chunk.length > Limits.definitionBytes * 3) {
             throw const AiResponseException(
               'response_size',
@@ -1763,11 +2088,9 @@ class ChatCompletionProvider implements AiProvider, GuidanceProvider {
           }
           bytes.addAll(chunk);
         }
-      })().timeout(
-        Duration(
-          milliseconds: 45000 - elapsed.elapsedMilliseconds.clamp(0, 44999),
-        ),
-      );
+      })().timeout(remaining());
+      bodyMilliseconds = elapsed.elapsedMilliseconds - bodyStarted;
+      phase = 'envelope';
       final dynamic json;
       try {
         json = jsonDecode(utf8.decode(bytes));
@@ -1777,6 +2100,34 @@ class ChatCompletionProvider implements AiProvider, GuidanceProvider {
           'The AI provider returned an invalid JSON response envelope.',
         );
       }
+      if (json is Map) {
+        requestIdHash ??= _requestIdHash(json['id']);
+        // Never reflect error.message, raw metadata, flagged input or bodies.
+        // A provider failure can arrive after HTTP 200 headers were committed.
+        final choices = json['choices'];
+        final first = choices is List && choices.isNotEmpty
+            ? choices.first
+            : null;
+        final error = json['error'] ?? (first is Map ? first['error'] : null);
+        if (error != null) {
+          final metadata = error is Map ? error['metadata'] : null;
+          final type = metadata is Map ? metadata['error_type'] : null;
+          providerType = _providerErrorTypes.contains(type)
+              ? type as String
+              : null;
+          providerCode = _providerErrorCode(
+            error is Map ? error['code'] : null,
+          );
+          throw AiResponseException(
+            'http_error',
+            'AI provider reported a completion failure${providerCode == null ? '' : ' (code $providerCode)'}.',
+            statusCode: providerCode,
+            providerErrorType: providerType,
+            retryAfter: retryAfter,
+            retryable: _providerRetryable(providerCode, providerType),
+          );
+        }
+      }
       final choices = json is Map ? json['choices'] : null;
       if (choices is! List || choices.isEmpty || choices.first is! Map) {
         throw const AiResponseException(
@@ -1784,6 +2135,7 @@ class ChatCompletionProvider implements AiProvider, GuidanceProvider {
           'The AI provider response did not contain a completion.',
         );
       }
+      phase = 'completion';
       final choice = choices.first as Map;
       final reason = choice['finish_reason'];
       if ({
@@ -1792,6 +2144,7 @@ class ChatCompletionProvider implements AiProvider, GuidanceProvider {
         'content_filter',
         'tool_calls',
         'function_call',
+        'error',
       }.contains(reason)) {
         finishReason = reason as String;
       }
@@ -1823,6 +2176,13 @@ class ChatCompletionProvider implements AiProvider, GuidanceProvider {
           'The AI provider did not finish a JSON completion. Return the supported declarative JSON object directly.',
         );
       }
+      if (reason == 'error') {
+        throw const AiResponseException(
+          'http_error',
+          'AI provider reported an interrupted completion.',
+          retryable: true,
+        );
+      }
       if (text is! String || text.trim().isEmpty) {
         throw const AiResponseException(
           'content_missing',
@@ -1840,7 +2200,8 @@ class ChatCompletionProvider implements AiProvider, GuidanceProvider {
       outcome = 'timeout';
       throw const AiResponseException(
         'timeout',
-        'The AI provider exceeded the 45-second response limit. Return a smaller complete definition.',
+        'The AI provider did not finish within the bounded response deadline. Try again later.',
+        retryable: true,
       );
     } on AiResponseException catch (e) {
       outcome = e.kind;
@@ -1853,8 +2214,11 @@ class ChatCompletionProvider implements AiProvider, GuidanceProvider {
       );
     } finally {
       client.close();
+      if (bodyStarted != null && bodyMilliseconds == null) {
+        bodyMilliseconds = elapsed.elapsedMilliseconds - bodyStarted;
+      }
       log?.call(
-        'generation_provider outcome=$outcome http_status=${status ?? 'none'} finish_reason=$finishReason duration_ms=${elapsed.elapsedMilliseconds} content_chars=${contentCharacters ?? 0} completion_tokens=${completionTokens ?? 0} reasoning_tokens=${reasoningTokens ?? 0} max_tokens=$maxTokens',
+        'generation_provider outcome=$outcome http_status=${status ?? 'none'} finish_reason=$finishReason duration_ms=${elapsed.elapsedMilliseconds} content_chars=${contentCharacters ?? 0} completion_tokens=${completionTokens ?? 0} reasoning_tokens=${reasoningTokens ?? 0} max_tokens=$maxTokens phase=$phase headers_ms=${headersMilliseconds ?? 'unknown'} body_ms=${bodyMilliseconds ?? 'unknown'} body_bytes=$bodyBytes deadline_ms=${deadline.inMilliseconds} provider_error_code=${providerCode ?? 'none'} provider_error_type=${providerType ?? 'none'} request_id_hash=${requestIdHash ?? 'none'} retry_after_seconds=${retryAfter?.inSeconds ?? 'none'}',
       );
     }
   }

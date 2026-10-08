@@ -1,5 +1,7 @@
 import 'package:appnest_spec/appnest_spec.dart';
 
+import 'generation_quality.dart';
+
 /// A deliberately narrow extraction of explicit creation requirements. It does
 /// not infer a product from keywords or substitute a template. Ambiguous prose
 /// remains the provider's responsibility; supported, literal contracts can be
@@ -12,6 +14,8 @@ class GenerationRequirements {
   final bool searchableList, singleRecordCollection, dedicatedRecordRoutes;
   final bool sharedRecordCreation;
   final OwnerInboxReminderRequirement? ownerInboxReminder;
+  final List<NumericInputRangeRequirement> numericInputRanges;
+  final List<RecordCheckboxRequirement> recordCheckboxes;
 
   const GenerationRequirements({
     this.policy,
@@ -24,6 +28,8 @@ class GenerationRequirements {
     this.dedicatedRecordRoutes = false,
     this.sharedRecordCreation = false,
     this.ownerInboxReminder,
+    this.numericInputRanges = const [],
+    this.recordCheckboxes = const [],
   });
 
   factory GenerationRequirements.fromRequest(String request) {
@@ -186,6 +192,8 @@ class GenerationRequirements {
               ),
       ownerInboxReminder: _ownerInboxReminder(request),
       sharedRecordCreation: _sharedRecordCreation(request, policies),
+      numericInputRanges: _numericInputRanges(request),
+      recordCheckboxes: _recordCheckboxes(request),
     );
   }
 
@@ -199,7 +207,9 @@ class GenerationRequirements {
       !singleRecordCollection &&
       !dedicatedRecordRoutes &&
       !sharedRecordCreation &&
-      ownerInboxReminder == null;
+      ownerInboxReminder == null &&
+      numericInputRanges.isEmpty &&
+      recordCheckboxes.isEmpty;
 
   String? get preferredPolicy =>
       policy ?? (sharedRecordCreation ? 'groupWorkflow.v1' : null);
@@ -216,6 +226,14 @@ class GenerationRequirements {
     if (dedicatedRecordRoutes) 'dedicatedRecordRoutes': true,
     if (ownerInboxReminder != null)
       'ownerInboxReminder': ownerInboxReminder!.toJson(),
+    if (numericInputRanges.isNotEmpty)
+      'numericInputRanges': numericInputRanges
+          .map((range) => range.toJson())
+          .toList(),
+    if (recordCheckboxes.isNotEmpty)
+      'recordCheckboxes': recordCheckboxes
+          .map((value) => value.toJson())
+          .toList(),
   };
 
   void validate(AppSpec spec) {
@@ -258,6 +276,12 @@ class GenerationRequirements {
       );
     }
     ownerInboxReminder?.validate(spec, issues);
+    for (final range in numericInputRanges) {
+      range.validate(spec, issues);
+    }
+    for (final checkbox in recordCheckboxes) {
+      checkbox.validate(spec, visibleViews, issues);
+    }
     for (final entry in choices.entries) {
       final matches = [
         for (final collection in spec.collections)
@@ -357,6 +381,411 @@ class GenerationRequirements {
     }
     if (issues.isNotEmpty) throw SpecException(issues.join(' '));
   }
+}
+
+/// A form-input contract, not a record-schema range invariant. The current
+/// numeric field schema remains unchanged; authenticated API writes continue
+/// to use its existing safe-number/type validation.
+class NumericInputRangeRequirement {
+  final String label;
+  final num min, max;
+  final bool integer;
+
+  const NumericInputRangeRequirement(
+    this.label,
+    this.min,
+    this.max, {
+    required this.integer,
+  });
+
+  Map<String, dynamic> toJson() => {
+    'label': label,
+    'type': integer ? 'integer' : 'number',
+    'min': min,
+    'max': max,
+    'reachableCreateAndEditForms': true,
+  };
+
+  void validate(AppSpec spec, List<String> issues) {
+    final matches = [
+      for (final collection in spec.collections)
+        for (final field in collection.fields)
+          if (field.label.toLowerCase() == label.toLowerCase())
+            (collection, field),
+    ];
+    if (matches.length != 1) {
+      issues.add(
+        'Include one unambiguous $label numeric field for the explicit input range.',
+      );
+      return;
+    }
+    final (collection, field) = matches.single;
+    if (field.type != (integer ? FieldType.integer : FieldType.number)) {
+      issues.add(
+        '$label must preserve its requested ${integer ? 'integer' : 'number'} input type.',
+      );
+      return;
+    }
+    final forms = reachableGeneratedRecordForms(spec, collection.id);
+    bool bounded(ViewSpec form) {
+      if (form.fieldIds.isNotEmpty && !form.fieldIds.contains(field.id)) {
+        return false;
+      }
+      final controls = (form.options['controls'] as List? ?? []).cast<Map>();
+      final control = controls
+          .where((item) => item['fieldId'] == field.id)
+          .singleOrNull;
+      if (control == null) return false;
+      if (control['control'] == 'rating') {
+        return integer && min == 1 && max == 5;
+      }
+      return {'slider', 'stepper'}.contains(control['control']) &&
+          control['min'] == min &&
+          control['max'] == max &&
+          (!integer || control['step'] == 1);
+    }
+
+    if (forms.isEmpty || forms.any((form) => !bounded(form))) {
+      issues.add(
+        '$label needs a bounded numeric control from $min to $max '
+        'on every reachable create/edit form, using its authored field ID. '
+        '${integer && min == 1 && max == 5 ? 'Use rating, or a slider/stepper with min:1, max:5, step:1.' : 'Use a slider/stepper with the exact requested min/max${integer ? ' and step:1' : ''}.'} '
+        'An unbounded default numeric input or an orphaned form does not satisfy the request.',
+      );
+    }
+  }
+}
+
+/// A requested record checkbox is a reachable checklist interaction, not just
+/// a field or menu label. Both supported storage representations use the
+/// platform's strictly validated toggle path.
+class RecordCheckboxRequirement {
+  final String label;
+  final bool requireBinaryInitialization;
+  const RecordCheckboxRequirement(
+    this.label, {
+    this.requireBinaryInitialization = true,
+  });
+
+  Map<String, dynamic> toJson() => {
+    'label': label,
+    'reachableChecklist': true,
+    'requireBinaryInitialization': requireBinaryInitialization,
+  };
+
+  void validate(
+    AppSpec spec,
+    List<ViewSpec> visibleViews,
+    List<String> issues,
+  ) {
+    final matches = [
+      for (final collection in spec.collections)
+        for (final field in collection.fields)
+          if (field.type == FieldType.boolean &&
+                  field.label.toLowerCase() == label.toLowerCase() ||
+              field.type == FieldType.choice &&
+                  field.choices.length == 2 &&
+                  field.choices.any(
+                    (value) => value.toLowerCase() == label.toLowerCase(),
+                  ))
+            (collection, field),
+    ];
+    if (matches.length != 1) {
+      issues.add(
+        'Resolve the explicitly requested $label checkbox to one unambiguous boolean field label or two-state checked value.',
+      );
+      return;
+    }
+    final (collection, field) = matches.single;
+    if (field.type == FieldType.boolean && requireBinaryInitialization) {
+      if (!field.required) {
+        issues.add(
+          'The $label checkbox needs a required boolean field so new items have '
+          'a checked or unchecked value rather than an unset third state.',
+        );
+      }
+      final forms = reachableGeneratedRecordForms(spec, collection.id);
+      final createForms = reachableGeneratedRecordForms(
+        spec,
+        collection.id,
+        creationOnly: true,
+      );
+      if (createForms.isEmpty ||
+          forms.any(
+            (form) =>
+                form.fieldIds.isNotEmpty && !form.fieldIds.contains(field.id),
+          )) {
+        issues.add(
+          'Include the $label boolean field on every reachable create/edit '
+          'form, with an actual reachable create route. The existing editor '
+          'initializes a visible required boolean to false; do not invent '
+          'a stored default or leave the field out of the form.',
+        );
+      }
+    }
+    final controls = visibleViews.where(
+      (view) =>
+          view.type == 'checklist' &&
+          view.collectionId == collection.id &&
+          view.options['fieldId'] == field.id &&
+          (field.type == FieldType.boolean ||
+              (view.options['checkedValue'] as String).toLowerCase() ==
+                  label.toLowerCase()),
+    );
+    if (controls.isEmpty) {
+      issues.add(
+        'Expose a reachable $label checklist checkbox on the entry page or a tab. '
+        'Bind checklist.options.fieldId to the authored field and options.actionId to its actual toggle action, also in actionIds. '
+        'Use a boolean with records.patch.v1, or a reversible two-choice workflow checklist with explicit checkedValue:$label and uncheckedValue. '
+        'A stored status, workflow menu, checkbox in a hidden form or orphaned checklist does not provide the requested tick interaction.',
+      );
+      return;
+    }
+    for (final control in controls) {
+      final action = spec.action(control.options['actionId'] as String);
+      if (!control.actionIds.contains(action.id) ||
+          action.collectionId != collection.id ||
+          action.capability !=
+              (field.type == FieldType.boolean
+                  ? 'records.patch.v1'
+                  : 'workflow.transition.v1')) {
+        issues.add(
+          'The $label checkbox must use its validated same-collection toggle action.',
+        );
+      }
+    }
+  }
+}
+
+List<RecordCheckboxRequirement> _recordCheckboxes(String request) {
+  if (!_unambiguousRequirementScope(request)) return const [];
+  final found = <String, RecordCheckboxRequirement>{};
+  final initializationDeclarations = <String, bool>{};
+  final ambiguous = <String>{};
+  final patterns = [
+    RegExp(
+      r'\b(?:a|an|the)\s+([A-Za-z][A-Za-z0-9 -]{0,40}?)\s+checkbox\b',
+      caseSensitive: false,
+    ),
+    RegExp(
+      r'(?:^|[,.;]|\band\b|\bwith\b)\s*([A-Za-z][A-Za-z0-9 -]{0,40}?)\s*\((?:required|optional)\s+checkbox\)',
+      caseSensitive: false,
+    ),
+  ];
+  for (final pattern in patterns) {
+    for (final match in pattern.allMatches(request)) {
+      final declaredLabel = match
+          .group(1)!
+          .trim()
+          .replaceFirst(
+            RegExp(r'^.*\bcollection\s+with\s+', caseSensitive: false),
+            '',
+          )
+          .replaceFirst(
+            RegExp(
+              r"^(?:do not|don't|never|avoid|without|no)\s+",
+              caseSensitive: false,
+            ),
+            '',
+          )
+          .replaceFirst(
+            RegExp(
+              r'^(?:include|add|save|record|track|use)\s+',
+              caseSensitive: false,
+            ),
+            '',
+          );
+      final prefix = RegExp(
+        r'^(optional|required)\s+',
+        caseSensitive: false,
+      ).firstMatch(declaredLabel)?.group(1)?.toLowerCase();
+      final annotation = RegExp(
+        r'\((optional|required)\s+checkbox\)',
+        caseSensitive: false,
+      ).firstMatch(match.group(0)!)?.group(1)?.toLowerCase();
+      // Only an immediate same-checkbox modifier at a clause boundary is a
+      // declaration. A later unqualified reference is not "required" prose.
+      final suffixMatch = RegExp(
+        r'^\s*(?:\((optional|required)\)|that\s+is\s+(optional|required))(?=\s*(?:[.,;!?]|$))',
+        caseSensitive: false,
+      ).firstMatch(request.substring(match.end));
+      final suffix = (suffixMatch?.group(1) ?? suffixMatch?.group(2))
+          ?.toLowerCase();
+      final declarations = <bool>{
+        if (prefix != null) prefix == 'required',
+        if (annotation != null) annotation == 'required',
+        if (suffix != null) suffix == 'required',
+      };
+      final label = declaredLabel.replaceFirst(
+        RegExp(r'^(?:optional|required)\s+', caseSensitive: false),
+        '',
+      );
+      final key = label.toLowerCase();
+      if (!_literalExplicitSpan(request, match.start, match.end) ||
+          declarations.length > 1) {
+        ambiguous.add(key);
+      } else {
+        if (declarations.singleOrNull case final declaration?) {
+          if (initializationDeclarations[key] case final previous?
+              when previous != declaration) {
+            ambiguous.add(key);
+          }
+          initializationDeclarations[key] = declaration;
+        }
+        found[key] = RecordCheckboxRequirement(
+          label,
+          requireBinaryInitialization: initializationDeclarations[key] ?? true,
+        );
+      }
+    }
+  }
+  return [
+    for (final entry in found.entries)
+      if (!ambiguous.contains(entry.key)) entry.value,
+  ];
+}
+
+List<NumericInputRangeRequirement> _numericInputRanges(String request) {
+  // Only literal field declarations and explicitly named rating phrases are
+  // supported. Multiple collection/app scopes or alternatives stay with the
+  // provider; no field is selected from its ID, position or approximate label.
+  if (!_unambiguousRequirementScope(request)) return const [];
+  const number = r'(-?\d+(?:\.\d+)?)';
+  final found = <String, NumericInputRangeRequirement>{};
+  final ambiguous = <String>{};
+  void add(
+    RegExpMatch match,
+    String label,
+    String type,
+    String low,
+    String high,
+  ) {
+    if (!_literalExplicitSpan(request, match.start, match.end)) return;
+    final min = num.tryParse(low), max = num.tryParse(high);
+    final integer = type.toLowerCase() == 'integer';
+    if (min == null ||
+        max == null ||
+        !min.isFinite ||
+        !max.isFinite ||
+        min >= max ||
+        min.abs() > 1e15 ||
+        max.abs() > 1e15 ||
+        integer && (min != min.round() || max != max.round())) {
+      return;
+    }
+    label = label
+        .trim()
+        .replaceFirst(
+          RegExp(r'^.*\bcollection\s+with\s+', caseSensitive: false),
+          '',
+        )
+        .replaceFirst(
+          RegExp(r'^(?:(?:and|fields|field)\s+)+', caseSensitive: false),
+          '',
+        )
+        .replaceFirst(
+          RegExp(
+            r'^(?:include|add|save|record|track|use)\s+',
+            caseSensitive: false,
+          ),
+          '',
+        );
+    final key = label.toLowerCase();
+    final value = NumericInputRangeRequirement(
+      label,
+      min,
+      max,
+      integer: integer,
+    );
+    final previous = found[key];
+    if (previous != null &&
+        (previous.min != min ||
+            previous.max != max ||
+            previous.integer != integer)) {
+      ambiguous.add(key);
+    }
+    found[key] = value;
+  }
+
+  final fields = RegExp(
+    r'(?:^|[,.;]|\band\b|\bwith\b|\blabeled\b)\s*([A-Za-z][A-Za-z0-9 -]{0,60}?)\s*\((?:required|optional)\s+(integer|number)\s+from\s+' +
+        number +
+        r'\s+to\s+' +
+        number +
+        r'\s*\)',
+    caseSensitive: false,
+  );
+  for (final match in fields.allMatches(request)) {
+    add(
+      match,
+      match.group(1)!,
+      match.group(2)!,
+      match.group(3)!,
+      match.group(4)!,
+    );
+  }
+  final ratings = RegExp(
+    r'\b(?:a|the)\s+((?:[A-Za-z][A-Za-z-]*\s+){0,3}rating)\s+from\s+' +
+        number +
+        r'\s+to\s+' +
+        number +
+        r'\b',
+    caseSensitive: false,
+  );
+  for (final match in ratings.allMatches(request)) {
+    add(match, match.group(1)!, 'integer', match.group(2)!, match.group(3)!);
+  }
+  return [
+    for (final entry in found.entries)
+      if (!ambiguous.contains(entry.key)) entry.value,
+  ];
+}
+
+bool _unambiguousRequirementScope(String request) {
+  final scopes = RegExp(r'\b(?:apps?|collections?)\b', caseSensitive: false)
+      .allMatches(request)
+      .where((m) => _literalAffirmativeSpan(request, m.start, m.end));
+  return scopes
+              .where((m) => m.group(0)!.toLowerCase().startsWith('app'))
+              .length <=
+          1 &&
+      scopes
+              .where((m) => m.group(0)!.toLowerCase().startsWith('collection'))
+              .length <=
+          1 &&
+      !RegExp(
+            r'\b(?:another|second|multiple|two)\s+(?:[A-Za-z][A-Za-z-]*\s+){0,3}(?:apps?|collections?)\b',
+            caseSensitive: false,
+          )
+          .allMatches(request)
+          .any((m) => _literalAffirmativeSpan(request, m.start, m.end));
+}
+
+bool _literalExplicitSpan(String request, int start, int end) {
+  if (!_literalAffirmativeSpan(request, start, end)) return false;
+  final clause = _clauseAt(request, start, end);
+  if (RegExp(
+    r"\b(?:or|either|not|no|without|avoid|don't|never|example|sample|hypothetical|maybe|perhaps|consider|later|eventually)\b",
+    caseSensitive: false,
+  ).hasMatch(clause)) {
+    return false;
+  }
+  for (final pattern in [
+    r'"[^"]*"',
+    r'`[^`]*`',
+    r'“[^”]*”',
+    r'‘[^’]*’',
+    r"(?<![A-Za-z])'[^']*'(?![A-Za-z])",
+  ]) {
+    if (RegExp(pattern)
+        .allMatches(request)
+        .any(
+          (quote) => start < quote.end && end > quote.start,
+        )) {
+      return false;
+    }
+  }
+  return true;
 }
 
 bool _sharedRecordCreation(String request, Set<String> explicitPolicies) {

@@ -1405,6 +1405,108 @@ void main() {
     );
   });
 
+  test('literal checkbox creation documents boolean counts and workflow controls', () {
+    const packing =
+        'Build a packing checklist for my weekend trip. Each item needs a name, category, quantity and a packed checkbox. Let me tick items as I pack, search by item name, and see a count of packed and unpacked items.';
+    String system(String idea, {bool editing = false}) =>
+        buildAiRequest(
+              'test-model',
+              idea,
+              current,
+              editing: editing,
+            )['messages'].first['content']
+            as String;
+    final prompt = system(packing);
+    expect(prompt, contains('For explicitRequirements.recordCheckboxes'));
+    expect(prompt, contains('an actual reachable checklist'));
+    expect(prompt, contains('use a required:true boolean field'));
+    expect(prompt, contains('fieldIds on every reachable create/edit form'));
+    expect(prompt, contains('the existing editor initializes it to false'));
+    expect(prompt, contains('There is no stored boolean default'));
+    expect(
+      prompt,
+      contains('preserving an explicitly optional checkbox field'),
+    );
+    expect(prompt, contains('same-collection records.patch.v1 action'));
+    expect(
+      prompt,
+      contains(
+        'checklist options {"fieldId":"packed","actionId":"editItem"}',
+      ),
+    );
+    expect(prompt, contains('checklist actionIds includes "editItem"'));
+    expect(
+      prompt,
+      contains('two metric views with options:{"metric":"count"}'),
+    );
+    expect(
+      prompt,
+      contains(
+        'query:{"filters":[{"fieldId":"packed","operator":"eq","value":true}]}',
+      ),
+    );
+    expect(prompt, contains('the same filter with value:false for unchecked'));
+    expect(prompt, contains('omit groupByFieldId and valueFieldId entirely'));
+    expect(prompt, contains('a boolean is not a valid grouped-summary field'));
+    expect(prompt, contains('These example IDs demonstrate bindings only'));
+    expect(prompt, contains('keep the normal reachable add/edit routes'));
+    expect(
+      prompt,
+      contains('checklist bound to its workflow.transition.v1 action'),
+    );
+    expect(
+      prompt,
+      contains('checkedValue/uncheckedValue and transitions both ways'),
+    );
+    expect(
+      prompt,
+      contains('Omit the workflow-managed status from form controls and steps'),
+    );
+    expect(prompt, contains('including required status fields'));
+    // The example is creation guidance for literal checkbox requests only.
+    // It must neither inject a starting definition nor alter edit instructions.
+    for (final idea in [
+      'Track travel supplies and their quantities.',
+      'Track travel supplies. Do not add a packed checkbox.',
+      'Example: "a packed checkbox". Build a notes app.',
+    ]) {
+      expect(
+        system(idea),
+        isNot(contains('For explicitRequirements.recordCheckboxes')),
+      );
+    }
+    expect(
+      system(packing, editing: true),
+      isNot(contains('For explicitRequirements.recordCheckboxes')),
+    );
+    final body = buildAiRequest('test-model', packing, current, editing: false);
+    final user = jsonDecode(body['messages'].last['content'] as String) as Map;
+    expect(user['request'], packing);
+    expect(user.containsKey('currentDefinition'), isFalse);
+    expect(user['explicitRequirements']['recordCheckboxes'], [
+      {
+        'label': 'packed',
+        'reachableChecklist': true,
+        'requireBinaryInitialization': true,
+      },
+    ]);
+    final optional = buildAiRequest(
+      'test-model',
+      'Save Packed (optional checkbox).',
+      current,
+      editing: false,
+    );
+    final optionalUser =
+        jsonDecode(optional['messages'].last['content'] as String) as Map;
+    expect(optionalUser['explicitRequirements']['recordCheckboxes'], [
+      {
+        'label': 'Packed',
+        'reachableChecklist': true,
+        'requireBinaryInitialization': false,
+      },
+    ]);
+  });
+
   test(
     'create sends only the request and diagnostics, edit includes definition',
     () {
@@ -2780,6 +2882,414 @@ void main() {
     },
   };
 
+  const freeUltra = 'nvidia/nemotron-3-ultra-550b-a55b:free';
+  const freeProvider = {
+    'allow_fallbacks': false,
+    'max_price': {'prompt': 0, 'completion': 0},
+  };
+  const schemaMarker = 'Complete response schema: ';
+
+  Object? expandInstructionSchema(Object? value, Map root) {
+    if (value is List) {
+      return value.map((item) => expandInstructionSchema(item, root)).toList();
+    }
+    if (value is! Map) return value;
+    final scope = value.containsKey(r'$defs') || value.containsKey(r'$id')
+        ? value
+        : root;
+    if (value[r'$ref'] case final String reference) {
+      expect(value.keys, [r'$ref']);
+      expect(reference, startsWith(r'#/$defs/'));
+      final definition = scope[r'$defs'][reference.substring(8)];
+      expect(definition, isNotNull);
+      return expandInstructionSchema(definition, scope);
+    }
+    return {
+      for (final entry in value.entries)
+        if (entry.key != r'$defs')
+          entry.key: expandInstructionSchema(entry.value, scope),
+    };
+  }
+
+  void expectFreeGenerationBody(Map body, Map original) {
+    expect(
+      body.keys,
+      unorderedEquals([
+        ...original.keys.where((key) => key != 'response_format'),
+        'reasoning',
+        'provider',
+      ]),
+    );
+    expect(body['model'], freeUltra);
+    expect(body['provider'], freeProvider);
+    expect(body['reasoning'], {'effort': 'medium'});
+    expect(body['max_tokens'], original['max_tokens']);
+    expect(body['temperature'], original['temperature']);
+    final messages = body['messages'] as List;
+    final originalMessages = original['messages'] as List;
+    expect(messages.length, originalMessages.length);
+    expect(messages.skip(1), originalMessages.skip(1));
+    expect(messages.first['role'], 'system');
+    final system = messages.first['content'] as String;
+    expect(system.split(schemaMarker), hasLength(2));
+    final compacted = jsonDecode(system.split(schemaMarker).last) as Map;
+    expect(
+      expandInstructionSchema(compacted, compacted),
+      expandInstructionSchema(
+        original['response_format']['json_schema']['schema'],
+        original['response_format']['json_schema']['schema'] as Map,
+      ),
+    );
+    expect(system, contains('This endpoint does not enforce JSON Schema.'));
+    expect(system, contains('AppNest validates every response'));
+    expect(system, isNot(contains('response_format')));
+    expect(body.containsKey('models'), isFalse);
+    expect(body.containsKey('plugins'), isFalse);
+    expect(body.containsKey('tools'), isFalse);
+  }
+
+  test('OpenRouter free Ultra receives the exact creation contract without provider schema enforcement', () async {
+    const idea = 'private-synthetic-request';
+    final original = buildAiRequest(
+      freeUltra,
+      idea,
+      current,
+      editing: false,
+    );
+    final logs = <String>[];
+    final provider = ChatCompletionProvider(
+      Uri.parse('https://openrouter.ai/api/v1'),
+      freeUltra,
+      'private-test-key',
+      log: logs.add,
+      clientFactory: () => MockClient((request) async {
+        expect(
+          request.url.toString(),
+          'https://openrouter.ai/api/v1/chat/completions',
+        );
+        expect(request.headers['Authorization'], 'Bearer private-test-key');
+        final body = jsonDecode(request.body) as Map;
+        expectFreeGenerationBody(body, original);
+        final user =
+            jsonDecode(body['messages'].last['content'] as String) as Map;
+        expect(user['request'], idea);
+        expect(user.containsKey('currentDefinition'), isFalse);
+        expect(request.body, isNot(contains('private-test-key')));
+        final envelope = completion('stop', creationReferenceJson);
+        (envelope['choices'] as List).first['message']['reasoning_details'] = [
+          {'type': 'reasoning.text', 'text': 'private-reasoning'},
+        ];
+        return http.Response(jsonEncode(envelope), 200);
+      }),
+    );
+    final result = await provider.generate(idea, current, editing: false);
+    expect(AppSpec.parse(result.text).name, 'Reading List');
+    expect(result.provider, 'openrouter.ai');
+    expect(result.model, freeUltra);
+    expect(result.usage['completion_tokens_details']['reasoning_tokens'], 174);
+    expect(logs.single, contains('finish_reason=stop'));
+    for (final secret in [
+      'private-test-key',
+      idea,
+      'private-reasoning',
+      'Reading List',
+    ]) {
+      expect(logs.single, isNot(contains(secret)));
+    }
+    // The transport adaptation does not mutate the common builder contract.
+    expect(original['response_format']['type'], 'json_schema');
+    expect(original.containsKey('provider'), isFalse);
+    expect(original.containsKey('reasoning'), isFalse);
+  });
+
+  test('OpenRouter free Ultra preserves typed repair bindings and the bounded truncation allowance', () async {
+    final rejected = jsonDecode(creationReferenceJson) as Map<String, dynamic>;
+    rejected['actions'][1]['capability'] = 'capacity.release.v1';
+    rejected['actions'][1]['behaviorId'] = 'missingBehavior';
+    rejected['privateRepairMarker'] = 'untrusted-repair-instruction';
+    final raw = jsonEncode(rejected);
+    const diagnostics = [
+      'Missing required capabilities: navigation.layouts.v1',
+      'AI output reached the token limit before finishing. Return a smaller complete JSON definition within 8000 tokens.',
+    ];
+    final original = buildAiRequest(
+      freeUltra,
+      'A reading list',
+      current,
+      editing: false,
+      diagnostics: diagnostics,
+      rejectedOutput: raw,
+    );
+    final logs = <String>[];
+    final provider = ChatCompletionProvider(
+      Uri.parse('https://openrouter.ai/api/v1/'),
+      freeUltra,
+      'private-key',
+      log: logs.add,
+      clientFactory: () => MockClient((request) async {
+        final body = jsonDecode(request.body) as Map;
+        expectFreeGenerationBody(body, original);
+        expect(body['max_tokens'], 12000);
+        final system = body['messages'].first['content'] as String;
+        expect(system, isNot(contains('privateRepairMarker')));
+        expect(system, isNot(contains('untrusted-repair-instruction')));
+        final user =
+            jsonDecode(body['messages'].last['content'] as String) as Map;
+        expect(user['diagnostics'], diagnostics);
+        expect(user['repairContext']['rejectedOutput'], raw);
+        expect(user['repairContext']['requiredBindings'], isNotEmpty);
+        expect(user.containsKey('currentDefinition'), isFalse);
+        return http.Response(
+          jsonEncode(completion('stop', creationReferenceJson)),
+          200,
+        );
+      }),
+    );
+    await provider.generate(
+      'A reading list',
+      current,
+      editing: false,
+      diagnostics: diagnostics,
+      rejectedOutput: raw,
+    );
+    expect(logs.single, contains('max_tokens=12000'));
+    for (final secret in [
+      'private-key',
+      'privateRepairMarker',
+      'untrusted-repair-instruction',
+    ]) {
+      expect(logs.single, isNot(contains(secret)));
+    }
+  });
+
+  test('OpenRouter free Ultra edits keep the exact semantic patch schema and stable definition context', () async {
+    const idea = 'Rename the app to Weekend Planner';
+    const output =
+        '{"patches":[{"type":"RenameLabel","targetId":"app","label":"Weekend Planner"}]}';
+    final original = buildAiRequest(freeUltra, idea, current, editing: true);
+    final provider = ChatCompletionProvider(
+      Uri.parse('https://openrouter.ai/api/v1'),
+      freeUltra,
+      'test-key',
+      clientFactory: () => MockClient((request) async {
+        final body = jsonDecode(request.body) as Map;
+        expectFreeGenerationBody(body, original);
+        expect(body['max_tokens'], 8000);
+        final system = body['messages'].first['content'] as String;
+        final schema = original['response_format']['json_schema']['schema'];
+        final compacted = jsonDecode(system.split(schemaMarker).last) as Map;
+        expect(
+          expandInstructionSchema(compacted, compacted),
+          expandInstructionSchema(schema, schema),
+        );
+        expect(system, contains('Edit response contract:'));
+        expect(system, isNot(contains(creationReferenceJson)));
+        expect(system, isNot(contains('Return an AppSpec INSTANCE')));
+        final user =
+            jsonDecode(body['messages'].last['content'] as String) as Map;
+        expect(user['currentDefinition'], current.toJson());
+        return http.Response(jsonEncode(completion('stop', output)), 200);
+      }),
+    );
+    expect(
+      (await provider.generate(idea, current, editing: true)).text,
+      output,
+    );
+  });
+
+  test('OpenRouter free Ultra guidance keeps its explicit decision contract and free-only routing', () async {
+    for (final definition in <AppSpec?>[null, current]) {
+      final original = buildGuidanceRequest(
+        freeUltra,
+        'A useful library',
+        definition: definition,
+      );
+      final provider = ChatCompletionProvider(
+        Uri.parse('https://openrouter.ai/api/v1'),
+        freeUltra,
+        'test-key',
+        clientFactory: () => MockClient((request) async {
+          final body = jsonDecode(request.body) as Map;
+          final expected = {
+            ...original,
+            'provider': freeProvider,
+          }..remove('response_format');
+          expect(body, expected);
+          expect(body['max_tokens'], 2048);
+          expect(body.containsKey('reasoning'), isFalse);
+          expect(
+            body['messages'].first['content'],
+            contains('needsClarification'),
+          );
+          expect(
+            body['messages'].first['content'],
+            contains('exactly those two keys'),
+          );
+          return http.Response(
+            jsonEncode(
+              completion('stop', '{"needsClarification":false,"questions":[]}'),
+            ),
+            200,
+          );
+        }),
+      );
+      expect(
+        await provider.suggestQuestions(
+          'A useful library',
+          definition: definition,
+        ),
+        isEmpty,
+      );
+    }
+  });
+
+  test('free Ultra transport adaptation cannot change other models or lookalike hosts', () async {
+    for (final endpoint in [
+      (base: 'https://example.test/v1', model: freeUltra),
+      (base: 'https://openrouter.ai.evil.test/api/v1', model: freeUltra),
+      (base: 'https://openrouter.ai@evil.test/api/v1', model: freeUltra),
+      (base: 'https://subdomain.openrouter.ai/api/v1', model: freeUltra),
+      (
+        base: 'https://openrouter.ai/api/v1',
+        model: 'nvidia/nemotron-3-ultra-550b-a55b',
+      ),
+      (
+        base: 'https://openrouter.ai/api/v1',
+        model: 'nvidia/nemotron-3-nano-30b-a3b:free',
+      ),
+      (base: 'https://openrouter.ai/api/v1', model: '$freeUltra-custom'),
+      (
+        base: 'https://openrouter.ai/api/v1',
+        model: 'NVIDIA/NEMOTRON-3-ULTRA-550B-A55B:FREE',
+      ),
+    ]) {
+      for (final editing in [false, true]) {
+        final original = buildAiRequest(
+          endpoint.model,
+          'A useful library',
+          current,
+          editing: editing,
+        );
+        final provider = ChatCompletionProvider(
+          Uri.parse(endpoint.base),
+          endpoint.model,
+          'test-key',
+          clientFactory: () => MockClient((request) async {
+            expect(jsonDecode(request.body), original);
+            return http.Response(jsonEncode(completion('stop', '{}')), 200);
+          }),
+        );
+        await provider.generate('A useful library', current, editing: editing);
+      }
+      final original = buildGuidanceRequest(
+        endpoint.model,
+        'A useful library',
+        definition: current,
+      );
+      final provider = ChatCompletionProvider(
+        Uri.parse(endpoint.base),
+        endpoint.model,
+        'test-key',
+        clientFactory: () => MockClient((request) async {
+          expect(jsonDecode(request.body), original);
+          return http.Response(
+            jsonEncode(
+              completion('stop', '{"needsClarification":false,"questions":[]}'),
+            ),
+            200,
+          );
+        }),
+      );
+      await provider.suggestQuestions('A useful library', definition: current);
+    }
+  });
+
+  test(
+    'OpenRouter free Ultra HTTP failures expose only safe status and metadata',
+    () async {
+      for (final guidance in [false, true]) {
+        for (final status in [401, 429, 503]) {
+          final logs = <String>[];
+          final provider = ChatCompletionProvider(
+            Uri.parse('https://openrouter.ai/api/v1'),
+            freeUltra,
+            'private-key',
+            log: logs.add,
+            clientFactory: () => MockClient((request) async {
+              final body = jsonDecode(request.body) as Map;
+              expect(body['provider'], freeProvider);
+              expect(body.containsKey('response_format'), isFalse);
+              return http.Response(
+                'private-provider-error private-key',
+                status,
+              );
+            }),
+          );
+          await expectLater(
+            guidance
+                ? provider.suggestQuestions('private-idea')
+                : provider.generate('private-idea', current, editing: false),
+            throwsA(
+              isA<AiResponseException>()
+                  .having(
+                    (error) => error.kind,
+                    'kind',
+                    guidance ? 'guidance_http' : 'http_error',
+                  )
+                  .having(
+                    (error) => error.message,
+                    'message',
+                    isNot(contains('private')),
+                  ),
+            ),
+          );
+          expect(logs.single, contains('http_status=$status'));
+          for (final secret in [
+            'private-key',
+            'private-provider-error',
+            'private-idea',
+          ]) {
+            expect(logs.single, isNot(contains(secret)));
+          }
+        }
+      }
+    },
+  );
+
+  test('OpenRouter free Ultra keeps truncation, invalid completion and byte-limit failures', () async {
+    for (final response in [
+      (body: jsonEncode(completion('length', null)), kind: 'truncated'),
+      (body: jsonEncode(completion('stop', null)), kind: 'content_missing'),
+      (
+        body: jsonEncode(completion('tool_calls', null)),
+        kind: 'completion_stopped',
+      ),
+      (
+        body: jsonEncode(completion('error', creationReferenceJson)),
+        kind: 'http_error',
+      ),
+      (body: 'private-invalid-envelope', kind: 'envelope_json'),
+      (
+        body: jsonEncode(
+          completion('stop', 'x' * (Limits.definitionBytes * 3)),
+        ),
+        kind: 'response_size',
+      ),
+    ]) {
+      final provider = ChatCompletionProvider(
+        Uri.parse('https://openrouter.ai/api/v1'),
+        freeUltra,
+        'test-key',
+        clientFactory: () =>
+            MockClient((request) async => http.Response(response.body, 200)),
+      );
+      await expectLater(
+        provider.generate('A useful library', current, editing: false),
+        throwsA(failure(response.kind)),
+      );
+    }
+  });
+
   test(
     'transport records safe completion metadata, never content or credentials',
     () async {
@@ -2805,6 +3315,323 @@ void main() {
       }
     },
   );
+
+  test('HTTP 200 provider errors cannot masquerade as completions or expose private diagnostics', () async {
+    for (final nested in [false, true]) {
+      for (final scenario in [
+        (code: 429, type: 'rate_limit_exceeded', retry: true),
+        (code: 503, type: 'provider_overloaded', retry: true),
+        (code: 401, type: 'authentication', retry: false),
+        (code: 400, type: 'invalid_request', retry: false),
+        (code: 503, type: 'permission_denied', retry: false),
+      ]) {
+        final logs = <String>[];
+        final error = {
+          'code': scenario.code,
+          'message': 'private-provider-message private-key private-request',
+          'metadata': {
+            'error_type': scenario.type,
+            'raw': 'private-raw-body',
+            'flagged_input': 'private-flagged-input',
+            'provider_code': 'private-provider-code',
+          },
+        };
+        final envelope = {
+          'id': 'private-provider-request-id',
+          if (nested)
+            'choices': [
+              {
+                'finish_reason': 'error',
+                'message': {'content': 'private-partial-content'},
+                'error': error,
+              },
+            ]
+          else
+            'error': error,
+        };
+        final provider = ChatCompletionProvider(
+          Uri.parse('https://openrouter.ai/api/v1'),
+          freeUltra,
+          'private-key',
+          log: logs.add,
+          clientFactory: () => MockClient(
+            (_) async => http.Response(
+              jsonEncode(envelope),
+              200,
+              headers: {'retry-after': '900'},
+            ),
+          ),
+        );
+        await expectLater(
+          provider.generate('private-request', current, editing: false),
+          throwsA(
+            isA<AiResponseException>()
+                .having((e) => e.kind, 'kind', 'http_error')
+                .having((e) => e.statusCode, 'code', scenario.code)
+                .having((e) => e.providerErrorType, 'type', scenario.type)
+                .having((e) => e.retryable, 'retryable', scenario.retry)
+                .having(
+                  (e) => e.retryAfter,
+                  'bounded delay',
+                  const Duration(seconds: 120),
+                )
+                .having(
+                  (e) => e.message,
+                  'safe message',
+                  isNot(contains('private')),
+                ),
+          ),
+        );
+        expect(logs.single, contains('http_status=200'));
+        expect(logs.single, contains('provider_error_code=${scenario.code}'));
+        expect(logs.single, contains('provider_error_type=${scenario.type}'));
+        expect(logs.single, contains('request_id_hash='));
+        expect(logs.single, contains('phase=envelope'));
+        expect(logs.single, isNot(contains('private')));
+      }
+    }
+  });
+
+  test('unknown provider error fields are discarded and HTTP retryability is bounded', () async {
+    for (final status in [200, 400, 401, 402, 403, 404, 413, 422, 429, 503]) {
+      final logs = <String>[];
+      final provider = ChatCompletionProvider(
+        Uri.parse('https://example.test/v1'),
+        'model',
+        'private-key',
+        log: logs.add,
+        clientFactory: () => MockClient(
+          (_) async => http.Response(
+            jsonEncode({
+              'id': 'x' * 300,
+              'error': {
+                'code': 'private-code',
+                'message': 'private-message',
+                'metadata': {'error_type': 'private-secret'},
+              },
+            }),
+            status,
+            headers: {
+              'retry-after': 'private-header',
+              'x-request-id': 'x' * 300,
+            },
+          ),
+        ),
+      );
+      await expectLater(
+        provider.generate('private-request', current, editing: false),
+        throwsA(
+          isA<AiResponseException>()
+              .having((e) => e.kind, 'kind', 'http_error')
+              .having(
+                (e) => e.statusCode,
+                'code',
+                status == 200 ? null : status,
+              )
+              .having(
+                (e) => e.providerErrorType,
+                'unknown type omitted',
+                isNull,
+              )
+              .having((e) => e.retryAfter, 'invalid delay omitted', isNull)
+              .having(
+                (e) => e.retryable,
+                'retryable',
+                {200, 429, 503}.contains(status),
+              ),
+        ),
+      );
+      expect(logs.single, isNot(contains('private')));
+      expect(logs.single, contains('request_id_hash=none'));
+      expect(logs.single, contains('provider_error_type=none'));
+    }
+    for (final header in [
+      '0',
+      '17',
+      '999999',
+      '-1',
+      'Thu, 01 Jan 2099 00:00:00 GMT',
+    ]) {
+      final provider = ChatCompletionProvider(
+        Uri.parse('https://example.test/v1'),
+        'model',
+        'key',
+        clientFactory: () => MockClient(
+          (_) async => http.Response('', 429, headers: {'retry-after': header}),
+        ),
+      );
+      final expected = switch (header) {
+        '0' => 1,
+        '17' => 17,
+        '-1' => null,
+        _ => 120,
+      };
+      await expectLater(
+        provider.generate('request', current, editing: false),
+        throwsA(
+          isA<AiResponseException>().having(
+            (e) => e.retryAfter?.inSeconds,
+            'numeric/date delay',
+            expected,
+          ),
+        ),
+      );
+    }
+  });
+
+  test('generation deadline changes only for exact free Ultra and cannot be extended by injection', () {
+    for (final route in [
+      (host: 'openrouter.ai', model: freeUltra, seconds: 90),
+      (host: 'openrouter.ai.evil.test', model: freeUltra, seconds: 45),
+      (host: 'example.test', model: freeUltra, seconds: 45),
+      (
+        host: 'openrouter.ai',
+        model: 'nvidia/nemotron-3-ultra-550b-a55b',
+        seconds: 45,
+      ),
+      (host: 'openrouter.ai', model: freeUltra.toUpperCase(), seconds: 45),
+    ]) {
+      for (final override in <Duration?>[null, const Duration(hours: 1)]) {
+        final provider = ChatCompletionProvider(
+          Uri.https(route.host, '/v1'),
+          route.model,
+          'key',
+          generationTimeout: override,
+        );
+        expect(provider.generationDeadline, Duration(seconds: route.seconds));
+      }
+    }
+  });
+
+  test('streamed headers and partial body share one deadline and retain safe phase evidence', () async {
+    final logs = <String>[];
+    final controller = StreamController<List<int>>();
+    Timer? completionTimer;
+    final provider = ChatCompletionProvider(
+      Uri.parse('https://openrouter.ai/api/v1'),
+      freeUltra,
+      'private-key',
+      generationTimeout: const Duration(milliseconds: 250),
+      log: logs.add,
+      clientFactory: () => MockClient.streaming((request, stream) async {
+        await stream.drain<void>();
+        await Future<void>.delayed(const Duration(milliseconds: 120));
+        controller.add(utf8.encode('{"private-partial":'));
+        completionTimer = Timer(const Duration(milliseconds: 180), () {
+          controller.add(utf8.encode('true}'));
+          controller.close();
+        });
+        return http.StreamedResponse(
+          controller.stream,
+          200,
+          headers: {'x-request-id': 'private-request-id'},
+        );
+      }),
+    );
+    try {
+      await expectLater(
+        provider.generate('private-request', current, editing: false),
+        throwsA(
+          isA<AiResponseException>()
+              .having((e) => e.kind, 'kind', 'timeout')
+              .having((e) => e.retryable, 'retryable', true),
+        ),
+      );
+      expect(logs.single, contains('http_status=200'));
+      expect(logs.single, contains('phase=body'));
+      expect(logs.single, contains('body_bytes=19'));
+      expect(logs.single, contains('deadline_ms=250'));
+      expect(logs.single, isNot(contains('private')));
+    } finally {
+      completionTimer?.cancel();
+      await controller.close();
+    }
+  });
+
+  test(
+    'streamed header timeout is distinguished from completed empty envelopes',
+    () async {
+      final logs = <String>[];
+      final provider = ChatCompletionProvider(
+        Uri.parse('https://example.test/v1'),
+        'model',
+        'key',
+        generationTimeout: const Duration(milliseconds: 30),
+        log: logs.add,
+        clientFactory: () => MockClient.streaming((_, stream) async {
+          await stream.drain<void>();
+          await Future<void>.delayed(const Duration(milliseconds: 60));
+          return http.StreamedResponse(const Stream<List<int>>.empty(), 200);
+        }),
+      );
+      await expectLater(
+        provider.generate('request', current, editing: false),
+        throwsA(failure('timeout')),
+      );
+      expect(logs.single, contains('phase=headers'));
+      expect(logs.single, contains('http_status=none'));
+      expect(logs.single, contains('body_bytes=0'));
+    },
+  );
+
+  test('free instruction schema compaction preserves every creation/edit/repair constraint', () async {
+    for (final editing in [false, true]) {
+      for (final repaired in [false, true]) {
+        const idea = 'A journal with title, notes and optional dates';
+        final rejected = repaired ? creationReferenceJson : null;
+        final diagnostics = repaired
+            ? ['Missing required capabilities: views.interactive.v1']
+            : <String>[];
+        final original = buildAiRequest(
+          freeUltra,
+          idea,
+          current,
+          editing: editing,
+          diagnostics: diagnostics,
+          rejectedOutput: rejected,
+        );
+        final rawSchema = original['response_format']['json_schema']['schema'];
+        final provider = ChatCompletionProvider(
+          Uri.parse('https://openrouter.ai/api/v1'),
+          freeUltra,
+          'key',
+          clientFactory: () => MockClient((request) async {
+            final body = jsonDecode(request.body) as Map;
+            expectFreeGenerationBody(body, original);
+            final system = body['messages'].first['content'] as String;
+            final compacted =
+                jsonDecode(system.split(schemaMarker).last) as Map;
+            if (editing) {
+              // Semantic edits already use a factored schema; do not relocate
+              // their existing references or change their resource semantics.
+              expect(compacted, rawSchema);
+            } else {
+              expect(compacted['anyOf'].first[r'$defs'], isNotEmpty);
+              expect(
+                jsonEncode(compacted).length,
+                lessThan(jsonEncode(rawSchema).length * .8),
+              );
+            }
+            expect(
+              system,
+              contains(
+                'Supported capabilities for requires: ${capabilities.join(', ')}',
+              ),
+            );
+            expect(body['messages'].last, original['messages'].last);
+            return http.Response(jsonEncode(completion('stop', '{}')), 200);
+          }),
+        );
+        await provider.generate(
+          idea,
+          current,
+          editing: editing,
+          diagnostics: diagnostics,
+          rejectedOutput: rejected,
+        );
+      }
+    }
+  });
 
   test('repair output is structured untrusted context and never logged', () async {
     const rejected =

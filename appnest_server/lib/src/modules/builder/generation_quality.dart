@@ -24,6 +24,74 @@ const _recordViewTypes = {
   'checklist',
 };
 
+/// Forms reached by actual record create/edit controls, rather than forms that
+/// merely exist on an orphaned page. This mirrors the renderer's main record
+/// views and their single-hop details/form routes; aggregates are not routes.
+List<ViewSpec> reachableGeneratedRecordForms(
+  AppSpec spec,
+  String collectionId, {
+  bool creationOnly = false,
+}) {
+  final navigation = spec.navigation;
+  if (navigation == null) return const [];
+  final mainViews = {
+    navigation.entryPageId,
+    ...navigation.tabs.map((tab) => tab.pageId),
+  }.expand((id) => spec.page(id).viewIds.map(spec.view));
+  final sources = mainViews
+      .where(
+        (view) =>
+            view.collectionId == collectionId &&
+            _recordViewTypes.contains(view.type),
+      )
+      .toList();
+  final routes = [
+    ...sources,
+    for (final view in sources)
+      if (view.detailPageId != null)
+        ...spec
+            .page(view.detailPageId!)
+            .viewIds
+            .map(spec.view)
+            .where(
+              (detail) =>
+                  detail.type == 'details' &&
+                  detail.collectionId == collectionId,
+            ),
+  ];
+  final forms = <String, ViewSpec>{};
+  // Add controls belong to visible record sources, not a details-only edit
+  // route whose shared form also happens to declare a create action.
+  for (final route in creationOnly ? sources : routes) {
+    if (route.formPageId == null) continue;
+    final capabilities = route.actionIds
+        .map(spec.action)
+        .where(
+          (action) =>
+              {
+                'records.create.v1',
+                'records.patch.v1',
+              }.contains(action.capability) &&
+              (!creationOnly || action.capability == 'records.create.v1'),
+        )
+        .map((action) => action.capability)
+        .toSet();
+    if (capabilities.isEmpty) continue;
+    for (final form in spec.page(route.formPageId!).viewIds.map(spec.view)) {
+      if (form.type == 'form' &&
+          form.collectionId == collectionId &&
+          form.actionIds
+              .map(spec.action)
+              .any(
+                (action) => capabilities.contains(action.capability),
+              )) {
+        forms[form.id] = form;
+      }
+    }
+  }
+  return forms.values.toList();
+}
+
 Map<String, String> _issues(AppSpec spec) {
   final issues = <String, String>{};
   final navigation = spec.navigation;
