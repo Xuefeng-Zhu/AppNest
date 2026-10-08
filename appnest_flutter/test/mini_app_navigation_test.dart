@@ -341,6 +341,7 @@ void main() {
         1,
         reason: history.entries.map((e) => e.uri.toString()).join(' -> '),
       );
+      await tester.ensureVisible(find.text('Make time for a walk'));
       await tester.tap(find.text('Make time for a walk'));
       await tester.pumpAndSettle();
       await tester.ensureVisible(find.text('Edit task'));
@@ -394,6 +395,7 @@ void main() {
       tester,
       const AppNestLocation(appId: 1, pageId: 'tasksPage'),
     );
+    await tester.ensureVisible(find.text('Make time for a walk'));
     await tester.tap(find.text('Make time for a walk'));
     await tester.pumpAndSettle();
     await tester.ensureVisible(find.text('Edit task'));
@@ -448,6 +450,7 @@ void main() {
         tester,
         const AppNestLocation(appId: 1, pageId: 'tasksPage'),
       );
+      await tester.ensureVisible(find.text('Make time for a walk'));
       await tester.tap(find.text('Make time for a walk'));
       await tester.pumpAndSettle();
       await tester.ensureVisible(find.text('Edit task'));
@@ -510,7 +513,7 @@ void main() {
       await tester.tap(find.byTooltip('Close mini-app'));
       await tester.pumpAndSettle();
       expect(router.currentConfiguration.appId, isNull);
-      expect(find.text('What would you like to build?'), findsOneWidget);
+      expect(find.text('Your apps'), findsOneWidget);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
     },

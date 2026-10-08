@@ -68,6 +68,11 @@ abstract class RuntimeAdapter {
     Object error, {
     String fallback = 'Could not complete the request. Try again.',
   }) => error is SpecException ? error.message : fallback;
+
+  /// A transport failure can hide a committed command's response. Typed
+  /// business rejections are definite failures; adapters recognize their own
+  /// service errors here so forms can distinguish correction from recovery.
+  bool commandMayHaveSucceeded(Object error) => error is! SpecException;
   Future<RuntimePage> query(String collectionId, Map<String, dynamic> query);
   Future<void> execute(
     ActionSpec action,

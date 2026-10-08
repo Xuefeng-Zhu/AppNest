@@ -20,17 +20,21 @@ class BuilderScreen extends StatefulWidget {
   final BuilderSnapshot initial;
   final String? initialPrompt;
   final bool startFromScratch;
+  final Future<void> Function()? onClose;
+  final Future<void> Function(int appId)? onPublished;
   const BuilderScreen({
     super.key,
     required this.initial,
     this.initialPrompt,
     this.startFromScratch = false,
+    this.onClose,
+    this.onPublished,
   });
   @override
-  State<BuilderScreen> createState() => _BuilderScreenState();
+  State<BuilderScreen> createState() => BuilderScreenState();
 }
 
-class _BuilderScreenState extends State<BuilderScreen> {
+class BuilderScreenState extends State<BuilderScreen> {
   late BuilderSnapshot draft;
   late PreviewRuntimeAdapter preview;
   final prompt = TextEditingController();
@@ -894,7 +898,11 @@ class _BuilderScreenState extends State<BuilderScreen> {
         ),
       );
       if (mounted) {
-        Navigator.pop(context, reviewed.appId);
+        if (widget.onPublished != null) {
+          await widget.onPublished!(reviewed.appId);
+        } else {
+          Navigator.pop(context, reviewed.appId);
+        }
       }
     });
   }
@@ -1642,6 +1650,8 @@ class _BuilderScreenState extends State<BuilderScreen> {
   Widget build(BuildContext context) => PopScope(
     canPop: allowPop || !visualEditing,
     onPopInvokedWithResult: (didPop, _) async {
+      // Declarative draft routes own the back operation and consult canLeave.
+      if (widget.onClose != null) return;
       if (!didPop && await finishVisualEdit() && mounted) {
         setState(() => allowPop = true);
         if (context.mounted) Navigator.of(context).pop();
@@ -1652,6 +1662,13 @@ class _BuilderScreenState extends State<BuilderScreen> {
       // underlying preview at full height while that keyboard is open.
       resizeToAvoidBottomInset: !visualEditing,
       appBar: AppBar(
+        leading: widget.onClose == null
+            ? null
+            : BackButton(
+                onPressed: () async {
+                  if (await canLeave() && mounted) await widget.onClose!();
+                },
+              ),
         backgroundColor: Colors.white,
         surfaceTintColor: Colors.transparent,
         titleSpacing: 0,
@@ -1749,4 +1766,6 @@ class _BuilderScreenState extends State<BuilderScreen> {
       ),
     ),
   );
+
+  Future<bool> canLeave() => finishVisualEdit();
 }

@@ -50,6 +50,13 @@ Even after correcting the SDK, the workflows target the server package and omit 
 
 ### 2. P2 — Save retry can duplicate a committed create
 
+**Follow-up:** the UI/UX fixes retain the original key, payload and record
+revision in both renderers, expose explicit recovery, and block competing
+mutations while the outcome is unknown. Lost-response widget regressions cover
+create and edit retries. Recovery remains in memory for the mounted runtime;
+pending commands do not survive browser reload. The original reproduction below
+describes the reviewed baseline.
+
 The rich renderer creates a new timestamp-based idempotency key for every `_execute` attempt. A failed Save retains the editor and offers another attempt. If the server committed the first create but its response was lost, the second Save is a new command and bypasses the first receipt. The legacy renderer also creates keys per attempt.
 
 Sources: [rich execution](../packages/appnest_renderer/lib/src/rich_runtime.dart#L561), [legacy execution](../packages/appnest_renderer/lib/src/runtime.dart#L175), [retained editor](../packages/appnest_renderer/lib/src/editor.dart#L144), [live forwarding](../appnest_flutter/lib/features/mini_app/live_adapter.dart#L216), [server receipt lookup](../appnest_server/lib/src/modules/runtime/commands.dart#L16).

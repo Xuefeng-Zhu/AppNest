@@ -123,9 +123,12 @@ void main() {
       await mount(tester, adapter, controller: controller);
       expect(find.text('Today at home'), findsOneWidget);
       expect(find.text('Chores'), findsNothing);
-      expect(find.text(title), findsOneWidget);
+      expect(find.text('Chore: $title'), findsOneWidget);
       final row = find
-          .ancestor(of: find.text(title), matching: find.byType(InkWell))
+          .ancestor(
+            of: find.text('Chore: $title'),
+            matching: find.byType(InkWell),
+          )
           .first;
       expect(
         find.descendant(of: row, matching: find.text(notes)),

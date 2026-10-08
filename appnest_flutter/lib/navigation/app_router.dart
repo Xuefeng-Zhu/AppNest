@@ -5,19 +5,21 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../features/home/home_screen.dart';
+import '../features/builder/draft_loader.dart';
 import '../features/mini_app/mini_app_screen.dart';
 import '../screens/sign_in_screen.dart';
 import 'browser_history.dart';
 
 /// Locations contain identifiers only. The authenticated runtime resolves them.
 class AppNestLocation {
-  final int? appId, recordId;
+  final int? appId, recordId, draftAppId;
   final String? pageId;
   final bool editing;
   final String? historySession;
   final int? historyIndex;
   const AppNestLocation({
     this.appId,
+    this.draftAppId,
     this.pageId,
     this.recordId,
     this.editing = false,
@@ -27,6 +29,12 @@ class AppNestLocation {
 
   factory AppNestLocation.fromUri(Uri uri) {
     final parts = uri.pathSegments;
+    if (parts.length == 2 && parts[0] == 'drafts') {
+      final id = int.tryParse(parts[1]);
+      return id != null && id > 0
+          ? AppNestLocation(draftAppId: id)
+          : const AppNestLocation();
+    }
     if (parts.length != 2 && parts.length != 4) return const AppNestLocation();
     final id = int.tryParse(parts[1]);
     if (parts[0] != 'apps' || id == null || id <= 0) {
@@ -51,6 +59,7 @@ class AppNestLocation {
 
   AppNestLocation withHistory(String session, int index) => AppNestLocation(
     appId: appId,
+    draftAppId: draftAppId,
     pageId: pageId,
     recordId: recordId,
     editing: editing,
@@ -62,7 +71,9 @@ class AppNestLocation {
       ? null
       : MiniAppLocation(pageId!, recordId: recordId, editing: editing);
 
-  Uri get uri => appId == null
+  Uri get uri => draftAppId != null
+      ? Uri(path: '/drafts/$draftAppId')
+      : appId == null
       ? Uri(path: '/')
       : Uri(
           path: '/apps/$appId${pageId == null ? '' : '/pages/$pageId'}',
@@ -122,6 +133,7 @@ class AppNestRouterDelegate extends RouterDelegate<AppNestLocation>
   @override
   final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
   var _appKey = GlobalKey<MiniAppScreenState>();
+  var _draftKey = GlobalKey<DraftLoaderState>();
   AppNestLocation _location = const AppNestLocation();
   final _entries = <AppNestLocation>[];
   static int _sessionSequence = 0;
@@ -203,8 +215,21 @@ class AppNestRouterDelegate extends RouterDelegate<AppNestLocation>
     _push(AppNestLocation(appId: appId, recordId: recordId));
   }
 
-  Future<bool> _canLeave() async =>
-      await _appKey.currentState?.canLeave() ?? true;
+  Future<void> openDraft(int appId) async {
+    if (!await _canLeave()) return;
+    _draftKey = GlobalKey<DraftLoaderState>();
+    _push(AppNestLocation(draftAppId: appId));
+  }
+
+  Future<void> _publishedDraft(int appId) async {
+    _appKey = GlobalKey<MiniAppScreenState>();
+    _launcherRevision++;
+    _replace(AppNestLocation(appId: appId));
+  }
+
+  Future<bool> _canLeave() async => _location.draftAppId != null
+      ? await _draftKey.currentState?.canLeave() ?? true
+      : await _appKey.currentState?.canLeave() ?? true;
 
   Future<void> closeApp() async {
     if (!await _canLeave()) return;
@@ -252,7 +277,8 @@ class AppNestRouterDelegate extends RouterDelegate<AppNestLocation>
     AppNestLocation acceptedConfiguration = configuration;
     try {
       var accepted = true;
-      if (configuration.appId != _location.appId) {
+      if (configuration.appId != _location.appId ||
+          configuration.draftAppId != _location.draftAppId) {
         accepted = await _canLeave();
       } else if (configuration.appId != null && _appKey.currentState != null) {
         final screen = _appKey.currentState!;
@@ -285,7 +311,9 @@ class AppNestRouterDelegate extends RouterDelegate<AppNestLocation>
         _replace(_location);
         return;
       }
-      if (_location.appId != null && acceptedConfiguration.appId == null) {
+      if ((_location.appId != null || _location.draftAppId != null) &&
+          acceptedConfiguration.appId == null &&
+          acceptedConfiguration.draftAppId == null) {
         _launcherRevision++;
       }
       if (incomingIndex != null) {
@@ -295,6 +323,9 @@ class AppNestRouterDelegate extends RouterDelegate<AppNestLocation>
       }
       if (_appKey.currentState?.widget.appId != configuration.appId) {
         _appKey = GlobalKey<MiniAppScreenState>();
+      }
+      if (_draftKey.currentState?.widget.appId != configuration.draftAppId) {
+        _draftKey = GlobalKey<DraftLoaderState>();
       }
       _replace(acceptedConfiguration);
     } finally {
@@ -307,6 +338,10 @@ class AppNestRouterDelegate extends RouterDelegate<AppNestLocation>
     // Dialogs and the builder are imperative routes above these pages.
     final navigator = navigatorKey.currentState;
     if (navigator != null && await navigator.maybePop()) {
+      return true;
+    }
+    if (_location.draftAppId != null) {
+      await closeApp();
       return true;
     }
     if (_location.appId == null) return false;
@@ -325,9 +360,24 @@ class AppNestRouterDelegate extends RouterDelegate<AppNestLocation>
             key: const ValueKey('launcher'),
             child: HomeScreen(
               onOpenApp: openApp,
+              onResumeDraft: openDraft,
               refreshToken: _launcherRevision,
             ),
           ),
+          if (_location.draftAppId != null)
+            MaterialPage<void>(
+              key: ValueKey('draft-${_location.draftAppId}'),
+              canPop: false,
+              onPopInvoked: (didPop, result) async {
+                if (!didPop) await closeApp();
+              },
+              child: DraftLoader(
+                key: _draftKey,
+                appId: _location.draftAppId!,
+                onClose: closeApp,
+                onPublished: _publishedDraft,
+              ),
+            ),
           if (_location.appId != null)
             MaterialPage<void>(
               key: ValueKey('mini-app-${_location.appId}'),

@@ -35,6 +35,7 @@ class _RichMiniAppRuntimeState extends State<_RichMiniAppRuntime>
   final _storage = PageStorageBucket();
   late MiniAppLocation _location;
   RuntimeItem? _record;
+  _RuntimeCommand? _pendingCommand;
   List<RuntimeReminderState>? _reminder;
   Object? _error;
   ModalRoute<void>? _editorRoute;
@@ -90,6 +91,7 @@ class _RichMiniAppRuntimeState extends State<_RichMiniAppRuntime>
       _attach();
     }
     if (oldWidget.adapter != adapter || oldWidget.adapter.spec != spec) {
+      _pendingCommand = null;
       _request++;
       _views.clear();
       _record = null;
@@ -171,6 +173,36 @@ class _RichMiniAppRuntimeState extends State<_RichMiniAppRuntime>
 
   Future<bool> _canLeave() async {
     if (_saving) return false;
+    if (_pendingCommand != null) {
+      final leave =
+          await showDialog<bool>(
+            context: context,
+            builder: (context) => AlertDialog(
+              title: const Text('Save outcome unconfirmed'),
+              content: const Text(
+                'Your changes may already be saved. Retry to check the original request, or leave without retrying. Reopening will not retry this request automatically.',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  child: const Text('Return to save'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(context, true),
+                  child: const Text('Leave without retrying'),
+                ),
+              ],
+            ),
+          ) ??
+          false;
+      if (leave && mounted) {
+        setState(() {
+          _pendingCommand = null;
+          _formDirty = false;
+        });
+      }
+      return leave;
+    }
     if (!_formDirty) return true;
     return await showDialog<bool>(
           context: context,
@@ -436,7 +468,7 @@ class _RichMiniAppRuntimeState extends State<_RichMiniAppRuntime>
     RuntimeItem? item, {
     ViewSpec? source,
   }) async {
-    if (!_permitted(action, item) || _saving) return;
+    if (!_permitted(action, item) || _saving || _pendingCommand != null) return;
     final edit = _VisualEditScope.of(context);
     if (edit != null) {
       edit.onSelect(
@@ -527,6 +559,7 @@ class _RichMiniAppRuntimeState extends State<_RichMiniAppRuntime>
               constraints: const BoxConstraints(maxWidth: 640),
               child: SingleChildScrollView(
                 child: _RecordEditor(
+                  action: action,
                   collection: spec.collection(action.collectionId),
                   initial: item?.data,
                   capacity: item?.capacity,
@@ -542,8 +575,14 @@ class _RichMiniAppRuntimeState extends State<_RichMiniAppRuntime>
                     Navigator.pop(dialogContext);
                     return true;
                   },
-                  onSave: (input) async {
-                    await _execute(action, item, input, propagateError: true);
+                  onSave: (command) async {
+                    await _execute(
+                      command.action,
+                      command.record,
+                      command.input,
+                      command: command,
+                      propagateError: true,
+                    );
                     if (dialogContext.mounted) Navigator.pop(dialogContext);
                   },
                 ),
@@ -564,22 +603,28 @@ class _RichMiniAppRuntimeState extends State<_RichMiniAppRuntime>
     Map<String, dynamic> input, {
     bool editor = false,
     bool propagateError = false,
+    _RuntimeCommand? command,
   }) async {
     if (_VisualEditScope.of(context) != null) return;
-    if (!_permitted(action, item))
+    final recovering = command != null && _pendingCommand?.key == command.key;
+    if (_saving || (_pendingCommand != null && !recovering)) {
+      const message =
+          'Resolve the unconfirmed save before making another change.';
+      if (editor || propagateError) throw const SpecException(message);
+      _showFeedback(message);
+      return;
+    }
+    if (!recovering && !_permitted(action, item))
       throw const SpecException('This action is unavailable.');
+    final request = command ?? _RuntimeCommand(action, item, input);
     setState(() => _saving = true);
     try {
-      await adapter.execute(
-        action,
-        item,
-        input,
-        'ui-${DateTime.now().microsecondsSinceEpoch}-${item?.id ?? 0}',
-      );
+      await request.execute(adapter);
       if (!mounted) return;
       setState(() {
         _saving = false;
         _formDirty = false;
+        _pendingCommand = null;
       });
       _showFeedback(adapter.preview ? 'Simulated in preview' : 'Saved');
       if (editor) {
@@ -588,7 +633,14 @@ class _RichMiniAppRuntimeState extends State<_RichMiniAppRuntime>
         await _refresh();
       }
     } catch (error) {
-      if (mounted) setState(() => _saving = false);
+      if (mounted) {
+        setState(() {
+          _saving = false;
+          _pendingCommand = recovering || adapter.commandMayHaveSucceeded(error)
+              ? request
+              : null;
+        });
+      }
       if (editor || propagateError) rethrow;
       if (mounted) {
         _showFeedback(
@@ -616,6 +668,20 @@ class _RichMiniAppRuntimeState extends State<_RichMiniAppRuntime>
         content: Text(message),
       ),
     );
+  }
+
+  Future<void> _retryPending() async {
+    final command = _pendingCommand;
+    if (command == null || _saving) return;
+    await _execute(
+      command.action,
+      command.record,
+      command.input,
+      command: command,
+    );
+    if (mounted && _pendingCommand == null && !_formDirty && _formPage) {
+      await _back();
+    }
   }
 
   String _actionLabel(ActionSpec action, RuntimeItem? item) {
@@ -711,6 +777,26 @@ class _RichMiniAppRuntimeState extends State<_RichMiniAppRuntime>
                     ),
                   if (_loading || _saving)
                     const LinearProgressIndicator(minHeight: 2),
+                  if (_pendingCommand != null &&
+                      (!_formPage ||
+                          _error != null ||
+                          !_permitted(_pendingCommand!.action, _record)))
+                    MaterialBanner(
+                      content: Semantics(
+                        liveRegion: true,
+                        child: const Text(
+                          'Save outcome unconfirmed. Your changes may already be saved.',
+                        ),
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: _saving ? null : _retryPending,
+                          child: Text(
+                            _saving ? 'Checking save…' : 'Retry save',
+                          ),
+                        ),
+                      ],
+                    ),
                   Expanded(child: _content(context)),
                 ],
               ),
@@ -833,21 +919,26 @@ class _RichMiniAppRuntimeState extends State<_RichMiniAppRuntime>
                             MiniAppEditKind.page,
                             page.id,
                           ),
-                          child: Text(
-                            page.title,
-                            style: Theme.of(context).textTheme.headlineMedium
-                                ?.copyWith(
-                                  fontWeight: spec.appearance == null
-                                      ? FontWeight.w700
-                                      : null,
-                                ),
+                          child: Semantics(
+                            header: true,
+                            child: Text(
+                              page.title,
+                              style: Theme.of(context).textTheme.headlineMedium
+                                  ?.copyWith(
+                                    fontWeight: spec.appearance == null
+                                        ? FontWeight.w700
+                                        : null,
+                                  ),
+                            ),
                           ),
                         ),
                       ],
                     ),
                     if (primary != null && _permitted(primary, null))
                       FilledButton.icon(
-                        onPressed: _saving ? null : () => _run(primary, null),
+                        onPressed: _saving || _pendingCommand != null
+                            ? null
+                            : () => _run(primary, null),
                         icon: const Icon(Icons.add),
                         label: Text(primary.label),
                       ),
@@ -978,6 +1069,7 @@ class _RichMiniAppRuntimeState extends State<_RichMiniAppRuntime>
         return const Text('You have read-only access to this record.');
       return _RecordEditor(
         key: ValueKey('editor-${view.id}-${_location.recordId}'),
+        action: action,
         collection: spec.collection(view.collectionId),
         initial: _record?.data,
         capacity: _record?.capacity,
@@ -987,8 +1079,15 @@ class _RichMiniAppRuntimeState extends State<_RichMiniAppRuntime>
         options: view.options,
         adapter: adapter,
         record: _record,
+        pendingCommand: _pendingCommand,
         onDirtyChanged: (value) => _formDirty = value,
-        onSave: (input) => _execute(action, _record, input, editor: true),
+        onSave: (command) => _execute(
+          command.action,
+          command.record,
+          command.input,
+          command: command,
+          editor: true,
+        ),
         onCancel: _back,
       );
     }
@@ -1053,7 +1152,7 @@ class _RichMiniAppRuntimeState extends State<_RichMiniAppRuntime>
               child: Padding(
                 padding: const EdgeInsets.only(bottom: 12),
                 child: FilledButton.icon(
-                  onPressed: _saving
+                  onPressed: _saving || _pendingCommand != null
                       ? null
                       : () => _run(action, null, source: view),
                   icon: const Icon(Icons.add),
@@ -1369,7 +1468,9 @@ class _RichMiniAppRuntimeState extends State<_RichMiniAppRuntime>
               MiniAppLocation(view.detailPageId!, recordId: item.id),
             ),
       child: Padding(
-        padding: const EdgeInsets.all(18),
+        padding: EdgeInsets.all(
+          MediaQuery.sizeOf(context).width < 760 ? 14 : 18,
+        ),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -1378,7 +1479,9 @@ class _RichMiniAppRuntimeState extends State<_RichMiniAppRuntime>
                 padding: const EdgeInsets.only(right: 10),
                 child: IconButton(
                   tooltip: _actionLabel(workflow, item),
-                  onPressed: _saving ? null : () => _run(workflow, item),
+                  onPressed: _saving || _pendingCommand != null
+                      ? null
+                      : () => _run(workflow, item),
                   icon: Icon(
                     _workflowIcon(workflow, item),
                     color: Theme.of(context).colorScheme.primary,
@@ -1429,14 +1532,11 @@ class _RichMiniAppRuntimeState extends State<_RichMiniAppRuntime>
                                   )
                                 : Text(
                                     field.type == FieldType.timestamp
-                                        ? _displayDate(
-                                            context,
-                                            '${item.data[field.id]}',
-                                          )
-                                        : '${item.data[field.id]}',
+                                        ? '${field.label}: ${_displayDate(context, '${item.data[field.id]}')}'
+                                        : '${field.label}: ${item.data[field.id]}',
                                     style: Theme.of(context)
                                         .textTheme
-                                        .bodySmall,
+                                        .bodyMedium,
                                   ),
                             pageId: page.id,
                           ),
@@ -1452,7 +1552,7 @@ class _RichMiniAppRuntimeState extends State<_RichMiniAppRuntime>
                         children: [
                           for (final action in inlineActions)
                             OutlinedButton(
-                              onPressed: _saving
+                              onPressed: _saving || _pendingCommand != null
                                   ? null
                                   : () => _run(action, item, source: view),
                               child: Text(_actionLabel(action, item)),
@@ -1552,7 +1652,7 @@ class _RichMiniAppRuntimeState extends State<_RichMiniAppRuntime>
               children: [
                 for (final action in _recordActions(view, item))
                   OutlinedButton(
-                    onPressed: _saving
+                    onPressed: _saving || _pendingCommand != null
                         ? null
                         : () => _run(action, item, source: view),
                     child: Text(_actionLabel(action, item)),

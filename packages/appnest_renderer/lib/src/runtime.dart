@@ -1,5 +1,36 @@
 part of '../appnest_renderer.dart';
 
+// Keep every receipt-bound value from the original attempt. A refreshed record
+// may have a newer revision precisely because the original command committed.
+class _RuntimeCommand {
+  final ActionSpec action;
+  final RuntimeItem? record;
+  final Map<String, dynamic> input;
+  final String key;
+  _RuntimeCommand(this.action, RuntimeItem? item, Map<String, dynamic> data)
+    : record = item == null
+          ? null
+          : RuntimeItem(
+              item.id,
+              item.collectionId,
+              Map<String, dynamic>.from(_copyPreviewValue(item.data) as Map),
+              revision: item.revision,
+              capacity: item.capacity,
+              allocated: item.allocated,
+              claimed: item.claimed,
+              allowedActions: List.of(item.allowedActions),
+            ),
+      input = Map<String, dynamic>.from(_copyPreviewValue(data) as Map),
+      key = 'ui-${DateTime.now().microsecondsSinceEpoch}-${item?.id ?? 0}';
+
+  Future<void> execute(RuntimeAdapter adapter) => adapter.execute(
+    action,
+    record,
+    Map<String, dynamic>.from(_copyPreviewValue(input) as Map),
+    key,
+  );
+}
+
 class _LegacyMiniAppRuntime extends StatefulWidget {
   final RuntimeAdapter adapter;
   const _LegacyMiniAppRuntime({required this.adapter});
@@ -18,6 +49,7 @@ class __LegacyMiniAppRuntimeState extends State<_LegacyMiniAppRuntime>
   Timer? reconnectTimer;
   String? filterChoice;
   String search = '';
+  _RuntimeCommand? _pendingCommand;
   RuntimeAdapter get adapter => widget.adapter;
   ViewSpec get view => adapter.spec.views.firstWhere((v) => v.id == viewId);
   @override
@@ -126,6 +158,7 @@ class __LegacyMiniAppRuntimeState extends State<_LegacyMiniAppRuntime>
   }
 
   Future<void> run(ActionSpec action, RuntimeItem? item) async {
+    if (_pendingCommand != null || loading) return;
     final edit = _VisualEditScope.of(context);
     if (edit != null) {
       edit.onSelect(MiniAppEditTarget(MiniAppEditKind.section, view.id));
@@ -173,11 +206,16 @@ class __LegacyMiniAppRuntimeState extends State<_LegacyMiniAppRuntime>
       input = {};
     }
     if (input == null || !mounted) return;
+    await _execute(_RuntimeCommand(action, item, input));
+  }
+
+  Future<void> _execute(_RuntimeCommand command) async {
     // Never imply a place is reserved until execute has returned successfully.
-    final key = 'ui-${DateTime.now().microsecondsSinceEpoch}-${item?.id ?? 0}';
+    final recovering = _pendingCommand != null;
     setState(() => loading = true);
     try {
-      await adapter.execute(action, item, input, key);
+      await command.execute(adapter);
+      _pendingCommand = null;
       if (mounted)
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -190,6 +228,9 @@ class __LegacyMiniAppRuntimeState extends State<_LegacyMiniAppRuntime>
         setState(() {
           error = e;
           loading = false;
+          _pendingCommand = recovering || adapter.commandMayHaveSucceeded(e)
+              ? command
+              : null;
         });
     }
   }
@@ -211,6 +252,21 @@ class __LegacyMiniAppRuntimeState extends State<_LegacyMiniAppRuntime>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        if (_pendingCommand case final command?)
+          MaterialBanner(
+            content: Semantics(
+              liveRegion: true,
+              child: const Text(
+                'Save outcome unconfirmed. Retry the original request to check whether it was saved.',
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: loading ? null : () => _execute(command),
+                child: Text(loading ? 'Checking save…' : 'Retry save'),
+              ),
+            ],
+          ),
         if (adapter.preview && _VisualEditScope.of(context) == null)
           const MaterialBanner(
             content: Text(
@@ -259,7 +315,9 @@ class __LegacyMiniAppRuntimeState extends State<_LegacyMiniAppRuntime>
               ),
               if (create != null)
                 FilledButton.icon(
-                  onPressed: loading ? null : () => run(create, null),
+                  onPressed: loading || _pendingCommand != null
+                      ? null
+                      : () => run(create, null),
                   icon: const Icon(Icons.add),
                   label: Text(create.label),
                 ),
@@ -356,7 +414,7 @@ class __LegacyMiniAppRuntimeState extends State<_LegacyMiniAppRuntime>
                     child: Text('A fresh start. Add the first record.'),
                   )
                 : AbsorbPointer(
-                    absorbing: loading,
+                    absorbing: loading || _pendingCommand != null,
                     child: SingleChildScrollView(
                       padding: EdgeInsets.all(_space(context, 16)),
                       child: Column(

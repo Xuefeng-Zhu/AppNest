@@ -1,6 +1,7 @@
 part of '../appnest_renderer.dart';
 
 class _RecordEditor extends StatefulWidget {
+  final ActionSpec action;
   final CollectionSpec collection;
   final Map<String, dynamic>? initial;
   final int? capacity;
@@ -8,19 +9,22 @@ class _RecordEditor extends StatefulWidget {
   final Future<List<String>> Function() members;
   final RuntimeAdapter? adapter;
   final RuntimeItem? record;
+  final _RuntimeCommand? pendingCommand;
   final Map<String, dynamic> options;
   final DateTime Function() clock;
   final ValueChanged<bool> onDirtyChanged;
-  final Future<void> Function(Map<String, dynamic>) onSave;
+  final Future<void> Function(_RuntimeCommand) onSave;
   final Future<bool> Function() onCancel;
   const _RecordEditor({
     super.key,
+    required this.action,
     required this.collection,
     this.initial,
     this.capacity,
     required this.members,
     this.adapter,
     this.record,
+    this.pendingCommand,
     this.options = const {},
     required this.clock,
     required this.fieldIds,
@@ -35,9 +39,13 @@ class _RecordEditor extends StatefulWidget {
 class _RecordEditorState extends State<_RecordEditor> {
   final _controllers = <String, TextEditingController>{};
   final _values = <String, dynamic>{};
+  final _fieldErrors = <String, String>{};
+  final _fieldKeys = <String, GlobalKey>{};
+  final _focusNodes = <String, FocusNode>{};
+  _RuntimeCommand? _pendingCommand;
   final _capacity = TextEditingController();
   List<String> _members = [];
-  bool _saving = false, _uploading = false;
+  bool _saving = false, _uploading = false, _retryingSave = false;
   int _stepIndex = 0;
   List<Map<String, dynamic>> get steps => [
     for (final step in widget.options['steps'] as List? ?? [])
@@ -76,18 +84,32 @@ class _RecordEditorState extends State<_RecordEditor> {
   @override
   void initState() {
     super.initState();
-    _capacity.text = '${widget.capacity ?? 1}';
+    _pendingCommand = widget.pendingCommand;
+    if (_pendingCommand != null) {
+      _error =
+          'Save outcome unconfirmed. Your changes may already be saved. '
+          'Retry save to check the original request before making changes.';
+      if (steps.isNotEmpty) _stepIndex = steps.length - 1;
+    }
+    _capacity.text =
+        '${_pendingCommand?.input['capacity'] ?? widget.capacity ?? 1}';
+    _fieldKeys['capacity'] = GlobalKey();
+    _focusNodes['capacity'] = FocusNode();
     _capacity.addListener(_dirty);
     for (final field in fields) {
-      final value =
-          widget.initial?[field.id] ??
-          (field.required
-              ? switch (field.type) {
-                  FieldType.choice => field.choices.first,
-                  FieldType.boolean => false,
-                  _ => null,
-                }
-              : null);
+      _fieldKeys[field.id] = GlobalKey();
+      _focusNodes[field.id] = FocusNode();
+      final pendingData = _pendingCommand?.input['data'] as Map?;
+      final value = pendingData?.containsKey(field.id) == true
+          ? pendingData![field.id]
+          : widget.initial?[field.id] ??
+                (field.required
+                    ? switch (field.type) {
+                        FieldType.choice => field.choices.first,
+                        FieldType.boolean => false,
+                        _ => null,
+                      }
+                    : null);
       _values[field.id] = value;
       _controllers[field.id] = TextEditingController(
         text: value?.toString() ?? '',
@@ -114,6 +136,9 @@ class _RecordEditorState extends State<_RecordEditor> {
   @override
   void dispose() {
     _capacity.dispose();
+    for (final node in _focusNodes.values) {
+      node.dispose();
+    }
     for (final controller in _controllers.values) {
       controller.dispose();
     }
@@ -141,10 +166,69 @@ class _RecordEditorState extends State<_RecordEditor> {
     _dirty();
   }
 
+  Map<String, dynamic>? _validate(
+    List<FieldSpec> checkedFields, {
+    bool capacity = false,
+  }) {
+    final data = <String, dynamic>{};
+    final errors = <String, String>{};
+    for (final field in checkedFields) {
+      try {
+        data[field.id] = _normalized(field);
+      } catch (error) {
+        errors[field.id] = error is FormatException
+            ? '${field.label} must be ${field.type == FieldType.integer ? 'a whole number' : 'a number'}.'
+            : _message(error, 'Check ${field.label.toLowerCase()}.');
+      }
+    }
+    if (capacity) {
+      final value = int.tryParse(_capacity.text.trim());
+      if (value == null || value < 0 || value > 10000) {
+        errors['capacity'] =
+            'Capacity must be a whole number from 0 to 10,000.';
+      }
+    }
+    setState(() {
+      _fieldErrors
+        ..clear()
+        ..addAll(errors);
+      _error = errors.isEmpty
+          ? null
+          : 'Please check ${errors.length == 1 ? 'the highlighted field' : 'the highlighted fields'}.';
+      if (errors.isNotEmpty && steps.isNotEmpty) {
+        final index = steps.indexWhere(
+          (step) => (step['fieldIds'] as List).contains(errors.keys.first),
+        );
+        _stepIndex = index < 0 ? steps.length - 1 : index;
+      }
+    });
+    if (errors.isEmpty) return data;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final id = errors.keys.first;
+      _focusNodes[id]?.requestFocus();
+      final fieldContext = _fieldKeys[id]?.currentContext;
+      if (fieldContext != null) {
+        Scrollable.ensureVisible(
+          fieldContext,
+          alignment: .15,
+          duration: const Duration(milliseconds: 200),
+        );
+      }
+    });
+    return null;
+  }
+
   Future<void> _save() async {
-    if (_saving) return;
-    try {
-      final data = {for (final field in fields) field.id: _normalized(field)};
+    if (_saving || _uploading) return;
+    final retrying = _pendingCommand != null;
+    _retryingSave = retrying;
+    final hasCapacity =
+        creating &&
+        widget.collection.behaviors.any((b) => b.type == 'capacity.v1');
+    if (!retrying) {
+      final data = _validate(fields, capacity: hasCapacity);
+      if (data == null) return;
       if (creating) {
         for (final behavior in widget.collection.behaviors.where(
           (b) => b.type == 'workflow.v1',
@@ -155,109 +239,171 @@ class _RecordEditorState extends State<_RecordEditor> {
               .first;
         }
       }
-      setState(() {
-        _saving = true;
-        _error = null;
-      });
-      await widget.onSave({
+      _pendingCommand = _RuntimeCommand(widget.action, widget.record, {
         'data': data,
-        if (creating &&
-            widget.collection.behaviors.any((b) => b.type == 'capacity.v1'))
-          'capacity': int.parse(_capacity.text),
+        if (hasCapacity) 'capacity': int.parse(_capacity.text.trim()),
       });
+    }
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    try {
+      await widget.onSave(_pendingCommand!);
     } catch (error) {
-      if (mounted)
-        setState(() {
-          _saving = false;
-          _error = 'Could not save. ${_message(error, 'Try again.')}';
-        });
+      if (!mounted) return;
+      setState(() {
+        _saving = false;
+        if (retrying ||
+            (widget.adapter?.commandMayHaveSucceeded(error) ??
+                error is! SpecException)) {
+          _error =
+              'Save outcome unconfirmed. Your changes may already be saved. '
+              'Retry save to check the original request before making changes.';
+        } else {
+          _pendingCommand = null;
+          _error =
+              'Could not save. ${_message(error, 'Check your values and try again.')}';
+        }
+      });
     }
   }
 
   @override
-  Widget build(BuildContext context) => Card(
-    child: Padding(
-      padding: EdgeInsets.all(_space(context, 24)),
-      child: AbsorbPointer(
-        absorbing: _saving || _uploading,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            if (steps.isNotEmpty) ...[
-              Text(
-                'Step ${_stepIndex + 1} of ${steps.length}',
-                style: Theme.of(context).textTheme.labelLarge,
-              ),
-              Text(
-                steps[_stepIndex]['title'] as String,
-                style: Theme.of(context).textTheme.titleLarge,
-              ),
-              const SizedBox(height: 8),
-              LinearProgressIndicator(
-                value: (_stepIndex + 1) / steps.length,
-                semanticsLabel: 'Form progress',
-              ),
-              const SizedBox(height: 24),
-            ],
-            for (final field in visibleFields)
-              Padding(
-                key: ValueKey('editor-field-${field.id}'),
-                padding: EdgeInsets.only(bottom: _space(context, 20)),
-                child: _fieldControl(field),
-              ),
-            if (creating &&
-                (_stepIndex == steps.length - 1 || steps.isEmpty) &&
-                widget.collection.behaviors.any((b) => b.type == 'capacity.v1'))
-              Padding(
-                padding: EdgeInsets.only(bottom: _space(context, 20)),
-                child: TextField(
-                  controller: _capacity,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(labelText: 'Capacity *'),
-                ),
-              ),
-            if (_uploading)
-              const LinearProgressIndicator(semanticsLabel: 'Uploading image'),
-            if (_error != null)
-              Padding(
-                padding: EdgeInsets.only(bottom: _space(context, 20)),
-                child: Text(
-                  _error!,
-                  style: TextStyle(color: Theme.of(context).colorScheme.error),
-                ),
-              ),
-            Wrap(
-              spacing: 12,
-              runSpacing: 12,
+  Widget build(BuildContext context) => Align(
+    alignment: Alignment.topLeft,
+    child: ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 720),
+      child: Card(
+        child: Padding(
+          padding: EdgeInsets.all(_space(context, 24)),
+          child: AbsorbPointer(
+            absorbing: _saving || _uploading,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                if (_stepIndex > 0)
-                  OutlinedButton(
-                    onPressed: _saving
-                        ? null
-                        : () => setState(() {
-                            _stepIndex--;
-                            _error = null;
-                          }),
-                    child: const Text('Previous'),
+                if (steps.isNotEmpty) ...[
+                  Text(
+                    'Step ${_stepIndex + 1} of ${steps.length}',
+                    style: Theme.of(context).textTheme.labelLarge,
                   ),
-                if (steps.isNotEmpty && _stepIndex < steps.length - 1)
-                  FilledButton(
-                    onPressed: _saving ? null : _nextStep,
-                    child: const Text('Next step'),
-                  )
-                else
-                  FilledButton.icon(
-                    onPressed: _saving ? null : _save,
-                    icon: const Icon(Icons.check),
-                    label: Text(_saving ? 'Saving…' : 'Save'),
+                  Text(
+                    steps[_stepIndex]['title'] as String,
+                    style: Theme.of(context).textTheme.titleLarge,
                   ),
-                TextButton(
-                  onPressed: _saving ? null : widget.onCancel,
-                  child: const Text('Cancel'),
+                  const SizedBox(height: 8),
+                  LinearProgressIndicator(
+                    value: (_stepIndex + 1) / steps.length,
+                    semanticsLabel: 'Form progress',
+                  ),
+                  const SizedBox(height: 24),
+                ],
+                for (final field in visibleFields)
+                  Padding(
+                    key: ValueKey('editor-field-${field.id}'),
+                    padding: EdgeInsets.only(bottom: _space(context, 20)),
+                    child: AbsorbPointer(
+                      absorbing: _pendingCommand != null,
+                      child: Focus(
+                        descendantsAreFocusable: _pendingCommand == null,
+                        canRequestFocus: _pendingCommand == null,
+                        key: _fieldKeys[field.id],
+                        focusNode:
+                            {
+                              FieldType.text,
+                              FieldType.integer,
+                              FieldType.number,
+                              FieldType.choice,
+                              FieldType.member,
+                            }.contains(field.type)
+                            ? null
+                            : _focusNodes[field.id],
+                        child: _fieldControl(field),
+                      ),
+                    ),
+                  ),
+                if (creating &&
+                    (_stepIndex == steps.length - 1 || steps.isEmpty) &&
+                    widget.collection.behaviors.any(
+                      (b) => b.type == 'capacity.v1',
+                    ))
+                  Padding(
+                    padding: EdgeInsets.only(bottom: _space(context, 20)),
+                    child: TextField(
+                      key: _fieldKeys['capacity'],
+                      enabled: _pendingCommand == null,
+                      focusNode: _focusNodes['capacity'],
+                      controller: _capacity,
+                      keyboardType: TextInputType.number,
+                      decoration: InputDecoration(
+                        labelText: 'Capacity *',
+                        errorText: _fieldErrors['capacity'],
+                      ),
+                    ),
+                  ),
+                if (_uploading)
+                  const LinearProgressIndicator(
+                    semanticsLabel: 'Uploading image',
+                  ),
+                if (_error != null)
+                  Padding(
+                    padding: EdgeInsets.only(bottom: _space(context, 20)),
+                    child: Semantics(
+                      liveRegion: true,
+                      child: Text(
+                        _error!,
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.error,
+                        ),
+                      ),
+                    ),
+                  ),
+                Wrap(
+                  spacing: 12,
+                  runSpacing: 12,
+                  children: [
+                    if (_stepIndex > 0)
+                      OutlinedButton(
+                        onPressed: _saving || _pendingCommand != null
+                            ? null
+                            : () => setState(() {
+                                _stepIndex--;
+                                _error = null;
+                              }),
+                        child: const Text('Previous'),
+                      ),
+                    if (steps.isNotEmpty && _stepIndex < steps.length - 1)
+                      FilledButton(
+                        onPressed: _saving || _pendingCommand != null
+                            ? null
+                            : _nextStep,
+                        child: const Text('Next step'),
+                      )
+                    else
+                      FilledButton.icon(
+                        onPressed: _saving ? null : _save,
+                        icon: const Icon(Icons.check),
+                        label: Text(
+                          _saving
+                              ? (_pendingCommand != null && _retryingSave
+                                    ? 'Checking save…'
+                                    : 'Saving…')
+                              : _pendingCommand != null
+                              ? 'Retry save'
+                              : 'Save',
+                        ),
+                      ),
+                    TextButton(
+                      onPressed: _saving || _pendingCommand != null
+                          ? null
+                          : widget.onCancel,
+                      child: const Text('Cancel'),
+                    ),
+                  ],
                 ),
               ],
             ),
-          ],
+          ),
         ),
       ),
     ),
@@ -279,10 +425,12 @@ class _RecordEditorState extends State<_RecordEditor> {
     } else {
       result = switch (field.type) {
         FieldType.choice || FieldType.member => DropdownButtonFormField<String>(
+          focusNode: _focusNodes[field.id],
           initialValue: _values[field.id] as String?,
           isExpanded: true,
           decoration: InputDecoration(
             labelText: '${field.label}${field.required ? ' *' : ''}',
+            errorText: _fieldErrors[field.id],
           ),
           items: [
             if (!field.required)
@@ -297,10 +445,12 @@ class _RecordEditorState extends State<_RecordEditor> {
                 child: Text(value, overflow: TextOverflow.ellipsis),
               ),
           ],
-          onChanged: (value) {
-            _values[field.id] = value;
-            _dirty();
-          },
+          onChanged: _pendingCommand != null
+              ? null
+              : (value) {
+                  _values[field.id] = value;
+                  _dirty();
+                },
         ),
         FieldType.boolean => CheckboxListTile(
           title: Text(field.label),
@@ -351,9 +501,12 @@ class _RecordEditorState extends State<_RecordEditor> {
           ],
         ),
         _ => TextField(
+          focusNode: _focusNodes[field.id],
+          readOnly: _pendingCommand != null,
           controller: _controllers[field.id],
           decoration: InputDecoration(
             labelText: '${field.label}${field.required ? ' *' : ''}',
+            errorText: _fieldErrors[field.id],
           ),
           keyboardType:
               {FieldType.integer, FieldType.number}.contains(field.type)
@@ -377,6 +530,24 @@ class _RecordEditorState extends State<_RecordEditor> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         result,
+        if (_fieldErrors[field.id] != null &&
+            !{
+              FieldType.text,
+              FieldType.integer,
+              FieldType.number,
+              FieldType.choice,
+              FieldType.member,
+            }.contains(field.type))
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Semantics(
+              liveRegion: true,
+              child: Text(
+                _fieldErrors[field.id]!,
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+            ),
+          ),
         if (hint != null)
           Padding(
             padding: const EdgeInsets.only(top: 6),
@@ -388,14 +559,15 @@ class _RecordEditorState extends State<_RecordEditor> {
 
   dynamic _normalized(FieldSpec field) {
     final text = _controllers[field.id]!.text;
+    final numberText = text.trim();
     final value = switch (field.type) {
       FieldType.choice ||
       FieldType.boolean ||
       FieldType.member ||
       FieldType.timestamp ||
       FieldType.image => _values[field.id],
-      FieldType.integer => text.isEmpty ? null : int.parse(text),
-      FieldType.number => text.isEmpty ? null : double.parse(text),
+      FieldType.integer => numberText.isEmpty ? null : int.parse(numberText),
+      FieldType.number => numberText.isEmpty ? null : double.parse(numberText),
       _ => text.isEmpty ? null : text,
     };
     final normalized = field.normalize(value);
@@ -415,20 +587,11 @@ class _RecordEditorState extends State<_RecordEditor> {
   }
 
   void _nextStep() {
-    try {
-      for (final field in visibleFields) {
-        _normalized(field);
-      }
-      setState(() {
-        _stepIndex++;
-        _error = null;
-      });
-    } catch (error) {
-      setState(
-        () => _error =
-            'Please check this step. ${_message(error, 'Review the entered values.')}',
-      );
-    }
+    if (_validate(visibleFields) == null) return;
+    setState(() {
+      _stepIndex++;
+      _error = null;
+    });
   }
 
   Widget _switchControl(FieldSpec field) => Column(
@@ -461,37 +624,54 @@ class _RecordEditorState extends State<_RecordEditor> {
     ],
   );
 
-  Widget _segmentedControl(FieldSpec field) => Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      Text('${field.label}${field.required ? ' *' : ''}'),
-      const SizedBox(height: 8),
-      Wrap(
-        spacing: 8,
-        runSpacing: 8,
-        children: [
-          if (!field.required)
-            ChoiceChip(
-              label: const Text('Not set'),
-              selected: _values[field.id] == null,
-              onSelected: (_) {
-                setState(() => _values[field.id] = null);
-                _dirty();
-              },
-            ),
-          for (final choice in field.choices)
-            ChoiceChip(
-              label: Text(choice),
-              selected: _values[field.id] == choice,
-              onSelected: (_) {
-                setState(() => _values[field.id] = choice);
-                _dirty();
-              },
-            ),
-        ],
-      ),
-    ],
+  Widget _segmentedControl(FieldSpec field) => Semantics(
+    container: true,
+    explicitChildNodes: true,
+    label: field.label,
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        ExcludeSemantics(
+          child: Text('${field.label}${field.required ? ' *' : ''}'),
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            if (!field.required) _choiceOption(field, null),
+            for (final choice in field.choices) _choiceOption(field, choice),
+          ],
+        ),
+      ],
+    ),
   );
+
+  Widget _choiceOption(FieldSpec field, String? choice) {
+    void select() {
+      setState(() => _values[field.id] = choice);
+      _dirty();
+    }
+
+    return Semantics(
+      label: '${field.label}: ${choice ?? 'Not set'}',
+      checked: _values[field.id] == choice,
+      inMutuallyExclusiveGroup: true,
+      enabled: _pendingCommand == null,
+      onTap: _pendingCommand == null ? select : null,
+      child: ExcludeSemantics(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+          child: ChoiceChip(
+            materialTapTargetSize: MaterialTapTargetSize.padded,
+            label: Text(choice ?? 'Not set'),
+            selected: _values[field.id] == choice,
+            onSelected: _pendingCommand == null ? (_) => select() : null,
+          ),
+        ),
+      ),
+    );
+  }
 
   Widget _numericControl(FieldSpec field, Map<String, dynamic> config) {
     final min =
@@ -522,6 +702,8 @@ class _RecordEditorState extends State<_RecordEditor> {
         // Existing values are not clamped on display or unrelated saves. Newly
         // entered or changed values must satisfy this form's authored range.
         TextField(
+          focusNode: _focusNodes[field.id],
+          readOnly: _pendingCommand != null,
           controller: _controllers[field.id],
           keyboardType: const TextInputType.numberWithOptions(
             decimal: true,
@@ -529,6 +711,7 @@ class _RecordEditorState extends State<_RecordEditor> {
           ),
           decoration: InputDecoration(
             labelText: '${field.label}${field.required ? ' *' : ''}',
+            errorText: _fieldErrors[field.id],
             helperText: value == null
                 ? 'Not set'
                 : value < min || value > max
@@ -560,6 +743,10 @@ class _RecordEditorState extends State<_RecordEditor> {
             children: [
               for (var n = 1; n <= 5; n++)
                 IconButton(
+                  constraints: const BoxConstraints(
+                    minWidth: 48,
+                    minHeight: 48,
+                  ),
                   tooltip: '${field.label}: $n',
                   onPressed: () => update(n.toDouble()),
                   icon: Icon(
@@ -577,6 +764,7 @@ class _RecordEditorState extends State<_RecordEditor> {
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
               IconButton(
+                constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
                 tooltip: 'Decrease ${field.label}',
                 onPressed: value == null || value <= min
                     ? null
@@ -585,6 +773,7 @@ class _RecordEditorState extends State<_RecordEditor> {
               ),
               Text(value == null ? 'Not set' : _number(value)),
               IconButton(
+                constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
                 tooltip: 'Increase ${field.label}',
                 onPressed: value != null && value >= max
                     ? null

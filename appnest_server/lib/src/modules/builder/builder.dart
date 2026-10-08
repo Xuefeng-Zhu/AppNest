@@ -5,6 +5,7 @@ import 'package:serverpod/serverpod.dart';
 
 import '../../generated/protocol.dart';
 import '../runtime/access.dart';
+import '../definitions/apps.dart';
 import '../automation/worker.dart';
 import '../media/media.dart';
 import 'provider.dart';
@@ -78,8 +79,13 @@ class Builder {
 
   static Future<AppDraft> draft(Session s, int id, {Transaction? tx}) async {
     final d = await AppDraft.db.findById(s, id, transaction: tx);
-    if (d == null) fail('notFound', 'Draft unavailable.');
+    if (d == null || d.actorId != actor(s)) {
+      fail('notFound', 'Draft unavailable.');
+    }
     final a = await access(s, d.appId, tx: tx);
+    if (d.workspaceId != a.app.workspaceId) {
+      fail('notFound', 'Draft unavailable.');
+    }
     a.requireBuilder();
     return d;
   }
@@ -99,6 +105,14 @@ class Builder {
         a.requireBuilder();
         a.writable();
         app = a.app;
+        if (app.workspaceId != workspaceId) {
+          fail('notFound', 'App unavailable in this workspace.');
+        }
+        if (app.activeVersionId == null) {
+          final existing = await Apps.unpublishedDraft(s, a, tx: tx);
+          if (existing == null) fail('notFound', 'Draft unavailable.');
+          return snapshot(s, existing, tx: tx);
+        }
         spec = await a.spec(s, tx: tx);
       } else {
         await reserveAppSlot(s, workspaceId, tx);

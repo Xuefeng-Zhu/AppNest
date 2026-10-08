@@ -46,6 +46,15 @@ void main() {
         message: 'All places are allocated.',
       );
       expect(adapter.errorMessage(error), 'All places are allocated.');
+      expect(adapter.commandMayHaveSucceeded(error), isFalse);
+      expect(
+        adapter.commandMayHaveSucceeded(const SpecException('Invalid value')),
+        isFalse,
+      );
+      expect(
+        adapter.commandMayHaveSucceeded(StateError('Response lost')),
+        isTrue,
+      );
       expect(
         adapter.errorMessage(StateError('private transport diagnostic')),
         'Could not complete the request. Try again.',

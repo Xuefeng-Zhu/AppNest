@@ -316,6 +316,189 @@ extension _RichComponents on _RichMiniAppRuntimeState {
     final fields = view.fieldIds.isEmpty
         ? collection.fields
         : view.fieldIds.map(collection.field).toList();
+    return LayoutBuilder(
+      builder: (context, constraints) => constraints.maxWidth < 640
+          ? _tableCards(context, view, items, fields)
+          : _desktopTable(context, view, items, fields, stored),
+    );
+  }
+
+  void _sortTable(ViewSpec view, FieldSpec field, bool descending) {
+    _update(() {
+      final stored = state(view);
+      stored.sortField = field.id;
+      stored.descending = descending;
+      stored.records = null;
+    });
+    _refresh();
+  }
+
+  Widget _tableCards(
+    BuildContext context,
+    ViewSpec view,
+    List<RuntimeItem> items,
+    List<FieldSpec> fields,
+  ) {
+    final collection = spec.collection(view.collectionId), stored = state(view);
+    final titleField = collection.field(
+      view.titleFieldId ?? collection.fields.first.id,
+    );
+    String title(RuntimeItem item) => titleField.type == FieldType.image
+        ? 'Image record'
+        : '${item.data[titleField.id] ?? 'Untitled'}';
+    final sortable = fields.where((field) => field.type != FieldType.image);
+    return Column(
+      key: ValueKey('mobile-table-${view.id}'),
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (sortable.isNotEmpty) ...[
+          Text('Sort by', style: Theme.of(context).textTheme.labelLarge),
+          const SizedBox(height: 4),
+          Wrap(
+            spacing: 8,
+            runSpacing: 4,
+            children: [
+              for (final field in sortable)
+                Tooltip(
+                  message: stored.sortField == field.id
+                      ? 'Sort by ${field.label}, ${stored.descending ? 'ascending' : 'descending'}'
+                      : 'Sort by ${field.label}, ascending',
+                  child: ChoiceChip(
+                    selected: stored.sortField == field.id,
+                    showCheckmark: false,
+                    avatar: stored.sortField == field.id
+                        ? Icon(
+                            stored.descending
+                                ? Icons.arrow_downward
+                                : Icons.arrow_upward,
+                            size: 18,
+                          )
+                        : null,
+                    label: Text(field.label),
+                    onSelected: (_) => _sortTable(
+                      view,
+                      field,
+                      stored.sortField == field.id ? !stored.descending : false,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 8),
+        ],
+        for (final item in items)
+          Card(
+            key: ValueKey('table-record-${view.id}-${item.id}'),
+            child: Padding(
+              padding: EdgeInsets.all(_space(context, 16)),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _editableField(
+                    context,
+                    view,
+                    titleField.id,
+                    Text(
+                      title(item),
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    pageId: page.id,
+                  ),
+                  for (final field in fields.where(
+                    (field) => field.id != titleField.id,
+                  ))
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: _editableField(
+                        context,
+                        view,
+                        field.id,
+                        field.type == FieldType.image &&
+                                item.data[field.id] != null
+                            ? _PrivateImage(
+                                adapter: adapter,
+                                assetId: '${item.data[field.id]}',
+                                label: field.label,
+                                height: 100,
+                              )
+                            : Text.rich(
+                                TextSpan(
+                                  children: [
+                                    TextSpan(
+                                      text: '${field.label}: ',
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                    TextSpan(
+                                      text: item.data[field.id] == null
+                                          ? 'Not set'
+                                          : field.type == FieldType.timestamp
+                                          ? _displayDate(
+                                              context,
+                                              '${item.data[field.id]}',
+                                            )
+                                          : '${item.data[field.id]}',
+                                    ),
+                                  ],
+                                ),
+                                style: Theme.of(context).textTheme.bodyMedium,
+                              ),
+                        pageId: page.id,
+                      ),
+                    ),
+                  if (item.capacity != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: CapacitySummary(item: item),
+                    ),
+                  if (view.detailPageId != null ||
+                      _recordActions(view, item).isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 4,
+                      children: [
+                        if (view.detailPageId != null)
+                          TextButton.icon(
+                            onPressed: _saving || _pendingCommand != null
+                                ? null
+                                : () => _openRecord(view, item),
+                            icon: const Icon(Icons.open_in_new, size: 18),
+                            label: Text(
+                              'Open',
+                              semanticsLabel: 'Open ${title(item)}',
+                            ),
+                          ),
+                        for (final action in _recordActions(view, item))
+                          OutlinedButton(
+                            onPressed: _saving || _pendingCommand != null
+                                ? null
+                                : () => _run(action, item, source: view),
+                            child: Text(
+                              _actionLabel(action, item),
+                              semanticsLabel:
+                                  '${_actionLabel(action, item)} for ${title(item)}',
+                            ),
+                          ),
+                      ],
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _desktopTable(
+    BuildContext context,
+    ViewSpec view,
+    List<RuntimeItem> items,
+    List<FieldSpec> fields,
+    _ViewState stored,
+  ) {
     return Card(
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
@@ -336,14 +519,7 @@ extension _RichComponents on _RichMiniAppRuntimeState {
                 }.contains(field.type),
                 onSort: field.type == FieldType.image
                     ? null
-                    : (_, ascending) {
-                        _update(() {
-                          stored.sortField = field.id;
-                          stored.descending = !ascending;
-                          stored.records = null;
-                        });
-                        _refresh();
-                      },
+                    : (_, ascending) => _sortTable(view, field, !ascending),
               ),
             if (view.detailPageId != null ||
                 items.any((r) => _recordActions(view, r).isNotEmpty))
@@ -386,7 +562,9 @@ extension _RichComponents on _RichMiniAppRuntimeState {
                       ),
                       onTap:
                           view.detailPageId == null ||
-                              _VisualEditScope.of(context) != null
+                              _VisualEditScope.of(context) != null ||
+                              _saving ||
+                              _pendingCommand != null
                           ? null
                           : () => _navigate(
                               MiniAppLocation(
@@ -405,11 +583,13 @@ extension _RichComponents on _RichMiniAppRuntimeState {
                             IconButton(
                               tooltip: 'Open record',
                               icon: const Icon(Icons.open_in_new),
-                              onPressed: () => _openRecord(view, item),
+                              onPressed: _saving || _pendingCommand != null
+                                  ? null
+                                  : () => _openRecord(view, item),
                             ),
                           for (final action in _recordActions(view, item))
                             TextButton(
-                              onPressed: _saving
+                              onPressed: _saving || _pendingCommand != null
                                   ? null
                                   : () => _run(action, item, source: view),
                               child: Text(action.label),
@@ -821,7 +1001,10 @@ extension _RichComponents on _RichMiniAppRuntimeState {
                     tristate: true,
                     semanticLabel:
                         '${item.data[view.titleFieldId] ?? 'Record'} complete',
-                    onChanged: _saving || !_permitted(action, item)
+                    onChanged:
+                        _saving ||
+                            _pendingCommand != null ||
+                            !_permitted(action, item)
                         ? null
                         : (_) {
                             final target = item.data[fieldId] == checked
@@ -875,6 +1058,7 @@ extension _RichComponents on _RichMiniAppRuntimeState {
         .choices;
     bool canMove(RuntimeItem item, String target) =>
         !_saving &&
+        _pendingCommand == null &&
         _VisualEditScope.of(context) == null &&
         _permitted(action, item) &&
         (behavior.transitions[item.data[behavior.fieldId]] ?? []).contains(
@@ -891,6 +1075,7 @@ extension _RichComponents on _RichMiniAppRuntimeState {
               tooltip: 'Move record',
               enabled:
                   !_saving &&
+                  _pendingCommand == null &&
                   _VisualEditScope.of(context) == null &&
                   choices.any((c) => canMove(item, c)),
               itemBuilder: (_) => [
@@ -1049,11 +1234,49 @@ extension _RichComponents on _RichMiniAppRuntimeState {
       clipBehavior: Clip.antiAlias,
       child: LayoutBuilder(
         builder: (context, constraints) {
+          final assetId = options['imageAssetId'] as String?;
+          if (constraints.maxWidth < 640 &&
+              assetId == null &&
+              options['body'] != null &&
+              options['targetPageId'] == null &&
+              options['tone'] != 'warning' &&
+              _VisualEditScope.of(context) == null) {
+            return ExpansionTile(
+              key: PageStorageKey('compact-banner-${view.id}'),
+              tilePadding: EdgeInsets.symmetric(
+                horizontal: _space(context, 16),
+                vertical: 4,
+              ),
+              childrenPadding: EdgeInsets.fromLTRB(
+                _space(context, 16),
+                0,
+                _space(context, 16),
+                _space(context, 16),
+              ),
+              expandedCrossAxisAlignment: CrossAxisAlignment.stretch,
+              shape: const Border(),
+              collapsedShape: const Border(),
+              textColor: foreground,
+              collapsedTextColor: foreground,
+              iconColor: foreground,
+              collapsedIconColor: foreground,
+              title: Text(
+                options['title'] as String? ?? view.label,
+                style: Theme.of(context).textTheme.titleMedium
+                    ?.copyWith(color: foreground),
+              ),
+              children: [
+                Text(
+                  options['body'] as String,
+                  style: TextStyle(color: foreground),
+                ),
+              ],
+            );
+          }
           final beside =
               options['imagePlacement'] == 'beside' &&
               constraints.maxWidth >= 640 &&
               MediaQuery.textScalerOf(context).scale(100) < 150;
-          final assetId = options['imageAssetId'] as String?;
           Widget image() => _PrivateImage(
             adapter: adapter,
             assetId: assetId!,

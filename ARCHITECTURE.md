@@ -48,6 +48,8 @@ Optional `navigation.v1` definitions compose bounded semantic views into app-own
 
 Navigation distinguishes forward, return and external route changes. The host stores an opaque session/index in route information to identify browser entries it owns. Returning from an editor traverses a known parent entry through Flutter's URL strategy; direct-link/native fallbacks and canonicalization replace the current entry. Rejected browser Back restores the original editor entry. External route changes trim renderer history, and generation checks prevent delayed navigation or obsolete discard dialogs from overwriting a newer destination. In-app and same-document leave guards do not install a cross-document `beforeunload` prompt.
 
+New unpublished apps appear in Continue building using server-persisted drafts. Discovery requires current workspace membership and app builder access, selects only the current author's latest unpublished draft, and excludes archived apps. The `/drafts/<appId>` route survives refresh and resolves through the authentication gate; the server checks access again and resumes that same draft under the app row lock. Published launcher entries continue to use the active version, and live app routes reject unpublished manifests. Publication replaces the draft URL with the app URL. Draft definitions stay on the server and are not stored in browser route state.
+
 `RuntimeAdapter` supplies record lookup, typed navigation, grouped summaries and reminder states to both isolated preview and authenticated live implementations. `runtime.summary` compiles the same validated predicates as queries and returns database-wide totals/choice counts in one app-locked transaction. Rich summary components use this operation rather than counting a loaded page. Relative-day predicates independently convert each local-midnight boundary to UTC; timestamp storage remains UTC.
 
 The rich component library adds bounded `ViewSpec.options`, collection-free
@@ -95,11 +97,13 @@ App-level serialization is the MVP tradeoff: lock the app control row, then reco
 
 Commands recheck access, coordinate an app/actor/idempotency receipt, compare its canonical request hash, then validate definition/revision and dispatch a registered handler. A matching old receipt can return after republishing without executing again; a reused key with changed input fails. Capacity create+initial configuration, claim/reactivation and release lock the pool and atomically update typed counters/claims. Unique claim identity plus bounds prevent overbooking and double decrement. Ordinary edits use revision conflicts; protected fields are not generic payload edits. Business state, receipt, audit and outbox commit together.
 
-This retry guarantee requires the caller to retain the same command key and
-input. The current renderer allocates a new key on a second Save, so an ambiguous
-create response can duplicate a record. Revoking an assigned member also leaves
-a stale reference that currently blocks unrelated edits. These are open defects,
-with reproductions in the [architecture review](docs/ARCHITECTURE_REVIEW.md#confirmed-findings).
+Both renderer variants retain the original command key, input and record
+revision after an unconfirmed response. Explicit Retry save replays that
+request; other mutations stay blocked until recovery succeeds. Reconnecting
+does not replay commands. This recovery state lasts for the mounted runtime,
+not across browser reloads. A definite rejection permits a corrected request.
+Revoking an assigned member still leaves a stale reference that can block
+unrelated edits, as recorded in the [architecture review](docs/ARCHITECTURE_REVIEW.md#confirmed-findings).
 
 Invitations are 256-bit unpredictable tokens stored only as hashes, seven-day expiry, single-use, revocable, role-selected and optionally bound to an authenticated account ID. Acceptance opens the same instance. Templates instantiate empty apps; remix copies structure only; unpin removes a shortcut; archive is read-only and suppresses effects.
 

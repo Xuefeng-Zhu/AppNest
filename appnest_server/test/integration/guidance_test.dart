@@ -192,41 +192,102 @@ void main() {
       },
     );
 
-    test('only builders can get draft guidance', () async {
-      final owner = user('guidance-owner');
-      final workspace = await Apps.createWorkspace(owner, 'Guidance roles');
-      final draft = await Builder.begin(owner, workspace, 'reading', null);
-      final ai = _GuidanceStub();
-      for (final role in ['builder', 'member', 'viewer']) {
-        final member = user('guidance-$role');
-        final token = await Sharing.invite(owner, draft.appId, role, null);
-        await Sharing.accept(member, token);
-        final request = Builder.suggestQuestions(
-          member,
-          'Improve this library',
-          null,
-          draft.draftId,
-          provider: ai,
-        );
-        if (role == 'builder') {
-          expect(await request, hasLength(2));
-        } else {
-          await expectLater(request, throwsA(category('forbidden')));
+    test(
+      'draft guidance is private to its author with builder access',
+      () async {
+        final owner = user('guidance-owner');
+        final workspace = await Apps.createWorkspace(owner, 'Guidance roles');
+        final draft = await Builder.begin(owner, workspace, 'reading', null);
+        final ai = _GuidanceStub();
+        final collaborators = <String, Session>{};
+        for (final role in ['builder', 'member', 'viewer']) {
+          final member = user('guidance-$role');
+          collaborators[role] = member;
+          final token = await Sharing.invite(owner, draft.appId, role, null);
+          await Sharing.accept(member, token);
+          await expectLater(
+            Builder.suggestQuestions(
+              member,
+              'Improve this library',
+              null,
+              draft.draftId,
+              provider: ai,
+            ),
+            throwsA(category('notFound')),
+          );
         }
-      }
-      final stranger = user('guidance-stranger');
-      await expectLater(
-        Builder.suggestQuestions(
-          stranger,
-          'Improve this library',
-          null,
-          draft.draftId,
-          provider: ai,
-        ),
-        throwsA(category('notFound')),
-      );
-      expect(ai.calls, 1);
-    });
+        final stranger = user('guidance-stranger');
+        await expectLater(
+          Builder.suggestQuestions(
+            stranger,
+            'Improve this library',
+            null,
+            draft.draftId,
+            provider: ai,
+          ),
+          throwsA(category('notFound')),
+        );
+        expect(ai.calls, 0);
+        expect(
+          await Builder.suggestQuestions(
+            owner,
+            'Improve this library',
+            null,
+            draft.draftId,
+            provider: ai,
+          ),
+          hasLength(2),
+        );
+        expect(ai.definition!.canonical, draft.candidateJson);
+        expect(ai.calls, 1);
+
+        await Builder.publish(
+          owner,
+          PublishRequest(
+            draftId: draft.draftId,
+            candidateHash: draft.candidateHash,
+            enabledRuleIds: [],
+            activateExistingRecordIds: [],
+            reviewHash: hashJson({
+              'candidateHash': draft.candidateHash,
+              'enabledRuleIds': [],
+              'activateExistingRecordIds': [],
+            }),
+            idempotencyKey: 'guidance-publication',
+          ),
+        );
+        final builderDraft = await Builder.begin(
+          collaborators['builder']!,
+          workspace,
+          'reading',
+          draft.appId,
+        );
+        expect(builderDraft.draftId, isNot(draft.draftId));
+        expect(
+          await Builder.suggestQuestions(
+            collaborators['builder']!,
+            'Improve my library draft',
+            null,
+            builderDraft.draftId,
+            provider: ai,
+          ),
+          hasLength(2),
+        );
+        expect(ai.definition!.canonical, builderDraft.candidateJson);
+        expect(ai.calls, 2);
+        for (final role in ['member', 'viewer']) {
+          await expectLater(
+            Builder.begin(
+              collaborators[role]!,
+              workspace,
+              'reading',
+              draft.appId,
+            ),
+            throwsA(category('forbidden')),
+          );
+        }
+      },
+    );
 
     test(
       'rolling quota atomically allows one final concurrent request',

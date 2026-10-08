@@ -266,7 +266,7 @@ void main() {
     await tester.ensureVisible(find.text('Next step'));
     await tester.tap(find.text('Next step'));
     await tester.pumpAndSettle();
-    expect(find.textContaining('Please check this step'), findsOneWidget);
+    expect(find.text('Please check the highlighted field.'), findsOneWidget);
     expect(adapter.writes, 0);
     await tester.ensureVisible(find.widgetWithText(TextField, 'Title *'));
     await tester.enterText(
@@ -414,10 +414,7 @@ void main() {
         await tester.tap(find.text('Save'));
         await tester.pumpAndSettle();
         expect(adapter.writes, 0);
-        expect(
-          find.text('Could not save. Energy must be between 1 and 5.'),
-          findsOneWidget,
-        );
+        expect(find.text('Energy must be between 1 and 5.'), findsOneWidget);
       }
       await tester.ensureVisible(energy);
       await tester.enterText(energy, '3');
@@ -462,10 +459,7 @@ void main() {
         await tester.pumpAndSettle();
         expect(adapter.writes, 0);
         expect((await adapter.get(1)).data['energy'], 3);
-        expect(
-          find.text('Could not save. Energy must be between 1 and 5.'),
-          findsOneWidget,
-        );
+        expect(find.text('Energy must be between 1 and 5.'), findsOneWidget);
         await tester.ensureVisible(find.text('Clear value'));
         await tester.tap(find.text('Clear value'));
         await tester.pumpAndSettle();
@@ -636,10 +630,7 @@ void main() {
     await tester.tap(find.text('Next step'));
     await tester.pumpAndSettle();
     expect(find.text('Step 1 of 2'), findsOneWidget);
-    expect(
-      find.text('Please check this step. Energy must be between 1 and 5.'),
-      findsOneWidget,
-    );
+    expect(find.text('Energy must be between 1 and 5.'), findsOneWidget);
     expect(adapter.writes, 0);
     await tester.ensureVisible(energy);
     await tester.enterText(energy, '5');

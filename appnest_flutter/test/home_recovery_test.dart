@@ -772,6 +772,7 @@ void main() {
       testClient.manifests.add(
         AppManifest(
           appId: index + 1,
+          versionId: index + 1,
           workspaceId: 1,
           name: name,
           specJson: spec,

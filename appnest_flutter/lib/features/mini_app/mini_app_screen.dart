@@ -204,6 +204,13 @@ class MiniAppScreenState extends State<MiniAppScreen> {
     try {
       final m = await client.apps.manifest(widget.appId);
       if (!mounted || generation != _loadGeneration) return;
+      if (m.versionId == null) {
+        throw NestError(
+          category: 'notFound',
+          message:
+              'This app is not published yet. Open its draft from your apps.',
+        );
+      }
       UtilityTimerController? timer;
       (String, String, int)? timerScope;
       if (AppSpec.parse(m.specJson!).views
@@ -305,35 +312,66 @@ class MiniAppScreenState extends State<MiniAppScreen> {
           title: const Text('Invite to this app'),
           content: SizedBox(
             width: 420,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'They join this same app and its shared records. The link expires in 7 days and can be accepted by one person.',
-                ),
-                const SizedBox(height: 16),
-                DropdownButton<String>(
-                  value: role,
-                  items: ['member', 'viewer', 'builder']
-                      .map((r) => DropdownMenuItem(value: r, child: Text(r)))
-                      .toList(),
-                  onChanged: token == null
-                      ? (v) => update(() => role = v!)
-                      : null,
-                ),
-                TextField(
-                  controller: recipient,
-                  decoration: const InputDecoration(
-                    labelText: 'Recipient account ID (optional)',
-                    helperText:
-                        'Leave blank for an authenticated link invitation.',
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'They join this same app and its shared records. The link expires in 7 days and can be accepted by one person.',
                   ),
-                ),
-                if (token != null)
-                  SelectableText('${Uri.base.origin}/?invite=$token'),
-                if (failure != null) Text(requestError(failure!)),
-              ],
+                  const SizedBox(height: 16),
+                  DropdownButtonFormField<String>(
+                    initialValue: role,
+                    decoration: const InputDecoration(
+                      labelText: 'Access level',
+                    ),
+                    items: const [
+                      DropdownMenuItem(value: 'member', child: Text('Member')),
+                      DropdownMenuItem(value: 'viewer', child: Text('Viewer')),
+                      DropdownMenuItem(
+                        value: 'builder',
+                        child: Text('Builder'),
+                      ),
+                    ],
+                    onChanged: token == null
+                        ? (value) => update(() => role = value!)
+                        : null,
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    switch (role) {
+                      'viewer' => 'Can view shared records. Cannot change records, app structure or sharing.',
+                      'builder' => 'Can customize and publish the app, manage sharing, and use its allowed actions.',
+                      _ => 'Can use the app’s allowed actions. Cannot change app structure or sharing.',
+                    },
+                    key: const ValueKey('invitation-role-description'),
+                  ),
+                  const SizedBox(height: 12),
+                  ExpansionTile(
+                    tilePadding: EdgeInsets.zero,
+                    title: const Text('Invite a specific account (optional)'),
+                    subtitle: const Text(
+                      'Leave blank to share a single-use link.',
+                    ),
+                    maintainState: true,
+                    children: [
+                      TextField(
+                        controller: recipient,
+                        enabled: token == null,
+                        decoration: const InputDecoration(
+                          labelText: 'Recipient account ID',
+                          helperText: 'They can copy this from Your account.',
+                          helperMaxLines: 2,
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (token != null)
+                    SelectableText('${Uri.base.origin}/?invite=$token'),
+                  if (failure != null) Text(requestError(failure!)),
+                ],
+              ),
             ),
           ),
           actions: [
@@ -352,9 +390,9 @@ class MiniAppScreenState extends State<MiniAppScreen> {
                           ? null
                           : recipient.text.trim(),
                     );
-                    update(() => token = t);
+                    if (context.mounted) update(() => token = t);
                   } catch (e) {
-                    update(() => failure = e);
+                    if (context.mounted) update(() => failure = e);
                   }
                 },
                 child: const Text('Create invitation'),

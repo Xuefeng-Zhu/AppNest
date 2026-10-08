@@ -38,6 +38,9 @@ class LiveRuntimeAdapter extends RuntimeAdapter {
       ? error.message
       : super.errorMessage(error, fallback: fallback);
   @override
+  bool commandMayHaveSucceeded(Object error) =>
+      error is! NestError && super.commandMayHaveSucceeded(error);
+  @override
   List<String> get approvedRuleIds => manifest.approvedRuleIds ?? const [];
   @override
   bool get readOnly =>

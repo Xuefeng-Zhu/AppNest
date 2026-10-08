@@ -59,7 +59,7 @@ bash scripts/verify.sh
 
 The script checks analysis, authored-source formatting, spec tests, renderer tests, Flutter host tests, real-PostgreSQL server tests, and separate-process reminder recovery. It does **not** build a release app or run a live AI/browser/device check. Focused commands and build instructions are in [development](docs/DEVELOPMENT.md#verification).
 
-[Verification records](docs/VERIFICATION.md) separate dated automated, browser, provider, and device evidence. The [architecture review](docs/ARCHITECTURE_REVIEW.md) records unresolved retry, authorization lifecycle, stream cleanup, assignment, and CI defects. Passing existing tests does not resolve those findings.
+[Verification records](docs/VERIFICATION.md) separate dated automated, browser, provider, and device evidence. The [architecture review](docs/ARCHITECTURE_REVIEW.md) records authorization lifecycle, stream cleanup, assignment, and CI defects. Retained-command UI retry recovery is implemented and covered by widget tests; pending commands do not survive browser reload. Passing existing tests does not resolve the other findings.
 
 ## Repository map
 

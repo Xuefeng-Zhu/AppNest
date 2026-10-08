@@ -210,6 +210,9 @@ Future<void> _writePlanner(Session s, String tag) async {
   for (final event in await OutboxEvent.db.find(
     s,
     where: (t) => t.appId.equals(draft.appId),
+    // Planning order does not define which task an automation run belongs to.
+    // Exercise the completed task first to keep that distinction in the probe.
+    orderBy: (t) => t.id.desc(),
   )) {
     await Worker.plan(s, event.id!);
   }
@@ -231,6 +234,24 @@ Future<void> _readPlanner(Session s, String tag) async {
     s,
     where: (t) => t.workspaceId.equals(workspace.id!),
   ))!;
+  final tasks = await Queries.query(s, app.id!, 'tasks', '{}');
+  final open = tasks.records
+      .where((record) => record.data['title'] == 'Open at restart')
+      .toList();
+  final done = tasks.records
+      .where((record) => record.data['title'] == 'Completed before restart')
+      .toList();
+  if (tasks.records.length != 2 ||
+      open.length != 1 ||
+      done.length != 1 ||
+      open.single.data['status'] != 'Open' ||
+      done.single.data['status'] != 'Done') {
+    throw StateError(
+      'Planner task identities or statuses did not survive restart.',
+    );
+  }
+  final openRecordId = open.single.id;
+  final completedRecordId = done.single.id;
   final runs = await AutomationRun.db.find(
     s,
     where: (t) => t.appId.equals(app.id!),
@@ -246,22 +267,31 @@ Future<void> _readPlanner(Session s, String tag) async {
     where: (t) => t.appId.equals(app.id!),
     orderBy: (t) => t.id,
   );
+  final openRuns = statuses
+      .where((run) => run.recordId == openRecordId)
+      .toList();
+  final completedRuns = statuses
+      .where((run) => run.recordId == completedRecordId)
+      .toList();
   if (statuses.length != 2 ||
-      statuses.first.status != 'succeeded' ||
-      statuses.last.status != 'suppressed') {
+      openRuns.length != 1 ||
+      completedRuns.length != 1 ||
+      openRuns.single.status != 'succeeded' ||
+      completedRuns.single.status != 'suppressed') {
     throw StateError(
       'Owner reminder delivery conditions did not survive restart.',
     );
   }
   final inbox = await Sharing.inbox(s);
   if (inbox.length != 1 ||
-      inbox.single.recordId != runs.first.recordId ||
+      inbox.single.appId != app.id ||
+      inbox.single.recordId != openRecordId ||
       inbox.single.collectionId != 'tasks') {
     throw StateError(
       'Owner inbox delivery was lost, duplicated or mistargeted.',
     );
   }
-  final completed = await Queries.get(s, app.id!, runs.last.recordId);
+  final completed = await Queries.get(s, app.id!, completedRecordId);
   await Commands.execute(
     s,
     ActionRequest(

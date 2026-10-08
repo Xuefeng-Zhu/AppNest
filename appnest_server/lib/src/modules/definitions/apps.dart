@@ -94,7 +94,17 @@ class Apps {
             'chores' => 'Make shared responsibilities clear.',
             'planner' =>
               'Plan today, track tasks, and choose personal reminders.',
-            _ => 'Bring people together, one place at a time.',
+            'volunteer' =>
+              'Organize shifts, set available places, and let people sign up.',
+            'projectHub' =>
+              'Track project tasks with a board, task list, and calendar.',
+            'photoJournal' =>
+              'Save photos and notes in a private visual journal.',
+            'habitTracker' =>
+              'Log daily habits and follow your progress over time.',
+            'phoneToolkit' =>
+              'Use a flashlight, brightness controls, and other phone tools.',
+            _ => 'Start with an example and customize it for your day.',
           },
         ),
       )
@@ -161,11 +171,18 @@ class Apps {
       CASE WHEN a."ownerId"=@actor THEN 'owner' ELSE g.role END,
       EXISTS(SELECT 1 FROM nest_shortcut p WHERE p."appId"=a.id AND p."actorId"=@actor),
       (SELECT count(*) FROM nest_record r WHERE r."appId"=a.id AND NOT r.deleted),
-      (SELECT coalesce(sum(p.capacity-p.allocated),0)::bigint FROM nest_pool p WHERE p."appId"=a.id),v."specJson",
+      (SELECT coalesce(sum(p.capacity-p.allocated),0)::bigint FROM nest_pool p WHERE p."appId"=a.id),coalesce(v."specJson",d."candidateJson"),
       (SELECT coalesce(json_agg(u."ruleId" ORDER BY u."ruleId"),'[]'::json)::text FROM nest_automation u WHERE u."appId"=a.id AND u.enabled)
-      FROM nest_app a LEFT JOIN nest_grant g ON g."appId"=a.id AND g."actorId"=@actor AND NOT g.revoked
-      JOIN nest_version v ON v.id=a."activeVersionId"
-      WHERE a."workspaceId"=@workspace AND (a."ownerId"=@actor OR g.id IS NOT NULL) ORDER BY a.id DESC LIMIT 100''',
+      FROM nest_app a LEFT JOIN nest_grant g ON g."appId"=a.id AND g."workspaceId"=a."workspaceId" AND g."actorId"=@actor AND NOT g.revoked
+      LEFT JOIN nest_version v ON v.id=a."activeVersionId" AND v."appId"=a.id
+      LEFT JOIN LATERAL (
+        SELECT "candidateJson" FROM nest_draft
+        WHERE "appId"=a.id AND "workspaceId"=a."workspaceId" AND "actorId"=@actor AND "publishedVersionId" IS NULL
+        ORDER BY "updatedAt" DESC,id DESC LIMIT 1
+      ) d ON a."activeVersionId" IS NULL
+      WHERE a."workspaceId"=@workspace AND (a."ownerId"=@actor OR g.id IS NOT NULL)
+      AND (v.id IS NOT NULL OR (a."activeVersionId" IS NULL AND NOT a.archived AND d."candidateJson" IS NOT NULL AND (a."ownerId"=@actor OR g.role='builder')))
+      ORDER BY a.id DESC LIMIT 100''',
       parameters: QueryParameters.named({
         'actor': actor(s),
         'workspace': workspaceId,
@@ -176,7 +193,9 @@ class Apps {
           (r) => AppManifest(
             appId: r[0] as int,
             workspaceId: r[1] as int,
-            name: r[2] as String,
+            name: r[3] == null
+                ? AppSpec.parse(r[9] as String).name
+                : r[2] as String,
             versionId: r[3] as int?,
             archived: r[4] as bool,
             role: r[5] as String,
@@ -194,8 +213,17 @@ class Apps {
 
   static Future<AppManifest> manifest(Session s, int id) =>
       s.db.transaction((tx) async {
-        final a = await access(s, id, tx: tx, lock: true),
-            spec = await a.spec(s, tx: tx);
+        final a = await access(s, id, tx: tx, lock: true);
+        AppSpec spec;
+        if (a.app.activeVersionId == null) {
+          a.requireBuilder();
+          a.writable();
+          final d = await unpublishedDraft(s, a, tx: tx);
+          if (d == null) fail('notFound', 'Draft unavailable.');
+          spec = AppSpec.parse(d.candidateJson);
+        } else {
+          spec = await a.spec(s, tx: tx);
+        }
         final rules = await Automation.db.find(
           s,
           where: (t) => t.appId.equals(id) & t.enabled.equals(true),
@@ -204,7 +232,7 @@ class Apps {
         return AppManifest(
           appId: id,
           workspaceId: a.app.workspaceId,
-          name: a.app.name,
+          name: spec.name,
           versionId: a.app.activeVersionId,
           specJson: spec.canonical,
           role: a.role,
@@ -221,6 +249,26 @@ class Apps {
           approvedRuleIds: rules.map((rule) => rule.ruleId).toList()..sort(),
         );
       });
+
+  /// Drafts belong to their author even when another builder can edit the app.
+  /// Callers must first authorize the app and require builder access.
+  static Future<AppDraft?> unpublishedDraft(
+    Session s,
+    Access a, {
+    Transaction? tx,
+  }) => AppDraft.db.findFirstRow(
+    s,
+    where: (t) =>
+        t.appId.equals(a.app.id!) &
+        t.workspaceId.equals(a.app.workspaceId) &
+        t.actorId.equals(actor(s)) &
+        t.publishedVersionId.equals(null),
+    orderByList: (t) => [
+      t.updatedAt.desc(),
+      t.id.desc(),
+    ],
+    transaction: tx,
+  );
 
   static Future<int> remix(Session s, int appId, int workspaceId) async {
     final a = await access(s, appId);

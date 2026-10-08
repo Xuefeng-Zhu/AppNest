@@ -16,7 +16,7 @@ verification entrypoint.
 | 2. App/record/invitation/notification/media tenant isolation | Tested locally | Real-DB authorization, bound invitations, private-media authorization and cross-app reference rejection |
 | 3. Member cannot grant rights, edit counters/protected workflow | Tested | Policy tests and typed action handlers; generic patch rejects protected input |
 | 4. 20 concurrent final-place attempts → one allocation | Tested | Independent committed sessions/transactions, not a single rollback wrapper |
-| 5. Identical command retry returns stored outcome; changed input fails | Tested at service boundary; client gap open | Same-key receipt regression including retry after publication. A second UI Save currently allocates a new key and can duplicate an ambiguously completed create |
+| 5. Identical command retry returns stored outcome; changed input fails | Tested at service and widget boundaries | Same-key receipt regression including retry after publication. Both renderers retain the original key, payload and revision after an unconfirmed response; explicit recovery does not replay on reconnect. Pending UI commands do not survive browser reload |
 | 6. Capacity release and transaction rollback preserve invariants | Tested | Repeated release, failed capacity/create transaction, business/outbox checks; stream cancellation is a separate open defect |
 | 7. Preview cannot reach live writes/schedules | Tested | Network-free adapter package contract; independent preview mutation test; synthetic UI labels |
 | 8. Optional additions preserve records/claims/IDs | Tested | Spec compatibility + PostgreSQL publication test + actual endpoint demo + browser manual publish |
@@ -26,16 +26,19 @@ verification entrypoint.
 | 12. Reconnect/repeated invalidations recover state | Tested, bounded; defects open | Reconnect/resume/duplicate-event tests and historical live server restart. Legacy error handling can retain private UI state; idle endpoint cancellation can stall. No multi-instance/load acceptance |
 | 13. AI failure does not break apps; template mode explicit | Tested; dated live evidence | Bounded attempts, preserved prior apps, explicit template mode. Historical browser creation, publication, CRUD and semantic label editing are recorded in [AI_CREATION_CHECK.md](AI_CREATION_CHECK.md); broader creation/edit outcomes in [CUSTOMIZATION_AI_CHECK.md](CUSTOMIZATION_AI_CHECK.md) |
 | 14. Mobile/desktop, keyboard and large text | Tested, bounded | Renderer 390×844/1440×1000 at 150%; browser 1280×720 and 390×844; Tab focus and mobile builder publication. Full accessibility audit deferred |
+| 15. Discover and resume unfinished new apps after reopening | Tested locally | Committed PostgreSQL sessions cover author-private discovery, concurrent resume and revoked access; Flutter route tests cover `/drafts/<appId>`, refresh, authentication and publication using synthetic transport. Connected browser acceptance remains unverified |
 
 ## Open acceptance gaps — architecture review 2026-10-07
 
-The [review](ARCHITECTURE_REVIEW.md#confirmed-findings) reproduced six defects:
-CI fails before its checks because of SDK drift; repeated Save can duplicate a
-committed create; legacy authorization errors can retain or restore private UI
+The [review](ARCHITECTURE_REVIEW.md#confirmed-findings) reproduced six defects.
+The UI/UX fixes add retained-command recovery for repeated Save, verified with
+lost-response widget adapters. The remaining findings include CI SDK drift;
+legacy authorization errors that can retain or restore private UI
 state; idle event-stream cancellation can stall; reminder retry deadlines are
 ignored; and revoked assignees can block unrelated record changes. The receipt,
 authorization and durable-work designs remain in place, but these boundary cases
-prevent treating the table as blanket acceptance. No fixes are claimed here.
+prevent treating the table as blanket acceptance. Browser-reload recovery of
+pending record commands remains unimplemented.
 
 That review ran static analysis, 81 spec tests, 259 server tests and 92 focused
 renderer tests. Eight additional invariant checks reproduced defects rather
