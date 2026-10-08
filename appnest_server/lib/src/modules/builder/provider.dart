@@ -7,7 +7,10 @@ import 'package:crypto/crypto.dart';
 import 'package:http/http.dart' as http;
 import 'package:serverpod/serverpod.dart';
 
+import '../../evaluation/nvidia_model_profiles.dart';
 import '../../generated/guidance_question.dart';
+
+export '../../evaluation/nvidia_model_profiles.dart';
 import 'generation_requirements.dart';
 import 'repair_bindings.dart';
 
@@ -17,13 +20,16 @@ class AiResult {
   AiResult(this.text, this.provider, this.model, this.usage);
 }
 
-/// Safe, actionable diagnostics: never includes provider response bodies.
+/// Safe, actionable diagnostics. Optional transport evidence is never logged
+/// or reflected in [message]. The benchmark persists it for synthetic requests.
 class AiResponseException implements Exception {
   final String kind, message;
   final int? statusCode;
   final String? providerErrorType;
   final Duration? retryAfter;
   final bool? retryable;
+  final Map<String, dynamic>? usage;
+  final String? syntheticResponse;
   const AiResponseException(
     this.kind,
     this.message, {
@@ -31,6 +37,8 @@ class AiResponseException implements Exception {
     this.providerErrorType,
     this.retryAfter,
     this.retryable,
+    this.usage,
+    this.syntheticResponse,
   });
 }
 
@@ -1765,28 +1773,90 @@ String? _requestIdHash(Object? value) =>
     ? sha256.convert(utf8.encode(value)).toString().substring(0, 16)
     : null;
 
+/// Exact free routes supported by the opt-in, synthetic model evaluation.
+const freeNemotronModels = <String>[
+  'nvidia/nemotron-3.5-lightning:free',
+  'nvidia/nemotron-3-super-120b-a12b:free',
+  'nvidia/nemotron-3-ultra-550b-a55b:free',
+  'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free',
+];
+
 class ChatCompletionProvider implements AiProvider, GuidanceProvider {
   final Uri base;
   final String model, key;
   final http.Client Function() _clientFactory;
   final void Function(String)? log;
   final Duration? generationTimeout;
+  final bool freeNemotronEvaluation;
+  final bool nvidiaNemotronEvaluation;
+  final bool nvidiaModelEvaluation;
   ChatCompletionProvider(
     this.base,
     this.model,
     this.key, {
     http.Client Function()? clientFactory,
     this.generationTimeout,
+    this.freeNemotronEvaluation = false,
+    this.nvidiaNemotronEvaluation = false,
+    this.nvidiaModelEvaluation = false,
     this.log,
-  }) : _clientFactory = clientFactory ?? http.Client.new;
+  }) : _clientFactory = clientFactory ?? http.Client.new {
+    if ([
+          freeNemotronEvaluation,
+          nvidiaNemotronEvaluation,
+          nvidiaModelEvaluation,
+        ].where((selected) => selected).length >
+        1) {
+      throw ArgumentError('Select only one evaluation provider profile.');
+    }
+    if (freeNemotronEvaluation &&
+        (base.replace(path: base.path.replaceFirst(RegExp(r'/$'), '')) !=
+                Uri.parse('https://openrouter.ai/api/v1') ||
+            !freeNemotronModels.contains(model))) {
+      throw ArgumentError(
+        'Free Nemotron evaluation requires the exact OpenRouter API base and an allowlisted :free model.',
+      );
+    }
+    if (nvidiaEvaluation &&
+        (base.replace(path: base.path.replaceFirst(RegExp(r'/$'), '')) !=
+                Uri.parse('https://integrate.api.nvidia.com/v1') ||
+            !(nvidiaModelEvaluation
+                    ? nvidiaEvaluationModels
+                    : nvidiaNemotronModels)
+                .contains(model))) {
+      throw ArgumentError(
+        'NVIDIA model evaluation requires the exact NVIDIA API base and an allowlisted model.',
+      );
+    }
+  }
+
+  bool get nvidiaEvaluation =>
+      nvidiaNemotronEvaluation || nvidiaModelEvaluation;
+
+  bool get nemotronEvaluation => freeNemotronEvaluation || nvidiaEvaluation;
 
   bool get _freeUltra =>
       base.host == 'openrouter.ai' &&
       model == 'nvidia/nemotron-3-ultra-550b-a55b:free';
 
+  bool get _structuredEvaluation =>
+      freeNemotronEvaluation && model == freeNemotronModels[1];
+
+  String get transportProfile => nvidiaEvaluation
+      ? nvidiaEvaluationProfile(model).name
+      : freeNemotronEvaluation
+      ? _structuredEvaluation
+            ? 'openrouter-free-json-schema-v1'
+            : 'openrouter-free-instruction-schema-v1'
+      : _freeUltra
+      ? 'openrouter-ultra-instruction-schema-v1'
+      : 'standard-chat-completions-v1';
+
   /// A test may shorten, but never extend, the provider's bounded deadline.
   Duration get generationDeadline {
-    final maximum = Duration(seconds: _freeUltra ? 90 : 45);
+    final maximum = Duration(
+      seconds: nemotronEvaluation || _freeUltra ? 90 : 45,
+    );
     return Duration(
       microseconds: (generationTimeout ?? maximum).inMicroseconds.clamp(
         1,
@@ -1795,28 +1865,76 @@ class ChatCompletionProvider implements AiProvider, GuidanceProvider {
     );
   }
 
-  /// This free endpoint accepts chat completions but not response_format.
+  /// Adapt an authored request without modifying its source map. Evaluation
+  /// calls are restricted to one exact route and cannot enable plugins,
+  /// tools or alternate model routing. Super supports provider enforcement;
+  /// other evaluated routes use the same exact instruction contract as Ultra.
+  ///
+  /// The existing free Ultra endpoint accepts chat completions but not
+  /// response_format.
   /// Keep the shared authoring contract unchanged and move its exact schema
   /// into model instructions only for this host/model pair. Local validation
   /// remains authoritative; unsupported provider enforcement is not implied.
-  Map<String, dynamic> _requestForTransport(
+  Map<String, dynamic> adaptRequestForTransport(
     Map<String, dynamic> body, {
     required bool generation,
   }) {
-    if (!_freeUltra) {
+    if (!nemotronEvaluation && !_freeUltra) {
       return body;
     }
+    if (nemotronEvaluation &&
+        (body['model'] != model ||
+            body.keys.any(
+              (key) => !const {
+                'model',
+                'max_tokens',
+                'temperature',
+                'response_format',
+                'messages',
+                'reasoning_effort',
+              }.contains(key),
+            ))) {
+      throw ArgumentError(
+        'Evaluation request must use its fixed provider profile.',
+      );
+    }
     final adapted = Map<String, dynamic>.from(body);
-    final format = adapted.remove('response_format') as Map;
-    adapted['provider'] = {
-      'allow_fallbacks': false,
-      'max_price': {'prompt': 0, 'completion': 0},
-    };
+    final format = body['response_format'];
+    if (nemotronEvaluation &&
+        (format is! Map ||
+            format['type'] != (generation ? 'json_schema' : 'json_object') ||
+            (generation &&
+                (format['json_schema'] is! Map ||
+                    format['json_schema']['schema']
+                        is! Map<String, dynamic>)))) {
+      throw ArgumentError(
+        'Evaluation request has an invalid response contract.',
+      );
+    }
+    if (nvidiaEvaluation) {
+      // Apply only this exact model's documented settings. Reasoning controls
+      // differ by family; OpenRouter routing fields do not apply to NVIDIA.
+      adapted.remove('reasoning_effort');
+      adapted.addAll(nvidiaEvaluationProfile(model).transportOverrides());
+    } else {
+      adapted['provider'] = {
+        'allow_fallbacks': false,
+        'max_price': {'prompt': 0, 'completion': 0},
+        if (_structuredEvaluation) 'require_parameters': true,
+      };
+    }
+    if (freeNemotronEvaluation &&
+        (model == freeNemotronModels[1] || model == freeNemotronModels[2])) {
+      adapted['reasoning'] = {'effort': 'medium'};
+    }
+    if (_structuredEvaluation) return adapted;
+    adapted.remove('response_format');
     if (!generation) return adapted;
 
-    adapted['reasoning'] = {'effort': 'medium'};
+    if (_freeUltra) adapted['reasoning'] = {'effort': 'medium'};
     final schema =
-        (format['json_schema'] as Map)['schema'] as Map<String, dynamic>;
+        ((format as Map)['json_schema'] as Map)['schema']
+            as Map<String, dynamic>;
     final originalSchema = jsonEncode(schema);
     final encodedSchema = jsonEncode(_compactInstructionSchema(schema));
     final messages = (body['messages'] as List)
@@ -1836,8 +1954,11 @@ class ChatCompletionProvider implements AiProvider, GuidanceProvider {
           'Respect the complete response_format grammar',
           'Respect the complete supplied response schema',
         );
+    final enforcement = nvidiaEvaluation
+        ? 'This request supplies its JSON Schema as instructions. '
+        : 'This endpoint does not enforce JSON Schema. ';
     system['content'] =
-        '$contract This endpoint does not enforce JSON Schema. '
+        '$contract $enforcement'
         'AppNest validates every response against the complete response schema. '
         'Return a matching response instance, never the schema itself. '
         'Complete response schema: $encodedSchema';
@@ -1846,13 +1967,10 @@ class ChatCompletionProvider implements AiProvider, GuidanceProvider {
   }
 
   static ChatCompletionProvider? configured(Session s) {
-    final base = s.passwords['AI_BASE_URL'],
-        model = s.passwords['AI_MODEL'],
-        key = s.passwords['AI_API_KEY'];
+    final base = s.passwords['AI_BASE_URL'], model = s.passwords['AI_MODEL'];
     if (base == null ||
         model == null ||
-        key == null ||
-        [base, model, key].any((x) => x.trim().isEmpty)) {
+        [base, model].any((x) => x.trim().isEmpty)) {
       return null;
     }
     final uri = Uri.tryParse(base);
@@ -1861,10 +1979,21 @@ class ChatCompletionProvider implements AiProvider, GuidanceProvider {
         uri.host.isEmpty) {
       return null;
     }
+    final nvidia = uri.host == 'integrate.api.nvidia.com';
+    if (nvidia &&
+        (uri.replace(path: uri.path.replaceFirst(RegExp(r'/$'), '')) !=
+                Uri.parse('https://integrate.api.nvidia.com/v1') ||
+            !nvidiaNemotronModels.contains(model))) {
+      return null;
+    }
+    // Never send a previously configured OpenRouter credential to NVIDIA.
+    final key = s.passwords[nvidia ? 'NVIDIA_API_KEY' : 'AI_API_KEY'];
+    if (key == null || key.trim().isEmpty) return null;
     return ChatCompletionProvider(
       uri,
       model,
       key,
+      nvidiaNemotronEvaluation: nvidia,
       log: (message) => s.log(message),
     );
   }
@@ -1891,11 +2020,15 @@ class ChatCompletionProvider implements AiProvider, GuidanceProvider {
           'Content-Type': 'application/json',
         })
         ..body = jsonEncode(
-          _requestForTransport(
+          adaptRequestForTransport(
             buildGuidanceRequest(model, idea, definition: definition),
             generation: false,
           ),
         );
+      if (nemotronEvaluation) message.followRedirects = false;
+      if (nvidiaEvaluation) {
+        message.headers['Accept'] = 'application/json';
+      }
       final response = await client
           .send(message)
           .timeout(
@@ -2033,7 +2166,9 @@ class ChatCompletionProvider implements AiProvider, GuidanceProvider {
       microseconds: (deadline.inMicroseconds - elapsed.elapsedMicroseconds)
           .clamp(1, deadline.inMicroseconds),
     );
-    final body = _requestForTransport(
+    Map<String, dynamic>? evaluationUsage;
+    String? evaluationResponse;
+    final body = adaptRequestForTransport(
       buildAiRequest(
         model,
         request,
@@ -2055,6 +2190,10 @@ class ChatCompletionProvider implements AiProvider, GuidanceProvider {
           'Content-Type': 'application/json',
         })
         ..body = jsonEncode(body);
+      if (nemotronEvaluation) message.followRedirects = false;
+      if (nvidiaEvaluation) {
+        message.headers['Accept'] = 'application/json';
+      }
       // Bound both total duration and bytes while receiving, not after buffering.
       final response = await client.send(message).timeout(remaining());
       status = response.statusCode;
@@ -2065,6 +2204,14 @@ class ChatCompletionProvider implements AiProvider, GuidanceProvider {
       );
       retryAfter = _boundedRetryAfter(response.headers['retry-after']);
       if (response.statusCode != 200) {
+        if (nvidiaEvaluation && response.statusCode == 202) {
+          throw const AiResponseException(
+            'indeterminate',
+            'NVIDIA accepted asynchronous work; its completion outcome is unknown. Do not resubmit this request.',
+            statusCode: 202,
+            retryable: false,
+          );
+        }
         providerCode = _providerErrorCode(status);
         throw AiResponseException(
           'http_error',
@@ -2101,6 +2248,9 @@ class ChatCompletionProvider implements AiProvider, GuidanceProvider {
         );
       }
       if (json is Map) {
+        if (nemotronEvaluation && json['usage'] is Map<String, dynamic>) {
+          evaluationUsage = Map<String, dynamic>.from(json['usage'] as Map);
+        }
         requestIdHash ??= _requestIdHash(json['id']);
         // Never reflect error.message, raw metadata, flagged input or bodies.
         // A provider failure can arrive after HTTP 200 headers were committed.
@@ -2108,6 +2258,12 @@ class ChatCompletionProvider implements AiProvider, GuidanceProvider {
         final first = choices is List && choices.isNotEmpty
             ? choices.first
             : null;
+        if (nemotronEvaluation && first is Map) {
+          final message = first['message'];
+          if (message is Map && message['content'] is String) {
+            evaluationResponse = message['content'] as String;
+          }
+        }
         final error = json['error'] ?? (first is Map ? first['error'] : null);
         if (error != null) {
           final metadata = error is Map ? error['metadata'] : null;
@@ -2162,6 +2318,7 @@ class ChatCompletionProvider implements AiProvider, GuidanceProvider {
           ? choice['message']['content']
           : null;
       if (text is String) contentCharacters = text.length;
+      if (nemotronEvaluation && text is String) evaluationResponse = text;
       if (reason == 'length') {
         throw AiResponseException(
           'truncated',
@@ -2205,6 +2362,19 @@ class ChatCompletionProvider implements AiProvider, GuidanceProvider {
       );
     } on AiResponseException catch (e) {
       outcome = e.kind;
+      if (nemotronEvaluation &&
+          (evaluationUsage != null || evaluationResponse != null)) {
+        throw AiResponseException(
+          e.kind,
+          e.message,
+          statusCode: e.statusCode,
+          providerErrorType: e.providerErrorType,
+          retryAfter: e.retryAfter,
+          retryable: e.retryable,
+          usage: evaluationUsage,
+          syntheticResponse: evaluationResponse,
+        );
+      }
       rethrow;
     } on http.ClientException {
       outcome = 'transport_error';

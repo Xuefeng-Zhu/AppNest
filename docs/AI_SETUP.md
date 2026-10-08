@@ -13,20 +13,24 @@ Without a configured provider, AppNest shows **Template mode — AI provider not
 configured**. Templates, manual editing, publication and existing apps remain
 available. `FakeAiProvider` is a test helper; it is not a runtime fallback.
 
-Add these entries under the active environment in the ignored
+For NVIDIA development, add these entries under `development` in the ignored
 `appnest_server/config/passwords.yaml`, preserving its existing database and
 authentication secrets:
 
 ```yaml
 development:
   # Keep existing database/authentication entries here.
-  AI_BASE_URL: https://YOUR_OPERATOR_APPROVED_PROVIDER/v1
-  AI_MODEL: YOUR_ACTUAL_PROVIDER_MODEL_ID
-  AI_API_KEY: YOUR_SERVER_ONLY_KEY
+  AI_BASE_URL: https://integrate.api.nvidia.com/v1
+  AI_MODEL: nvidia/nemotron-3-ultra-550b-a55b
+  NVIDIA_API_KEY: YOUR_SERVER_ONLY_NVIDIA_KEY
 ```
 
-Use the environment the server actually runs in. All three nonblank values are
-required. The adapter accepts an HTTP(S) base URL and appends `/chat/completions`;
+Keep the NVIDIA credential under `development` only. The NVIDIA adapter reads
+`NVIDIA_API_KEY`; other providers read `AI_API_KEY`. Preserve any existing
+OpenRouter credential under its original name. The evaluator also accepts an
+explicit `OPENROUTER_API_KEY` for OpenRouter; its legacy `AI_API_KEY` fallback
+requires `AI_BASE_URL` to identify OpenRouter. The base URL, model and matching
+provider credential must all be nonblank. The adapter appends `/chat/completions`;
 provide the API base rather than the completed request path. Use HTTPS for a
 remote service. `.env` files alone are not read by this adapter, and these names
 are Serverpod password entries rather than Flutter build settings.
@@ -52,7 +56,8 @@ requests, including after later failures or manual edits. None of these
 operations sends stored mini-app records or device readings to the provider.
 
 The normal adapter requires the configured provider to support its requested
-response formats. The scoped development route below is the explicit exception.
+response formats. The NVIDIA and scoped OpenRouter adaptations below are
+explicit exceptions.
 Provider enforcement is supplementary: AppNest always validates the returned
 JSON and semantic references locally. One outer JSON fence is tolerated; prose
 and arbitrary embedded-object extraction are rejected.
@@ -64,6 +69,105 @@ definition strictly again and records raw-output, input-definition and candidate
 hashes plus added declarations in private job metadata. Manual definitions and
 edits retain their strict parsing path. Preview remains separate from explicit
 publication and reminder approval.
+
+## NVIDIA development route and benchmark
+
+The NVIDIA route uses the exact API base `https://integrate.api.nvidia.com/v1`.
+The application configuration above selects Ultra. The optional
+[Nemotron benchmark](NEMOTRON_EVALUATION.md) defaults to NVIDIA and compares all
+four exact allowlisted model IDs without changing the application's selection:
+
+| Model | NVIDIA model ID |
+| --- | --- |
+| Lightning 3.5 | `nvidia/nemotron-3.5-lightning-30b-a3b` |
+| Super 3 | `nvidia/nemotron-3-super-120b-a12b` |
+| Ultra 3 | `nvidia/nemotron-3-ultra-550b-a55b` |
+| Nano Omni 3 | `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning` |
+
+All four use the `nvidia-instruction-schema-thinking-off-v1` transport profile.
+Generation supplies its schema in instructions rather than `response_format`;
+guidance supplies its bounded JSON contract in instructions. Calls are
+nonstreaming and set `chat_template_kwargs.enable_thinking: false`. AppNest's
+local parsing, semantic validation, unsupported-request checks and bounded
+repairs remain authoritative. These settings do not establish provider-side
+schema enforcement or successful generation.
+
+The public NVIDIA model pages advertise available free developer endpoints.
+The evaluator verifies that advertisement before a live run and records each
+source URL and `freeEndpoint: true`. An authenticated model-listing request
+checks credential access without making a completion request. These checks do
+not reveal numerical account quota or verified token pricing: metadata records
+`pricingVerified: false`, `accountLimitsKnown: false`, and unknown free-request
+counts. The trial endpoint is expected to be free; omitted usage cost remains
+unknown.
+
+The **2026-10-08 serial NVIDIA benchmark** completed all 144 planned operations
+with 72 passes, 62 failures and 10 skipped sequence edits over 288 attempts.
+The server-only development key was configured, and authenticated model access
+was verified for all four routes. These synthetic checks establish provider
+and definition behavior rather than connected Flutter or app persistence.
+
+| Model | Strict creations /12 | Fixed-baseline edits /12 |
+| --- | ---: | ---: |
+| Lightning 3.5 | 1 | 5 |
+| Super 3 | 6 | 12 |
+| Ultra 3 | 7 | 7 |
+| Nano Omni 3 | 0 | 4 |
+
+Super had the strongest observed editing result, with 9/12 first-attempt and
+12/12 eventual passes. The report withholds definitive creation/editing winners
+because service failures left some models without comparable response coverage.
+Ultra and Nano encountered 21 and 66 HTTP 503 attempts; Lightning had five
+timeouts. Short failure latency is not evidence of fast usable generation.
+NVIDIA cost remained unreported and unknown.
+
+Production's capability compiler is broader than the frozen strict scorer:
+an offline post-hoc check accepts 8/12 Ultra creations versus the primary 7/12,
+without changing the scored run. See the
+[complete category results, timings and evidence](NEMOTRON_EVALUATION.md#completed-nvidia-serial-evaluation--2026-10-08-utc)
+and [compiler diagnostic](evidence/nemotron/2026-10-08-nvidia-v2/posthoc-offline-compiler-diagnostic.md).
+The separate 902-test implementation check predates later parallel execution
+changes. The full comparison used concurrency 1; `--concurrency=1..4` in the
+benchmark defaults to 1, keeps each model's calls sequential and applies global
+four-second dispatch pacing. Parallel comparisons require a separate run.
+
+A separate bounded parallel smoke on 2026-10-08 UTC used concurrency 4 and a
+four-request cap. It observed a peak of three overlapping calls, starts at
+least four seconds apart and a 26.216-second dispatch-to-completion window,
+then stopped at the cap with no request in flight. One Ultra response passed,
+two responses failed validation and one Nano request received HTTP 503. This
+establishes scheduling behavior, not a full parallel quality comparison or
+speedup measurement. The changes passed 139 focused benchmark tests, workspace
+analysis, formatting and invalid-CLI checks. See the
+[smoke report](evidence/nemotron/2026-10-08-nvidia-parallel-smoke/checkpoint.json.md)
+and [checkpoint](evidence/nemotron/2026-10-08-nvidia-parallel-smoke/checkpoint.json).
+Offline replay confirmed the one accepted synthetic result; the frozen source
+fingerprint is retained in the checkpoint.
+
+The explicit [Kimi, GLM and DeepSeek benchmark extension](FREE_MODEL_EVALUATION.md)
+stopped at NVIDIA HTTP 429 on 2026-10-08 UTC. Of 108 planned operations,
+80 reached terminal outcomes: 42 passed and 38 failed. Separately, one was
+blocked and 27 remain pending, over 168 attempts. GLM finished at 35/36, Kimi at 7/36 planned
+and DeepSeek at 0/36 with no completion received. GLM provides the strongest
+observed practical signal for this bounded setup; service failures and
+unfinished coverage prevent a categorical quality winner. The separate
+image-upload and optional-reminder diagnoses do not change primary scores.
+Its concurrency 3 and reasoning profiles differ from the historical serial
+thinking-disabled run, so latency is not a controlled comparison. Actual cost,
+account allowance and reset time remain unknown. See the linked guide for
+archived evidence, the seven-model category table and 42-result offline replay.
+These explicit `--models` selections do not change the application's Ultra
+configuration or the default four-model Nemotron benchmark. Do not resume until
+the provider block is resolved.
+
+If the evaluator receives HTTP 202, the provider has accepted asynchronous
+work without returning a final result. It records that operation as
+indeterminate, stops dispatching, and never automatically replays the request.
+
+Official endpoint references: [Lightning](https://build.nvidia.com/nvidia/nemotron-3.5-lightning-30b-a3b),
+[Super](https://build.nvidia.com/nvidia/nemotron-3-super-120b-a12b),
+[Ultra](https://build.nvidia.com/nvidia/nemotron-3-ultra-550b-a55b), and
+[Nano Omni](https://build.nvidia.com/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning).
 
 ## Scoped OpenRouter development route
 
@@ -84,9 +188,9 @@ fallbacks and send zero prompt/completion token price limits. This is an
 intentional compatibility adaptation, not evidence that the provider enforces
 the schema. Local validation remains authoritative.
 
-The generation deadline is 90 seconds for this pair and 45 seconds otherwise.
-Changing the model or host leaves the normal response-format path and deadline
-in effect. Use synthetic requests for development and review the provider's
+The generation deadline is 90 seconds for this pair and for the supported NVIDIA
+routes, and 45 seconds otherwise. Other host/model combinations use the normal
+response-format path. Use synthetic requests for development and review the provider's
 current data-handling terms before sending other material. The
 [model listing](https://openrouter.ai/nvidia/nemotron-3-ultra-550b-a55b:free)
 is an external reference; this guide does not establish current availability,
@@ -101,7 +205,7 @@ free quota, pricing or successful live generation.
 | Generation attempts | At most three per job |
 | Generation input | At most 16 KiB UTF-8 at the server; the composer also limits characters |
 | Worker pool | Eight Future Call slots per process, shared by generation, reminders and reconciliation |
-| Generation provider duration | 45 seconds normally; 90 seconds for the scoped route above |
+| Generation provider duration | 45 seconds normally; 90 seconds for the scoped OpenRouter route and supported NVIDIA routes |
 | Generation lease | 120 seconds, with expiration and stale-result fencing |
 | Output token allowance | 8,000 normally; a fresh-creation retry after a recognized truncation diagnostic gets a fixed 12,000 allowance |
 | Definition output | 128 KiB; provider response envelope is bounded separately to three times that size |

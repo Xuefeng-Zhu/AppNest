@@ -34,6 +34,8 @@ Begin with [verification records](VERIFICATION.md) for the scope of each check. 
 | [Architecture review](ARCHITECTURE_REVIEW.md) | 2026-10-07 source review, selected passing suites, and focused defect reproductions |
 | [Fresh AI creation](AI_CREATION_CHECK.md) | Historical authenticated browser creation/publication and semantic edits |
 | [Customization AI evaluation](CUSTOMIZATION_AI_CHECK.md) | Historical targeted provider creation/edit batches with explicit baselines |
+| [Nemotron model evaluation](NEMOTRON_EVALUATION.md) | Reproducible free-route model comparison, scoring and checkpoint recovery |
+| [Kimi, GLM and DeepSeek evaluation](FREE_MODEL_EVALUATION.md) | Blocked 108-operation NVIDIA comparison, seven-model category observations and archived evidence |
 | [Generation failure investigation](GENERATION_FAILURE_CHECK.md) | A dated failure, subsequent changes, and bounded verification |
 | [Rich components live check](RICH_COMPONENTS_LIVE_CHECK.md) | Historical local RPC/browser media, forms, queries, and persistence |
 | [Phone Toolkit AI check](IPHONE_AI_CHECK.md) | Historical generation/browser behavior; distinct from native-device acceptance |
