@@ -314,7 +314,10 @@ void _validateRichView(AppSpec spec, ViewSpec view) {
         _ => <FieldType>{},
       };
       if (!types.contains(f.type))
-        throw const SpecException('Control does not match the field type');
+        throw SpecException(
+          'Form ${view.id} field ${f.id} has type ${f.type.name}, but control '
+          '${c['control']} requires ${types.map((type) => type.name).join(' or ')}.',
+        );
       if (c['control'] == 'segmented' && f.choices.length > 6)
         throw const SpecException(
           'Segmented controls support at most six choices',

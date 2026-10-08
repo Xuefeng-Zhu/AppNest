@@ -434,6 +434,85 @@ void main() {
     expect(habits.collection('checkins').field('minutes').normalize(500), 500);
   });
 
+  test('control mismatch diagnostics identify exact typed bindings without labels or hints', () {
+    for (final (control, diagnostic) in <(Map<String, dynamic>, String)>[
+      (
+        {'fieldId': 'title', 'control': 'switch'},
+        'Form editor field title has type text, but control switch requires boolean.',
+      ),
+      (
+        {'fieldId': 'minutes', 'control': 'select'},
+        'Form editor field minutes has type number, but control select requires choice or member.',
+      ),
+      (
+        {'fieldId': 'minutes', 'control': 'rating'},
+        'Form editor field minutes has type number, but control rating requires integer.',
+      ),
+      (
+        {'fieldId': 'completed', 'control': 'dateTime'},
+        'Form editor field completed has type boolean, but control dateTime requires timestamp.',
+      ),
+      (
+        {
+          'fieldId': 'title',
+          'control': 'slider',
+          'min': 0,
+          'max': 10,
+          'step': 1,
+        },
+        'Form editor field title has type text, but control slider requires integer or number.',
+      ),
+    ]) {
+      final json = jsonDecode(habits.canonical) as Map<String, dynamic>;
+      final form = (json['views'] as List).cast<Map>().singleWhere(
+        (view) => view['id'] == 'editor',
+      );
+      form['label'] = 'Private form label';
+      final field = (json['collections'][0]['fields'] as List)
+          .cast<Map>()
+          .singleWhere((field) => field['id'] == control['fieldId']);
+      field['label'] = 'Private field label';
+      form['options'] = {
+        'controls': [
+          {...control, 'hint': 'Private record-like hint content'},
+        ],
+      };
+      expect(
+        () => AppSpec.parse(jsonEncode(json)),
+        throwsA(
+          isA<SpecException>().having(
+            (error) => error.message,
+            'actionable mismatch with no labels or hint content',
+            diagnostic,
+          ),
+        ),
+      );
+    }
+    // The diagnostic change preserves the accepted control/type combinations.
+    final valid = mutate(
+      habits,
+      'editor',
+      (view) => view['options'] = {
+        'controls': [
+          {'fieldId': 'title', 'control': 'multiline'},
+          {
+            'fieldId': 'minutes',
+            'control': 'stepper',
+            'min': 0,
+            'max': 100,
+            'step': 1,
+          },
+          {'fieldId': 'completed', 'control': 'checkbox'},
+          {'fieldId': 'energy', 'control': 'rating'},
+          {'fieldId': 'category', 'control': 'select'},
+          {'fieldId': 'loggedAt', 'control': 'dateTime'},
+        ],
+      },
+    );
+    expect(AppSpec.parse(valid.canonical).hash, valid.hash);
+    expect(habits.collection('checkins').field('minutes').normalize(500), 500);
+  });
+
   test('numeric controls reject overflowing spans and step ratios', () {
     for (final control in ['slider', 'stepper']) {
       for (final bounds in [

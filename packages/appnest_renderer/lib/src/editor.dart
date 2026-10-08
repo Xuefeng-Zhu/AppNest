@@ -398,7 +398,20 @@ class _RecordEditorState extends State<_RecordEditor> {
       FieldType.number => text.isEmpty ? null : double.parse(text),
       _ => text.isEmpty ? null : text,
     };
-    return field.normalize(value);
+    final normalized = field.normalize(value);
+    final config = control(field), kind = config['control'];
+    if (normalized is num &&
+        {'slider', 'stepper', 'rating'}.contains(kind) &&
+        (creating || normalized != widget.initial?[field.id])) {
+      final min = kind == 'rating' ? 1 : config['min'] as num;
+      final max = kind == 'rating' ? 5 : config['max'] as num;
+      if (normalized < min || normalized > max) {
+        throw SpecException(
+          '${field.label} must be between ${_number(min)} and ${_number(max)}.',
+        );
+      }
+    }
+    return normalized;
   }
 
   void _nextStep() {
@@ -481,28 +494,33 @@ class _RecordEditorState extends State<_RecordEditor> {
   );
 
   Widget _numericControl(FieldSpec field, Map<String, dynamic> config) {
-    final min = (config['min'] as num?)?.toDouble() ?? 0;
+    final min =
+        (config['min'] as num?)?.toDouble() ??
+        (config['control'] == 'rating' ? 1 : 0);
     final max =
         (config['max'] as num?)?.toDouble() ??
         (config['control'] == 'rating' ? 5 : 100);
     final step = (config['step'] as num?)?.toDouble() ?? 1;
-    final value = num.tryParse(_controllers[field.id]!.text)?.toDouble();
+    final parsed = num.tryParse(_controllers[field.id]!.text)?.toDouble();
+    final value = parsed != null && parsed.isFinite ? parsed : null;
     void update(double next) {
       if (!next.isFinite) {
         setState(() => _error = 'This numeric value is too large.');
         return;
       }
+      final bounded = next.clamp(min, max);
       setState(
         () => _controllers[field.id]!.text = field.type == FieldType.integer
-            ? '${next.round()}'
-            : next.toString(),
+            ? '${bounded.round()}'
+            : bounded.toString(),
       );
     }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        // The text value remains authoritative even when it exceeds a display range.
+        // Existing values are not clamped on display or unrelated saves. Newly
+        // entered or changed values must satisfy this form's authored range.
         TextField(
           controller: _controllers[field.id],
           keyboardType: const TextInputType.numberWithOptions(
@@ -514,7 +532,9 @@ class _RecordEditorState extends State<_RecordEditor> {
             helperText: value == null
                 ? 'Not set'
                 : value < min || value > max
-                ? 'Outside the control range; your value is preserved.'
+                ? (!creating && value == widget.initial?[field.id])
+                      ? 'Outside the control range; your value is preserved.'
+                      : 'Choose a value between ${_number(min)} and ${_number(max)}.'
                 : null,
           ),
           onChanged: (_) => setState(() {}),
@@ -538,7 +558,7 @@ class _RecordEditorState extends State<_RecordEditor> {
           Wrap(
             spacing: 2,
             children: [
-              for (var n = min == 0 ? 1 : min.toInt(); n <= max && n <= 10; n++)
+              for (var n = 1; n <= 5; n++)
                 IconButton(
                   tooltip: '${field.label}: $n',
                   onPressed: () => update(n.toDouble()),
@@ -558,13 +578,17 @@ class _RecordEditorState extends State<_RecordEditor> {
             children: [
               IconButton(
                 tooltip: 'Decrease ${field.label}',
-                onPressed: value == null ? null : () => update(value - step),
+                onPressed: value == null || value <= min
+                    ? null
+                    : () => update(value - step),
                 icon: const Icon(Icons.remove_circle_outline),
               ),
               Text(value == null ? 'Not set' : _number(value)),
               IconButton(
                 tooltip: 'Increase ${field.label}',
-                onPressed: () => update(value == null ? min : value + step),
+                onPressed: value != null && value >= max
+                    ? null
+                    : () => update(value == null ? min : value + step),
                 icon: const Icon(Icons.add_circle_outline),
               ),
             ],

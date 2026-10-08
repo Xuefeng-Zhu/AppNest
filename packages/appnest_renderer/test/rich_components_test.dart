@@ -48,6 +48,31 @@ Future<void> close(
   controller.dispose();
 }
 
+AppSpec boundedEnergyForm(String kind, {int step = 1}) {
+  final json = habitTrackerTemplate().toJson();
+  final fields = json['collections'][0]['fields'] as List;
+  fields.firstWhere((field) => field['id'] == 'loggedAt')['required'] = false;
+  final editor = (json['views'] as List).firstWhere(
+    (view) => view['id'] == 'editor',
+  );
+  editor['fieldIds'] = ['title', 'energy', 'notes'];
+  editor['options'] = {
+    'controls': [
+      {
+        'fieldId': 'energy',
+        'control': kind,
+        if (kind != 'rating') ...{'min': 1, 'max': 5, 'step': step},
+      },
+      {'fieldId': 'notes', 'control': 'multiline'},
+    ],
+  };
+  return AppSpec.parse(jsonEncode(json));
+}
+
+Finder numericButton(String tooltip) => find.byWidgetPredicate(
+  (widget) => widget is IconButton && widget.tooltip == tooltip,
+);
+
 class RecordingPreview extends PreviewRuntimeAdapter {
   RecordingPreview(super.spec, {super.pickImage}) : super(now: now);
   final queries = <Map<String, dynamic>>[];
@@ -365,6 +390,278 @@ void main() {
     await tester.tap(find.text('Save'));
     await tester.pumpAndSettle();
     expect((await adapter.get(1)).data['minutes'], 999.125);
+    await close(tester, adapter, controller);
+  });
+  for (final kind in ['slider', 'stepper', 'rating']) {
+    testWidgets('$kind rejects new out-of-range values before any write', (
+      tester,
+    ) async {
+      final adapter = RecordingPreview(boundedEnergyForm(kind));
+      final controller = MiniAppController();
+      await mount(tester, adapter, controller);
+      await controller.navigate(
+        const MiniAppLocation('formPage', editing: true),
+      );
+      await tester.pumpAndSettle();
+      final title = find.widgetWithText(TextField, 'Activity *');
+      final energy = find.widgetWithText(TextField, 'Energy');
+      await tester.ensureVisible(title);
+      await tester.enterText(title, 'Bounded new $kind');
+      for (final invalid in ['6', '0']) {
+        await tester.ensureVisible(energy);
+        await tester.enterText(energy, invalid);
+        await tester.ensureVisible(find.text('Save'));
+        await tester.tap(find.text('Save'));
+        await tester.pumpAndSettle();
+        expect(adapter.writes, 0);
+        expect(
+          find.text('Could not save. Energy must be between 1 and 5.'),
+          findsOneWidget,
+        );
+      }
+      await tester.ensureVisible(energy);
+      await tester.enterText(energy, '3');
+      await tester.ensureVisible(find.text('Save'));
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+      expect(adapter.writes, 1);
+      final saved = (await adapter.query('checkins', {
+        'filters': [
+          {'fieldId': 'title', 'operator': 'eq', 'value': 'Bounded new $kind'},
+        ],
+      })).items.single;
+      expect(saved.data['energy'], 3);
+      expect(tester.takeException(), isNull);
+      await close(tester, adapter, controller);
+    });
+
+    testWidgets(
+      '$kind rejects changed out-of-range values but allows optional clearing',
+      (tester) async {
+        final adapter = RecordingPreview(boundedEnergyForm(kind));
+        final controller = MiniAppController();
+        await adapter.execute(
+          adapter.spec.action('editRecord'),
+          await adapter.get(1),
+          {
+            'data': {'energy': 3},
+          },
+          'prepare-valid-energy',
+        );
+        adapter.writes = 0;
+        await mount(tester, adapter, controller);
+        await controller.navigate(
+          const MiniAppLocation('formPage', recordId: 1, editing: true),
+        );
+        await tester.pumpAndSettle();
+        final energy = find.widgetWithText(TextField, 'Energy');
+        await tester.ensureVisible(energy);
+        await tester.enterText(energy, '6');
+        await tester.ensureVisible(find.text('Save'));
+        await tester.tap(find.text('Save'));
+        await tester.pumpAndSettle();
+        expect(adapter.writes, 0);
+        expect((await adapter.get(1)).data['energy'], 3);
+        expect(
+          find.text('Could not save. Energy must be between 1 and 5.'),
+          findsOneWidget,
+        );
+        await tester.ensureVisible(find.text('Clear value'));
+        await tester.tap(find.text('Clear value'));
+        await tester.pumpAndSettle();
+        await tester.ensureVisible(find.text('Save'));
+        await tester.tap(find.text('Save'));
+        await tester.pumpAndSettle();
+        expect(adapter.writes, 1);
+        expect((await adapter.get(1)).data.containsKey('energy'), isFalse);
+        expect(tester.takeException(), isNull);
+        await close(tester, adapter, controller);
+      },
+    );
+
+    testWidgets(
+      '$kind preserves untouched legacy values on unrelated edits and permits correction',
+      (tester) async {
+        final adapter = RecordingPreview(boundedEnergyForm(kind));
+        final controller = MiniAppController();
+        await adapter.execute(
+          adapter.spec.action('editRecord'),
+          await adapter.get(1),
+          {
+            'data': {'energy': 9},
+          },
+          'prepare-legacy-energy',
+        );
+        adapter.writes = 0;
+        await mount(tester, adapter, controller);
+        await controller.navigate(
+          const MiniAppLocation('formPage', recordId: 1, editing: true),
+        );
+        await tester.pumpAndSettle();
+        final notes = find.widgetWithText(TextField, 'Notes');
+        await tester.ensureVisible(notes);
+        await tester.enterText(notes, 'An unrelated note');
+        await tester.ensureVisible(find.text('Save'));
+        await tester.tap(find.text('Save'));
+        await tester.pumpAndSettle();
+        expect(adapter.writes, 1);
+        expect((await adapter.get(1)).data['energy'], 9);
+        expect((await adapter.get(1)).data['notes'], 'An unrelated note');
+        // Let the acknowledgement snackbar leave before reopening the editor.
+        await tester.pump(const Duration(seconds: 5));
+        await tester.pumpAndSettle();
+        await controller.navigate(
+          const MiniAppLocation('formPage', recordId: 1, editing: true),
+        );
+        await tester.pumpAndSettle();
+        if (kind == 'stepper') {
+          expect(
+            tester
+                .widget<IconButton>(numericButton('Increase Energy'))
+                .onPressed,
+            isNull,
+          );
+          await tester.ensureVisible(find.byTooltip('Decrease Energy'));
+          await tester.tap(find.byTooltip('Decrease Energy'));
+        } else if (kind == 'rating') {
+          await tester.ensureVisible(find.byTooltip('Energy: 5'));
+          await tester.tap(find.byTooltip('Energy: 5'));
+        } else {
+          tester.widget<Slider>(find.byType(Slider)).onChanged!(5);
+        }
+        await tester.pumpAndSettle();
+        await tester.ensureVisible(find.text('Save'));
+        await tester.tap(find.text('Save'));
+        await tester.pumpAndSettle();
+        expect(adapter.writes, 2);
+        expect((await adapter.get(1)).data['energy'], 5);
+        expect((await adapter.get(1)).data['notes'], 'An unrelated note');
+        expect(tester.takeException(), isNull);
+        await close(tester, adapter, controller);
+      },
+    );
+  }
+
+  testWidgets(
+    'stepper disables boundary buttons and never overshoots a partial final step',
+    (tester) async {
+      final adapter = RecordingPreview(boundedEnergyForm('stepper', step: 3));
+      final controller = MiniAppController();
+      await mount(tester, adapter, controller);
+      await controller.navigate(
+        const MiniAppLocation('formPage', editing: true),
+      );
+      await tester.pumpAndSettle();
+      final energy = find.widgetWithText(TextField, 'Energy');
+      final increase = numericButton('Increase Energy');
+      final decrease = numericButton('Decrease Energy');
+      String displayed() => tester.widget<TextField>(energy).controller!.text;
+      expect(displayed(), '');
+      expect(tester.widget<IconButton>(decrease).onPressed, isNull);
+      for (final expected in ['1', '4', '5']) {
+        await tester.ensureVisible(increase);
+        await tester.tap(increase);
+        await tester.pumpAndSettle();
+        expect(displayed(), expected);
+      }
+      expect(tester.widget<IconButton>(increase).onPressed, isNull);
+      for (final expected in ['2', '1']) {
+        await tester.ensureVisible(decrease);
+        await tester.tap(decrease);
+        await tester.pumpAndSettle();
+        expect(displayed(), expected);
+      }
+      expect(tester.widget<IconButton>(decrease).onPressed, isNull);
+      expect(adapter.writes, 0);
+      await close(tester, adapter, controller);
+    },
+  );
+
+  testWidgets('optional bounded numeric create can remain unset', (
+    tester,
+  ) async {
+    final adapter = RecordingPreview(boundedEnergyForm('rating'));
+    final controller = MiniAppController();
+    await mount(tester, adapter, controller);
+    await controller.navigate(const MiniAppLocation('formPage', editing: true));
+    await tester.pumpAndSettle();
+    final title = find.widgetWithText(TextField, 'Activity *');
+    await tester.ensureVisible(title);
+    await tester.enterText(title, 'An unrated entry');
+    await tester.ensureVisible(find.text('Save'));
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+    expect(adapter.writes, 1);
+    final saved = (await adapter.query('checkins', {
+      'filters': [
+        {'fieldId': 'title', 'operator': 'eq', 'value': 'An unrated entry'},
+      ],
+    })).items.single;
+    expect(saved.data.containsKey('energy'), isFalse);
+    await close(tester, adapter, controller);
+  });
+  testWidgets('bounded numeric validation also guards multi-step progression', (
+    tester,
+  ) async {
+    final json = jsonDecode(
+      jsonEncode(boundedEnergyForm('stepper').toJson()),
+    ) as Map<String, dynamic>;
+    final editor = (json['views'] as List).firstWhere(
+      (view) => view['id'] == 'editor',
+    );
+    editor['options']['steps'] = [
+      {
+        'id': 'energyStep',
+        'title': 'Choose energy',
+        'fieldIds': ['title', 'energy'],
+      },
+      {
+        'id': 'notesStep',
+        'title': 'Add a note',
+        'fieldIds': ['notes'],
+      },
+    ];
+    final adapter = RecordingPreview(AppSpec.parse(jsonEncode(json)));
+    final controller = MiniAppController();
+    await mount(tester, adapter, controller);
+    await controller.navigate(const MiniAppLocation('formPage', editing: true));
+    await tester.pumpAndSettle();
+    final title = find.widgetWithText(TextField, 'Activity *');
+    final energy = find.widgetWithText(TextField, 'Energy');
+    await tester.ensureVisible(title);
+    await tester.enterText(title, 'A staged bounded entry');
+    await tester.ensureVisible(energy);
+    await tester.enterText(energy, '6');
+    await tester.ensureVisible(find.text('Next step'));
+    await tester.tap(find.text('Next step'));
+    await tester.pumpAndSettle();
+    expect(find.text('Step 1 of 2'), findsOneWidget);
+    expect(
+      find.text('Please check this step. Energy must be between 1 and 5.'),
+      findsOneWidget,
+    );
+    expect(adapter.writes, 0);
+    await tester.ensureVisible(energy);
+    await tester.enterText(energy, '5');
+    await tester.ensureVisible(find.text('Next step'));
+    await tester.tap(find.text('Next step'));
+    await tester.pumpAndSettle();
+    expect(find.text('Step 2 of 2'), findsOneWidget);
+    expect(adapter.writes, 0);
+    await tester.ensureVisible(find.text('Save'));
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+    expect(adapter.writes, 1);
+    final saved = (await adapter.query('checkins', {
+      'filters': [
+        {
+          'fieldId': 'title',
+          'operator': 'eq',
+          'value': 'A staged bounded entry',
+        },
+      ],
+    })).items.single;
+    expect(saved.data['energy'], 5);
     await close(tester, adapter, controller);
   });
   for (final step in [0.001, 3.0]) {
