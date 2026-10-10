@@ -1,0 +1,2 @@
+CI=true dart format --output=none --set-exit-if-changed on 15 changed sources/tests
+Formatted 15 files (0 changed) in 0.10 seconds.

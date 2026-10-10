@@ -1,0 +1,359 @@
+Running build hooks...Running build hooks...00:00 +0: loading test/provider_test.dart
+00:00 +0: test/provider_test.dart: guidance assesses with only idea and optional declarative definition
+00:00 +1: test/provider_test.dart: guidance accepts clear decisions or focused selectable options
+00:00 +2: test/provider_test.dart: guidance transport logs metadata only and bounds completion
+00:00 +3: test/provider_test.dart: only recognized Ultra uses efficient reasoning on compact creation and preserves edits
+00:00 +4: test/provider_test.dart: recognized Ultra keeps bounded efficient reasoning across every repair
+00:00 +5: test/provider_test.dart: known Ultra reasoning mode is stable for complete and malformed rejected output
+00:00 +6: test/provider_test.dart: compact creation documentation retains typed enums and functional guidance without duplicating the schema
+00:00 +7: test/provider_test.dart: route repair grammar binds existing source, details and form together without a generic branch
+00:00 +8: test/provider_test.dart: count and numeric metric grammars enforce their distinct value-field contracts
+00:00 +9: test/provider_test.dart: raw route repairs bind unique existing pages even when CRUD capabilities are invalid
+00:00 +10: test/provider_test.dart: missing capabilities become an exact minimum retry checklist without freezing new declarations
+00:00 +11: test/provider_test.dart: explicit owner inbox requests require an authored rule only on creation
+00:00 +12: test/provider_test.dart: literal shared member creation constrains creation policy without grants or edit changes
+00:00 +13: test/provider_test.dart: typed chart repairs bind compatible dates and numbers or use existing categorical groups
+00:00 +14: test/provider_test.dart: typed-filter retries allow only existing choice fields and preserve text search without inventing choices
+00:00 +15: test/provider_test.dart: identical duplicate action retries preserve existing declarations once without guessing collision IDs
+00:00 +16: test/provider_test.dart: literal checkbox creation documents boolean counts and workflow controls
+00:00 +17: test/provider_test.dart: create sends only the request and diagnostics, edit includes definition
+00:00 +18: test/provider_test.dart: edit prompt and response format share only the semantic edit schema
+00:00 +19: test/provider_test.dart: only a known creation truncation gets a fixed 12000-token retry allowance
+00:00 +20: test/provider_test.dart: transport constrains create, edits and retries while guidance stays JSON
+00:00 +21: test/provider_test.dart: edit grammar closes the envelope and preserves server-owned identities
+00:00 +22: test/provider_test.dart: edit AddField grammar binds existing form and details without a guessed field id
+00:00 +23: test/provider_test.dart: utility edit grammar omits unavailable collection and rule operations
+00:00 +24: test/provider_test.dart: creation guidance covers notes controls, capabilities and source actions together
+00:00 +25: test/provider_test.dart: provider projection omits unsupported keywords, not AppSpec rules
+00:00 +26: test/provider_test.dart: public creation example validates and never replaces the user request
+00:00 +27: test/provider_test.dart: public device component fragment validates every built-in control
+00:00 +28: test/provider_test.dart: device contract reaches creation and repair without seeding an app
+00:00 +29: test/provider_test.dart: provider view variants retain options and collection constraints
+00:00 +30: test/provider_test.dart: create and edit grammars require slider/stepper bounds and forbid rating ranges
+00:00 +31: test/provider_test.dart: literal single-collection requests constrain creation property omissions
+00:00 +32: test/provider_test.dart: filtered-tab repair grammar binds only unique existing list identities
+00:00 +33: test/provider_test.dart: provider field variants enforce choice presence and emptiness
+00:00 +34: test/provider_test.dart: provider constrains behavior requirements and action bindings
+00:00 +35: test/provider_test.dart: strict JSON and one outer json fence validate identically
+00:00 +36: test/provider_test.dart: design instructions expose bounded styling without leaking records
+00:00 +37: test/provider_test.dart: output parser rejects prose, partial JSON, nested fences and wrong shape
+00:00 +38: test/provider_test.dart: OpenRouter free Ultra receives the exact creation contract without provider schema enforcement
+00:00 +39: test/provider_test.dart: OpenRouter free Ultra preserves typed repair bindings and the bounded truncation allowance
+00:00 +40: test/provider_test.dart: OpenRouter free Ultra edits keep the exact semantic patch schema and stable definition context
+00:00 +41: test/provider_test.dart: OpenRouter free Ultra guidance keeps its explicit decision contract and free-only routing
+00:00 +42: test/provider_test.dart: free Ultra transport adaptation cannot change other models or lookalike hosts
+00:00 +43: test/provider_test.dart: OpenRouter free Ultra HTTP failures expose only safe status and metadata
+00:00 +44: test/provider_test.dart: OpenRouter free Ultra keeps truncation, invalid completion and byte-limit failures
+00:00 +45: test/provider_test.dart: transport records safe completion metadata, never content or credentials
+00:00 +46: test/provider_test.dart: HTTP 200 provider errors cannot masquerade as completions or expose private diagnostics
+00:00 +47: test/provider_test.dart: unknown provider error fields are discarded and HTTP retryability is bounded
+00:00 +48: test/provider_test.dart: generation deadline changes only for exact free Ultra and cannot be extended by injection
+00:00 +49: test/provider_test.dart: streamed headers and partial body share one deadline and retain safe phase evidence
+00:00 +50: test/provider_test.dart: streamed header timeout is distinguished from completed empty envelopes
+00:00 +51: test/provider_test.dart: free instruction schema compaction preserves every creation/edit/repair constraint
+00:01 +52: test/provider_test.dart: repair output is structured untrusted context and never logged
+00:01 +53: test/provider_test.dart: transport distinguishes truncation, HTTP errors and missing completion
+00:01 +54: test/provider_test.dart: transport distinguishes malformed envelope JSON from timeout
+00:01 +55: loading test/nemotron_report_test.dart
+00:01 +55: test/nemotron_report_test.dart: all retry attempts contribute usage, first and eventual rates differ
+00:01 +56: test/nemotron_report_test.dart: omitted usage is unknown, while partial sums retain known attempts
+00:01 +57: test/nemotron_report_test.dart: latency quantiles are deterministic and exclude pending and skipped
+00:01 +58: test/nemotron_report_test.dart: skips and absent operations retain the planned denominator
+00:01 +59: test/nemotron_report_test.dart: transport-only failures do not become model correctness failures
+00:01 +60: test/nemotron_report_test.dart: quota blocks and ambiguous in-flight attempts remain incomplete
+00:01 +61: test/nemotron_report_test.dart: complete category coverage recommends correctness over speed
+00:01 +62: test/nemotron_report_test.dart: unknown usage does not falsely break an otherwise exact tie
+00:01 +63: test/nemotron_report_test.dart: creation and edit recommendations can choose different models
+00:01 +64: test/nemotron_report_test.dart: frozen catalog and transport adaptations are retained in both reports
+00:01 +65: test/nemotron_report_test.dart: historical checkpoints retain explicit OpenRouter behavior
+00:01 +66: test/nemotron_report_test.dart: NVIDIA free endpoint metadata does not invent verified cost or quota
+00:01 +67: loading test/nemotron_evaluation_test.dart
+00:01 +67: test/nemotron_evaluation_test.dart: catalog rejects paid, absent, duplicate and unrecognized routes
+00:01 +68: test/nemotron_evaluation_test.dart: resume requires the frozen contract and operation identities
+00:01 +69: test/nemotron_evaluation_test.dart: dispatch persists in-flight then success; resume never repeats it
+00:01 +70: test/nemotron_evaluation_test.dart: interrupted in-flight request stays indeterminate and is never replayed
+00:01 +71: test/nemotron_evaluation_test.dart: repair receives bounded diagnostics and retains failed-attempt usage
+00:01 +72: test/nemotron_evaluation_test.dart: quota pauses without switching models and resumes without replay
+00:01 +73: test/nemotron_evaluation_test.dart: per-invocation cap preserves work for explicit resume
+00:01 +74: test/nemotron_evaluation_test.dart: unexpected nonzero reported cost stops all further dispatch
+00:01 +75: test/nemotron_evaluation_test.dart: permanent provider error does not consume three requests
+00:01 +76: test/nemotron_evaluation_test.dart: guidance uses guarded transport and retains usage
+00:01 +77: test/nemotron_evaluation_test.dart: guidance 429 keeps retry metadata without provider error body
+00:01 +78: test/nemotron_evaluation_test.dart: malformed model JSON is scored as a correctness failure
+00:01 +79: test/nemotron_evaluation_test.dart: billing guard cannot be cleared by resume
+00:01 +80: test/nemotron_evaluation_test.dart: guidance helper rejects an ordinary provider before network
+00:01 +81: test/nemotron_evaluation_test.dart: guidance embedded quota error is preserved
+00:01 +82: test/nemotron_evaluation_test.dart: resume rejects corrupted attempt counts and manifest contents
+00:01 +83: loading test/nemotron_parallel_edges_test.dart
+00:01 +83: test/nemotron_parallel_edges_test.dart: global cap reserves one request before delayed in-flight saving
+00:01 +84: test/nemotron_parallel_edges_test.dart: billing stops new dispatch while draining an active response
+00:01 +85: test/nemotron_parallel_edges_test.dart: quota stops new dispatch while draining an active response
+00:01 +86: test/nemotron_parallel_edges_test.dart: asynchronous stops new dispatch while draining an active response
+00:01 +87: test/nemotron_parallel_edges_test.dart: billing evidence wins after an earlier HTTP 429 stop
+00:01 +88: test/nemotron_parallel_edges_test.dart: billing evidence wins after an earlier HTTP 202 stop
+00:01 +89: test/nemotron_parallel_edges_test.dart: failed pre-dispatch save stops queued work and drains a started call
+00:01 +90: test/nemotron_parallel_edges_test.dart: model lane finishes repairs before its own dependent sequence
+00:01 +91: test/nemotron_parallel_edges_test.dart: all interrupted model lanes remain indeterminate without replay
+00:01 +92: loading test/nemotron_parallel_scheduler_test.dart
+00:02 +92: test/nemotron_parallel_scheduler_test.dart: fair lanes overlap distinct models and serialize each model
+00:02 +93: test/nemotron_parallel_scheduler_test.dart: retry retains its lane head and yields to other models
+00:02 +94: test/nemotron_parallel_scheduler_test.dart: errors stop queued lanes and drain already-started work
+00:02 +95: test/nemotron_parallel_scheduler_test.dart: execution parameters freeze resume identity
+00:02 +96: test/nemotron_parallel_scheduler_test.dart: default retains serial scenario/model rotation and timestamps
+00:02 +97: test/nemotron_parallel_scheduler_test.dart: runner rejects concurrency differing from frozen checkpoint
+00:02 +98: test/nemotron_parallel_scheduler_test.dart: a guard observed during global pacing cancels queued dispatch
+00:02 +99: test/nemotron_parallel_scheduler_test.dart: resume resets latest invocation stats when no new call is sent
+00:02 +100: loading test/nemotron_transport_test.dart
+00:02 +100: test/nemotron_transport_test.dart: nvidia/nemotron-3.5-lightning-30b-a3b NVIDIA create uses instruction schema without reasoning
+00:02 +101: test/nemotron_transport_test.dart: nvidia/nemotron-3.5-lightning-30b-a3b NVIDIA edit uses instruction schema without reasoning
+00:02 +102: test/nemotron_transport_test.dart: nvidia/nemotron-3.5-lightning-30b-a3b NVIDIA guidance keeps grammar and disables streaming and thinking
+00:02 +103: test/nemotron_transport_test.dart: nvidia/nemotron-3-super-120b-a12b NVIDIA create uses instruction schema without reasoning
+00:02 +104: test/nemotron_transport_test.dart: nvidia/nemotron-3-super-120b-a12b NVIDIA edit uses instruction schema without reasoning
+00:02 +105: test/nemotron_transport_test.dart: nvidia/nemotron-3-super-120b-a12b NVIDIA guidance keeps grammar and disables streaming and thinking
+00:02 +106: test/nemotron_transport_test.dart: nvidia/nemotron-3-ultra-550b-a55b NVIDIA create uses instruction schema without reasoning
+00:02 +107: test/nemotron_transport_test.dart: nvidia/nemotron-3-ultra-550b-a55b NVIDIA edit uses instruction schema without reasoning
+00:02 +108: test/nemotron_transport_test.dart: nvidia/nemotron-3-ultra-550b-a55b NVIDIA guidance keeps grammar and disables streaming and thinking
+00:02 +109: test/nemotron_transport_test.dart: nvidia/nemotron-3-nano-omni-30b-a3b-reasoning NVIDIA create uses instruction schema without reasoning
+00:02 +110: test/nemotron_transport_test.dart: nvidia/nemotron-3-nano-omni-30b-a3b-reasoning NVIDIA edit uses instruction schema without reasoning
+00:02 +111: test/nemotron_transport_test.dart: nvidia/nemotron-3-nano-omni-30b-a3b-reasoning NVIDIA guidance keeps grammar and disables streaming and thinking
+00:02 +112: test/nemotron_transport_test.dart: NVIDIA profile rejects any different API origin, model, or mixed opt-in
+00:02 +113: test/nemotron_transport_test.dart: NVIDIA rejects alternate routes and extensions; preserves bounded truncation repair
+00:02 +114: test/nemotron_transport_test.dart: configured NVIDIA uses its own key and fails closed without it
+00:02 +115: test/nemotron_transport_test.dart: configured other providers retain the existing AI_API_KEY contract
+00:02 +116: test/nemotron_transport_test.dart: NVIDIA generation disables redirects and retains failed-completion usage
+00:02 +117: test/nemotron_transport_test.dart: NVIDIA accepted asynchronous work is indeterminate and cannot be blindly retried
+00:02 +118: test/nemotron_transport_test.dart: nvidia/nemotron-3.5-lightning:free create uses its fixed free contract
+00:02 +119: test/nemotron_transport_test.dart: nvidia/nemotron-3.5-lightning:free edit uses its fixed free contract
+00:02 +120: test/nemotron_transport_test.dart: nvidia/nemotron-3.5-lightning:free guidance keeps its full decision grammar and free routing
+00:02 +121: test/nemotron_transport_test.dart: nvidia/nemotron-3-super-120b-a12b:free create uses its fixed free contract
+00:02 +122: test/nemotron_transport_test.dart: nvidia/nemotron-3-super-120b-a12b:free edit uses its fixed free contract
+00:02 +123: test/nemotron_transport_test.dart: nvidia/nemotron-3-super-120b-a12b:free guidance keeps its full decision grammar and free routing
+00:02 +124: test/nemotron_transport_test.dart: nvidia/nemotron-3-ultra-550b-a55b:free create uses its fixed free contract
+00:02 +125: test/nemotron_transport_test.dart: nvidia/nemotron-3-ultra-550b-a55b:free edit uses its fixed free contract
+00:02 +126: test/nemotron_transport_test.dart: nvidia/nemotron-3-ultra-550b-a55b:free guidance keeps its full decision grammar and free routing
+00:02 +127: test/nemotron_transport_test.dart: nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free create uses its fixed free contract
+00:02 +128: test/nemotron_transport_test.dart: nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free edit uses its fixed free contract
+00:02 +129: test/nemotron_transport_test.dart: nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free guidance keeps its full decision grammar and free routing
+00:02 +130: test/nemotron_transport_test.dart: evaluation accepts canonical base with one trailing slash
+00:02 +131: test/nemotron_transport_test.dart: evaluation rejects any different API origin, path, or model
+00:02 +132: test/nemotron_transport_test.dart: evaluation rejects alternate routing and malformed authored contracts
+00:02 +133: test/nemotron_transport_test.dart: other hosts and routes retain ordinary transport without opt-in
+00:02 +134: test/nemotron_transport_test.dart: evaluation generation forbids HTTP redirects before dispatch
+00:02 +135: test/nemotron_transport_test.dart: failed evaluation completions retain usage and synthetic output without logging it
+00:02 +136: loading test/nemotron_nvidia_test.dart
+00:02 +136: test/nemotron_nvidia_test.dart: provider routes require exact distinct model IDs and isolate credentials
+00:02 +137: test/nemotron_nvidia_test.dart: public model pages require visible exact free-endpoint markers
+00:02 +138: test/nemotron_nvidia_test.dart: public catalog checks exact page URLs without authorization or redirects
+00:02 +139: test/nemotron_nvidia_test.dart: public catalog rejects failed HTTP status and never follows redirected pages
+00:02 +140: test/nemotron_nvidia_test.dart: catalog and access reject unrecognized models before any network dispatch
+00:02 +141: test/nemotron_nvidia_test.dart: authenticated NVIDIA model listing uses its provided key and keeps quota unknown
+00:02 +142: test/nemotron_nvidia_test.dart: authenticated listing requires every exact selected NVIDIA ID
+00:02 +143: test/nemotron_nvidia_test.dart: authenticated failures expose safe status without provider content or key
+00:02 +144: test/nemotron_nvidia_test.dart: malformed authenticated JSON never escapes in diagnostics
+00:02 +145: test/nemotron_nvidia_test.dart: NVIDIA guidance posts fixed nonstreaming thinking-off requests to NVIDIA
+00:02 +146: test/nemotron_nvidia_test.dart: checkpoints freeze provider, API base, models and transport profiles across resume
+00:02 +147: test/nemotron_nvidia_test.dart: NVIDIA guidance preserves HTTP 202 without consuming its body
+00:02 +148: test/nemotron_nvidia_test.dart: NVIDIA guidance preserves HTTP 429 without consuming its body
+00:02 +149: test/nemotron_nvidia_test.dart: NVIDIA HTTP 202 pauses and explicit resume never repeats accepted work
+00:02 +150: loading test/nemotron_scenarios_test.dart
+00:03 +150: test/nemotron_scenarios_test.dart: suite has exactly the fixed operation coverage and stable IDs
+00:03 +151: test/nemotron_scenarios_test.dart: create-notes-fields accepts its intended synthetic output
+00:03 +152: test/nemotron_scenarios_test.dart: create-notes-appearance accepts its intended synthetic output
+00:03 +153: test/nemotron_scenarios_test.dart: create-reminders-timing accepts its intended synthetic output
+00:03 +154: test/nemotron_scenarios_test.dart: create-reminders-name accepts its intended synthetic output
+00:03 +155: test/nemotron_scenarios_test.dart: create-calendar-category accepts its intended synthetic output
+00:03 +156: test/nemotron_scenarios_test.dart: create-calendar-appearance accepts its intended synthetic output
+00:03 +157: test/nemotron_scenarios_test.dart: create-focus-duration accepts its intended synthetic output
+00:03 +158: test/nemotron_scenarios_test.dart: create-focus-clock accepts its intended synthetic output
+00:03 +159: test/nemotron_scenarios_test.dart: create-rich-dashboard accepts its intended synthetic output
+00:03 +160: test/nemotron_scenarios_test.dart: create-multistep-form accepts its intended synthetic output
+00:03 +161: test/nemotron_scenarios_test.dart: create-shared-workflow accepts its intended synthetic output
+00:03 +162: test/nemotron_scenarios_test.dart: create-capacity-signup accepts its intended synthetic output
+00:03 +163: test/nemotron_scenarios_test.dart: edit-notes-fields accepts its intended synthetic output
+00:03 +164: test/nemotron_scenarios_test.dart: edit-notes-appearance accepts its intended synthetic output
+00:03 +165: test/nemotron_scenarios_test.dart: edit-reminders-timing accepts its intended synthetic output
+00:03 +166: test/nemotron_scenarios_test.dart: edit-reminders-name accepts its intended synthetic output
+00:03 +167: test/nemotron_scenarios_test.dart: edit-calendar-category accepts its intended synthetic output
+00:03 +168: test/nemotron_scenarios_test.dart: edit-calendar-appearance accepts its intended synthetic output
+00:03 +169: test/nemotron_scenarios_test.dart: edit-focus-duration accepts its intended synthetic output
+00:03 +170: test/nemotron_scenarios_test.dart: edit-focus-clock accepts its intended synthetic output
+00:03 +171: test/nemotron_scenarios_test.dart: edit-navigation accepts its intended synthetic output
+00:03 +172: test/nemotron_scenarios_test.dart: edit-rich-config accepts its intended synthetic output
+00:03 +173: test/nemotron_scenarios_test.dart: edit-workflow-label accepts its intended synthetic output
+00:03 +174: test/nemotron_scenarios_test.dart: edit-shared-field accepts its intended synthetic output
+00:03 +175: test/nemotron_scenarios_test.dart: guidance-actionable-notes accepts its intended synthetic output
+00:03 +176: test/nemotron_scenarios_test.dart: guidance-actionable-focus accepts its intended synthetic output
+00:03 +177: test/nemotron_scenarios_test.dart: guidance-ambiguous-organize accepts its intended synthetic output
+00:03 +178: test/nemotron_scenarios_test.dart: guidance-ambiguous-team accepts its intended synthetic output
+00:03 +179: test/nemotron_scenarios_test.dart: unsupported-executable accepts its intended synthetic output
+00:03 +180: test/nemotron_scenarios_test.dart: unsupported-external-automation accepts its intended synthetic output
+00:03 +181: test/nemotron_scenarios_test.dart: unsupported-payments accepts its intended synthetic output
+00:03 +182: test/nemotron_scenarios_test.dart: unsupported-background-device accepts its intended synthetic output
+00:03 +183: test/nemotron_scenarios_test.dart: dashboard rejects a valid chart with the wrong numeric measure
+00:03 +184: test/nemotron_scenarios_test.dart: multistep form rejects requested fields moved to the wrong step
+00:03 +185: test/nemotron_scenarios_test.dart: workflow creation requires actual drag controls and transitions
+00:03 +186: test/nemotron_scenarios_test.dart: capacity reminder must target active claimants at the requested time
+00:03 +187: test/nemotron_scenarios_test.dart: navigation rejects a no-op and unrelated compatible changes
+00:03 +188: test/nemotron_scenarios_test.dart: rich-config rejects a no-op and unrelated compatible changes
+00:03 +189: test/nemotron_scenarios_test.dart: workflow-label rejects a no-op and unrelated compatible changes
+00:03 +190: test/nemotron_scenarios_test.dart: shared-field rejects a no-op and unrelated compatible changes
+00:03 +191: test/nemotron_scenarios_test.dart: guidance distinguishes actionable requests from ambiguous ideas
+00:03 +192: test/nemotron_scenarios_test.dart: unsupported responses require exactly one bounded explanation
+00:03 +193: test/nemotron_scenarios_test.dart: four separate sequence edits use their model-specific baseline
+00:03 +194: loading test/nvidia_model_extension_test.dart
+00:03 +194: test/nvidia_model_extension_test.dart: new NVIDIA IDs are opt-in; old default and application lists stay fixed
+00:03 +195: test/nvidia_model_extension_test.dart: model lookalikes and foreign hosts fail before a completion can start
+00:03 +196: test/nvidia_model_extension_test.dart: new public catalog pages use exact declared paths and retain unknown pricing
+00:03 +197: test/nvidia_model_extension_test.dart: authenticated access checks selected new IDs without claiming account credits
+00:03 +198: test/nvidia_model_extension_test.dart: moonshotai/kimi-k3 has an explicit immutable create/edit transport profile
+00:03 +199: test/nvidia_model_extension_test.dart: moonshotai/kimi-k3 rejects caller-controlled routing or thinking extensions
+00:03 +200: test/nvidia_model_extension_test.dart: moonshotai/kimi-k3 guidance retains its decision grammar and provider profile
+00:03 +201: test/nvidia_model_extension_test.dart: moonshotai/kimi-k3 asynchronous responses remain indeterminate without retries
+00:03 +202: test/nvidia_model_extension_test.dart: z-ai/glm-5.3 has an explicit immutable create/edit transport profile
+00:03 +203: test/nvidia_model_extension_test.dart: z-ai/glm-5.3 rejects caller-controlled routing or thinking extensions
+00:03 +204: test/nvidia_model_extension_test.dart: z-ai/glm-5.3 guidance retains its decision grammar and provider profile
+00:03 +205: test/nvidia_model_extension_test.dart: z-ai/glm-5.3 asynchronous responses remain indeterminate without retries
+00:03 +206: test/nvidia_model_extension_test.dart: deepseek-ai/deepseek-v4.1-flash has an explicit immutable create/edit transport profile
+00:03 +207: test/nvidia_model_extension_test.dart: deepseek-ai/deepseek-v4.1-flash rejects caller-controlled routing or thinking extensions
+00:03 +208: test/nvidia_model_extension_test.dart: deepseek-ai/deepseek-v4.1-flash guidance retains its decision grammar and provider profile
+00:03 +209: test/nvidia_model_extension_test.dart: deepseek-ai/deepseek-v4.1-flash asynchronous responses remain indeterminate without retries
+00:03 +210: test/nvidia_model_extension_test.dart: z-ai/glm-5.3-flash has an explicit immutable create/edit transport profile
+00:03 +211: test/nvidia_model_extension_test.dart: z-ai/glm-5.3-flash rejects caller-controlled routing or thinking extensions
+00:03 +212: test/nvidia_model_extension_test.dart: z-ai/glm-5.3-flash guidance retains its decision grammar and provider profile
+00:03 +213: test/nvidia_model_extension_test.dart: z-ai/glm-5.3-flash asynchronous responses remain indeterminate without retries
+00:03 +214: test/nvidia_model_extension_test.dart: google/gemma-4-31b-it has an explicit immutable create/edit transport profile
+00:03 +215: test/nvidia_model_extension_test.dart: google/gemma-4-31b-it rejects caller-controlled routing or thinking extensions
+00:03 +216: test/nvidia_model_extension_test.dart: google/gemma-4-31b-it guidance retains its decision grammar and provider profile
+00:03 +217: test/nvidia_model_extension_test.dart: google/gemma-4-31b-it asynchronous responses remain indeterminate without retries
+00:03 +218: test/nvidia_model_extension_test.dart: poolside/laguna-xs-2.1 has an explicit immutable create/edit transport profile
+00:03 +219: test/nvidia_model_extension_test.dart: poolside/laguna-xs-2.1 rejects caller-controlled routing or thinking extensions
+00:03 +220: test/nvidia_model_extension_test.dart: poolside/laguna-xs-2.1 guidance retains its decision grammar and provider profile
+00:03 +221: test/nvidia_model_extension_test.dart: poolside/laguna-xs-2.1 asynchronous responses remain indeterminate without retries
+00:03 +222: test/nvidia_model_extension_test.dart: z-ai/glm-5.3-flash freezes reviewed parameters and AppNest limits
+00:03 +223: test/nvidia_model_extension_test.dart: google/gemma-4-31b-it freezes reviewed parameters and AppNest limits
+00:03 +224: test/nvidia_model_extension_test.dart: poolside/laguna-xs-2.1 freezes reviewed parameters and AppNest limits
+00:03 +225: test/nvidia_model_extension_test.dart: checkpoint profiles describe actual adapters and resume rejects altered execution
+00:03 +226: loading test/nemotron_case_selection_test.dart
+00:04 +226: test/nemotron_case_selection_test.dart: default selection preserves all 36 cases and their order
+00:04 +227: test/nemotron_case_selection_test.dart: smoke selection includes one creation, fixed edit, and guidance
+00:04 +228: test/nemotron_case_selection_test.dart: selection preserves requested order and trims surrounding whitespace
+00:04 +229: test/nemotron_case_selection_test.dart: rejects empty case IDs in ""
+00:04 +230: test/nemotron_case_selection_test.dart: rejects empty case IDs in ",create-notes-fields"
+00:04 +231: test/nemotron_case_selection_test.dart: rejects empty case IDs in "create-notes-fields,"
+00:04 +232: test/nemotron_case_selection_test.dart: rejects empty case IDs in " , "
+00:04 +233: test/nemotron_case_selection_test.dart: rejects duplicate case IDs after whitespace normalization
+00:04 +234: test/nemotron_case_selection_test.dart: rejects unknown IDs instead of silently selecting no cases
+00:04 +235: test/nemotron_case_selection_test.dart: rejects missing or later sequence source in "sequence-notes-fields"
+00:04 +236: test/nemotron_case_selection_test.dart: rejects missing or later sequence source in "sequence-notes-fields,create-notes-fields"
+00:04 +237: test/nemotron_case_selection_test.dart: rejects missing or later sequence source in "create-focus-clock,sequence-notes-fields"
+00:04 +238: test/nemotron_case_selection_test.dart: accepts a sequence after its corresponding source creation
+00:04 +239: loading test/nemotron_prompt_test.dart
+00:04 +239: test/nemotron_prompt_test.dart: creation reminder preserves original request, schema and repair data
+00:04 +240: test/nemotron_prompt_test.dart: edit and guidance contracts remain byte equivalent
+00:04 +241: test/nemotron_prompt_test.dart: unrecognized message shapes receive no inferred instructions
+00:04 +242: loading test/nemotron_reasoning_profile_test.dart
+00:04 +242: test/nemotron_reasoning_profile_test.dart: profile parser accepts only explicit reviewed modes
+00:04 +243: test/nemotron_reasoning_profile_test.dart: all default and configured NVIDIA models retain thinking-off
+00:04 +244: test/nemotron_reasoning_profile_test.dart: bounded-reasoning rejects other routes and unsupported model sets
+00:04 +245: test/nemotron_reasoning_profile_test.dart: bounded-reasoning emits documented fixed effort/budget and immutable input
+00:04 +246: test/nemotron_reasoning_profile_test.dart: bounded-reasoning preserves GLM control payload byte for byte
+00:04 +247: test/nemotron_reasoning_profile_test.dart: bounded-reasoning guidance uses the fixed small response allowance
+00:04 +248: test/nemotron_reasoning_profile_test.dart: contract-reasoning rejects other routes and unsupported model sets
+00:04 +249: test/nemotron_reasoning_profile_test.dart: contract-reasoning emits documented fixed effort/budget and immutable input
+00:04 +250: test/nemotron_reasoning_profile_test.dart: contract-reasoning preserves GLM control payload byte for byte
+00:04 +251: test/nemotron_reasoning_profile_test.dart: contract-reasoning guidance uses the fixed small response allowance
+00:04 +252: test/nemotron_reasoning_profile_test.dart: profile and contract emphasis change fingerprint and cannot resume another mode
+00:04 +253: test/nemotron_reasoning_profile_test.dart: CLI rejects invalid profile selection before public catalog calls
+00:12 +254: loading test/nemotron_creation_profile_test.dart
+00:12 +254: test/nemotron_creation_profile_test.dart: authored creation detection excludes edit/guidance and never mutates
+00:12 +255: test/nemotron_creation_profile_test.dart: contract-only unsupported ideas use creation controls; sequences use baseline
+00:13 +256: test/nemotron_creation_profile_test.dart: contract-only low creation changes only declared controls/checklist
+00:13 +257: test/nemotron_creation_profile_test.dart: contract-only low edits and guidance are byte equivalent to baseline
+00:13 +258: test/nemotron_creation_profile_test.dart: contract-only medium creation changes only declared controls/checklist
+00:13 +259: test/nemotron_creation_profile_test.dart: contract-only medium edits and guidance are byte equivalent to baseline
+00:13 +260: test/nemotron_creation_profile_test.dart: contract-only GLM controls retain byte equivalent creation/edit/guidance
+00:13 +261: test/nemotron_creation_profile_test.dart: contract-only creation repair keeps the same fixed higher allowance
+00:13 +262: test/nemotron_creation_profile_test.dart: contract-only freezes complete per-operation maps and detached metadata
+00:13 +263: test/nemotron_creation_profile_test.dart: contract-only rejects unsupported routes/models and ordinary app construction
+00:13 +264: test/nemotron_creation_profile_test.dart: contract-only CLI rejects other providers before catalog/credential access
+00:20 +265: test/nemotron_creation_profile_test.dart: efficient-creation unsupported ideas use creation controls; sequences use baseline
+00:20 +266: test/nemotron_creation_profile_test.dart: efficient-creation low creation changes only declared controls/checklist
+00:20 +267: test/nemotron_creation_profile_test.dart: efficient-creation low edits and guidance are byte equivalent to baseline
+00:20 +268: test/nemotron_creation_profile_test.dart: efficient-creation medium creation changes only declared controls/checklist
+00:20 +269: test/nemotron_creation_profile_test.dart: efficient-creation medium edits and guidance are byte equivalent to baseline
+00:20 +270: test/nemotron_creation_profile_test.dart: efficient-creation GLM controls retain byte equivalent creation/edit/guidance
+00:20 +271: test/nemotron_creation_profile_test.dart: efficient-creation creation repair keeps the same fixed higher allowance
+00:20 +272: test/nemotron_creation_profile_test.dart: efficient-creation freezes complete per-operation maps and detached metadata
+00:20 +273: test/nemotron_creation_profile_test.dart: efficient-creation rejects unsupported routes/models and ordinary app construction
+00:20 +274: test/nemotron_creation_profile_test.dart: efficient-creation CLI rejects other providers before catalog/credential access
+00:28 +275: test/nemotron_creation_profile_test.dart: new modes and actual operation override changes reject resume
+00:28 +276: loading test/nemotron_publisher_profile_test.dart
+00:28 +276: test/nemotron_publisher_profile_test.dart: low publisher creation changes efficient sampling only
+00:28 +277: test/nemotron_publisher_profile_test.dart: low edit/sequence/guidance preserve baseline bytes
+00:28 +278: test/nemotron_publisher_profile_test.dart: medium publisher creation changes efficient sampling only
+00:28 +279: test/nemotron_publisher_profile_test.dart: medium edit/sequence/guidance preserve baseline bytes
+00:28 +280: test/nemotron_publisher_profile_test.dart: unsupported ideas use publisher creation with the unchanged strict response contract
+00:28 +281: test/nemotron_publisher_profile_test.dart: both GLM controls preserve all operation payloads and metadata
+00:28 +282: test/nemotron_publisher_profile_test.dart: only new profile metadata reports creation sampling and fixed limits
+00:28 +283: test/nemotron_publisher_profile_test.dart: explicit selection, constructor guard and fingerprint isolate publisher mode
+00:28 +284: test/nemotron_publisher_profile_test.dart: CLI rejects wrong publisher route before catalog or credential access
+00:36 +285: loading test/generation_requirements_test.dart
+00:36 +285: test/generation_requirements_test.dart: exact packing183 candidate cannot replace an explicit checkbox with a status menu
+00:36 +286: test/generation_requirements_test.dart: exact packing186 candidate cannot leave new checkbox values unset
+00:36 +287: test/generation_requirements_test.dart: binary checkbox needs a required field and an actual reachable creation form
+00:36 +288: test/generation_requirements_test.dart: explicit optional checkbox keeps its UI requirement without requiring binary initialization
+00:36 +289: test/generation_requirements_test.dart: parenthesized optional checkbox suffix preserves the UI requirement
+00:36 +290: test/generation_requirements_test.dart: that-is-optional checkbox suffix preserves the UI requirement
+00:36 +291: test/generation_requirements_test.dart: unqualified checkbox references inherit the explicit optional declaration in either order
+00:36 +292: test/generation_requirements_test.dart: explicit checkbox accepts actual boolean and reversible workflow checklist UI
+00:36 +293: test/generation_requirements_test.dart: checkbox field resolves uniquely while multiple views may share it
+00:36 +294: test/generation_requirements_test.dart: checkbox extraction excludes negative quoted example and ambiguous requirements
+00:36 +295: test/generation_requirements_test.dart: literal rating ranges serialize as reachable input requirements
+00:36 +296: test/generation_requirements_test.dart: literal numeric labels, types and ranges use exact authored bindings
+00:36 +297: test/generation_requirements_test.dart: numeric requirements ignore negatives, quotes and ambiguous ranges
+00:36 +298: test/generation_requirements_test.dart: hidden bounded forms and alternative unbounded routes cannot satisfy a range
+00:36 +299: test/generation_requirements_test.dart: record grammar guards require literal affirmative single-collection routes
+00:36 +300: test/generation_requirements_test.dart: literal participant creation requires a shared member-write policy without assigning identities
+00:36 +301: test/generation_requirements_test.dart: schema-valid personal potluck159 is rejected for the exact shared creation request
+00:36 +302: test/generation_requirements_test.dart: shared creation skips negatives, examples, viewing-only friends and ambiguous scopes
+00:36 +303: test/generation_requirements_test.dart: explicit policies retain precedence and shared contracts are creation-only in provider requests
+00:36 +304: test/generation_requirements_test.dart: explicit personal inbox scheduling serializes requirements without authored identities
+00:36 +305: test/generation_requirements_test.dart: negative examples and ambiguous reminder scopes remain provider interpretation
+00:36 +306: test/generation_requirements_test.dart: schema-valid reminder158 omission cannot satisfy the explicit inbox request
+00:36 +307: test/generation_requirements_test.dart: owner inbox gate requires optional separate dates and the declared Open condition
+00:36 +308: test/generation_requirements_test.dart: an explicit separate reminder time cannot reuse the optional due-date calendar field
+00:36 +309: test/generation_requirements_test.dart: literal standalone search supports visible text lists and tables without choice filters
+00:36 +310: test/generation_requirements_test.dart: provider gets explicit inbox requirements for creation while edits retain their existing contract
+00:36 +311: test/generation_requirements_test.dart: explicit policies are enforced without inferring ambiguous prose
+00:36 +312: test/generation_requirements_test.dart: exact choice vocabulary and initial ordering survive defaults
+00:36 +313: test/generation_requirements_test.dart: choice filters must be on a visible record view, not display fields
+00:36 +314: test/generation_requirements_test.dart: slash-separated filters preserve each named field
+00:36 +315: test/generation_requirements_test.dart: negative filter and summary examples do not become requirements
+00:36 +316: test/generation_requirements_test.dart: negative field and filtered-tab examples are not inferred
+00:36 +317: test/generation_requirements_test.dart: a requested searchable filtered list needs a text title binding
+00:36 +318: test/generation_requirements_test.dart: a total cannot satisfy a requested grouped summary
+00:36 +319: test/generation_requirements_test.dart: a filtered tab must constrain every record view on that tab
+00:36 +320: test/generation_requirements_test.dart: shared log grouping request remains separate from task workflow
+00:36 +321: test/generation_requirements_test.dart: provider receives literal creation requirements without draft content
+00:36 +322: loading test/generation_quality_test.dart
+00:36 +322: test/generation_quality_test.dart: device-only generated apps need visible device components
+00:36 +323: test/generation_quality_test.dart: existing starter experiences expose their editable collections
+00:36 +324: test/generation_quality_test.dart: a schema-valid hidden create control is rejected for generation
+00:36 +325: test/generation_quality_test.dart: a hidden edit form alone is not a reachable record edit
+00:36 +326: test/generation_quality_test.dart: unreachable edit diagnostics name an unambiguous candidate route
+00:36 +327: test/generation_quality_test.dart: ambiguous visible sources are rejected without selecting a binding by order
+00:36 +328: test/generation_quality_test.dart: direct list editing cannot conceal an orphaned details page
+00:36 +329: test/generation_quality_test.dart: a declared workflow action must be exposed on a main or linked record view
+00:36 +330: test/generation_quality_test.dart: member assignment on an orphaned details page is not a visible route
+00:36 +331: test/generation_quality_test.dart: capacity actions require a visible route in navigation-backed apps
+00:36 +332: test/generation_quality_test.dart: read-only collections are not required to offer CRUD
+00:36 +333: test/generation_quality_test.dart: behavior-only collections still require reachable declared actions
+00:36 +334: test/generation_quality_test.dart: summary action IDs and summary detail links do not expose a record editor
+00:36 +335: test/generation_quality_test.dart: existing append-only apps can be renamed without new CRUD requirements
+00:36 +336: loading test/creation_compiler_test.dart
+00:37 +336: test/creation_compiler_test.dart: creation compiler closes only parser-derived capability declarations
+00:37 +337: test/creation_compiler_test.dart: all declared features supply their closure without inferring new meaning
+00:37 +338: test/creation_compiler_test.dart: valid legacy canonical definitions and capability order remain unchanged
+00:37 +339: test/creation_compiler_test.dart: unsupported explicit capabilities and malformed graphs remain rejected
+00:37 +340: test/creation_compiler_test.dart: input, raw provider output and compiled definition remain size bounded
+00:37 +341: All tests passed!

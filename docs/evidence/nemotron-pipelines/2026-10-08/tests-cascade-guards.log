@@ -1,0 +1,12 @@
+Running build hooks...Running build hooks...00:00 +0: loading test/creation_cascade_guard_test.dart
+00:00 +0: HTTP 202 remains indeterminate without fallback or resubmission
+00:00 +1: HTTP 401 blocks before GLM can consume a call
+00:00 +2: HTTP 402 blocks before GLM can consume a call
+00:00 +3: HTTP 403 blocks before GLM can consume a call
+00:00 +4: HTTP 429 blocks before GLM can consume a call
+00:00 +5: reported nonzero cost blocks fallback and prevents a later resume
+00:00 +6: one-call cap counts primary and defers fallback to explicit resume
+00:00 +7: failed primary then successful GLM uses two recorded attempts
+00:00 +8: persistent correctness failures spend exactly the original three calls
+00:00 +9: new-process resume keeps the preceding GLM response as repair context
+00:00 +10: All tests passed!

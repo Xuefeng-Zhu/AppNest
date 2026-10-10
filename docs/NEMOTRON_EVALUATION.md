@@ -11,6 +11,11 @@ private records.
 The explicit [Kimi, GLM and DeepSeek extension](FREE_MODEL_EVALUATION.md) uses
 the same cases and strict scorer with separate NVIDIA profiles and a separate
 output path. The default selection remains the four Nemotron models below.
+The [GLM Flash, Gemma and Laguna comparison](NVIDIA_MODEL_COMPARISON.md) adds
+an explicit response smoke before a separate full benchmark.
+The [Nemotron tuning experiment](NEMOTRON_TUNING.md) compares opt-in creation
+checklists and reasoning settings while preserving the original scorer and
+configured application defaults.
 
 ## Completed NVIDIA serial evaluation — 2026-10-08 UTC
 
@@ -162,6 +167,9 @@ Run from the repository root with the verified Dart 3.13 toolchain:
 # Offline NVIDIA manifest: exact models, prompts and synthetic edit fixtures.
 dart --suppress-analytics run scripts/nemotron_eval.dart --describe
 
+# Offline three-case smoke manifest, preserving the requested order.
+dart --suppress-analytics run scripts/nemotron_eval.dart --describe --models=z-ai/glm-5.3 --cases=create-notes-fields,edit-notes-fields,guidance-ambiguous-organize
+
 # Public NVIDIA pages only; verifies advertised free endpoint availability.
 dart --suppress-analytics run scripts/nemotron_eval.dart --catalog
 
@@ -193,10 +201,20 @@ reports alongside it. `--provider=openrouter` defaults to the historical
 separate run; existing checkpoints cannot be overwritten by a new run.
 `--models=ID,ID` selects exact registered IDs for the selected provider, shown
 by `--describe`. NVIDIA defaults to the four Nemotron models and also permits
-the explicitly selected [Kimi, GLM and DeepSeek profiles](FREE_MODEL_EVALUATION.md);
+the explicitly selected [Kimi, GLM and DeepSeek profiles](FREE_MODEL_EVALUATION.md)
+and [GLM Flash, Gemma and Laguna profiles](NVIDIA_MODEL_COMPARISON.md);
 OpenRouter retains its four Nemotron routes.
 `--max-requests=N` bounds completion requests in one invocation, including
 retries; resume continues the remainder.
+
+`--cases=ID,ID` selects exact case IDs from `--describe` in the supplied order.
+Empty, duplicate and unknown IDs are rejected before catalog or credential
+access. A sequence case requires its source creation earlier in the selected
+order; for example, `create-notes-fields,sequence-notes-fields` is valid.
+Without `--cases`, the default remains all 36 cases per model. Selected cases
+and their order are part of the frozen manifest: a smoke checkpoint cannot be
+resumed as a full benchmark. Use a fresh output path and omit `--cases` for the
+full run, selecting only the models admitted by the smoke protocol.
 
 `--concurrency=1..4` selects the dispatch concurrency; the default is 1. Calls
 for each model remain sequential, while different model queues can overlap.

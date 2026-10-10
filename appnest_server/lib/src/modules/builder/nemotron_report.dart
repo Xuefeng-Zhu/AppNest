@@ -40,6 +40,7 @@ Map<String, dynamic> summarizeNemotronEvaluation(
     'benchmarkVersion': checkpoint['benchmarkVersion'],
     'benchmarkLabel':
         checkpoint['benchmarkLabel'] ?? 'AppNest Nemotron evaluation',
+    'creationPipeline': ?checkpoint['creationPipeline'],
     'modelFamilies': checkpoint['modelFamilies'],
     'status': checkpoint['status'],
     'createdAt': checkpoint['createdAt'],
@@ -95,6 +96,12 @@ String renderNemotronReport(Map<String, dynamic> checkpoint) {
       '# ${_cell(summary['benchmarkLabel'])} (${_cell(summary['provider'])})',
     )
     ..writeln()
+    ..writeln(
+      summary['creationPipeline'] == null
+          ? ''
+          : 'Creation pipeline: ${summary['creationPipeline']['pipeline']}. '
+                'This measures the combined pipeline; individual serving models are recorded per attempt.',
+    )
     ..writeln(
       'Status: ${_cell(summary['status'])}. '
       'Benchmark: ${_cell(summary['benchmarkVersion'])}. '
@@ -572,6 +579,7 @@ bool _scored(Map<String, dynamic> row) =>
                 'output_shape',
                 'output_size',
                 'guidance_completion',
+                'pipeline_validation',
               }.contains(attempt['kind']) ||
               attempt['success'] == true),
     );

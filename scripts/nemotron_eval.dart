@@ -3,11 +3,14 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:appnest_server/src/evaluation/nemotron_case_selection.dart';
 import 'package:appnest_server/src/generated/serverpod.dart';
 import 'package:appnest_server/src/modules/builder/nemotron_evaluation.dart';
 import 'package:appnest_server/src/modules/builder/nemotron_report.dart';
 import 'package:appnest_server/src/modules/builder/nemotron_routes.dart';
 import 'package:appnest_server/src/modules/builder/nemotron_scenarios.dart';
+import 'package:appnest_server/src/modules/builder/creation_pipeline_evaluation.dart';
+import 'package:appnest_server/src/modules/builder/creation_pipeline_scenarios.dart';
 import 'package:appnest_server/src/modules/builder/provider.dart';
 import 'package:appnest_spec/appnest_spec.dart';
 import 'package:crypto/crypto.dart';
@@ -25,13 +28,16 @@ Future<void> main(List<String> args) async {
         ![
           '--provider=',
           '--models=',
+          '--cases=',
+          '--nemotron-profile=',
+          '--creation-pipeline=',
           '--output=',
           '--max-requests=',
           '--concurrency=',
         ].any(a.startsWith),
   )) {
     stderr.writeln(
-      'Unknown option. Use --describe, --catalog, --live [--resume], or --replay; --provider=nvidia|openrouter --models=ID,ID --output=FILE --max-requests=N --concurrency=1..4.',
+      'Unknown option. Use --describe, --catalog, --live [--resume], or --replay; --provider=nvidia|openrouter --models=ID,ID --cases=ID,ID --nemotron-profile=PROFILE --creation-pipeline=baseline|scoped|plan|repair|cascade --output=FILE --max-requests=N --concurrency=1..4.',
     );
     exitCode = 2;
     return;
@@ -50,10 +56,34 @@ Future<void> main(List<String> args) async {
   final root = File.fromUri(Platform.script).parent.parent;
   late final NemotronEvaluationRoute route;
   late final List<String> models;
+  late final List<NemotronScenario> scenarios;
+  late final NvidiaNemotronProfile nemotronProfile;
+  late final CreationPipeline pipeline;
   try {
     route = nemotronRoute(option('--provider') ?? 'nvidia');
     models = option('--models')?.split(',') ?? route.models.toList();
     validateNemotronModelSelection(models, route);
+    nemotronProfile = parseNvidiaNemotronProfile(
+      option('--nemotron-profile') ?? 'baseline',
+    );
+    validateNvidiaNemotronProfileSelection(models, route.name, nemotronProfile);
+    pipeline = parseCreationPipeline(
+      option('--creation-pipeline') ?? 'baseline',
+    );
+    if (pipeline != CreationPipeline.baseline &&
+        (route.name != 'nvidia' ||
+            models.length != 1 ||
+            models.single != pipelineTargetModel ||
+            nemotronProfile != NvidiaNemotronProfile.efficientCreation)) {
+      throw const FormatException(
+        'Creation pipelines require NVIDIA Super only and --nemotron-profile=efficient-creation.',
+      );
+    }
+    scenarios = selectNemotronCases([
+      ...nemotronScenarios(),
+      ...nemotronSequences(),
+      if (option('--cases') != null) ...creationPipelineTransferScenarios(),
+    ], cases: option('--cases'));
   } on FormatException catch (e) {
     stderr.writeln(e.message);
     exitCode = 2;
@@ -78,13 +108,22 @@ Future<void> main(List<String> args) async {
     exitCode = 2;
     return;
   }
+  if (pipeline == CreationPipeline.cascade && concurrency != 1) {
+    stderr.writeln(
+      'Cascade requires --concurrency=1 to preserve actual-model pacing.',
+    );
+    exitCode = 2;
+    return;
+  }
   const requestInterval = Duration(seconds: 4);
-  final scenarios = [...nemotronScenarios(), ...nemotronSequences()];
   if (args.contains('--describe')) {
     stdout.writeln(
       const JsonEncoder.withIndent('  ').convert({
         'benchmarkVersion': nemotronBenchmarkVersion,
         'provider': route.name,
+        'nemotronProfile': nemotronProfile.id,
+        if (pipeline != CreationPipeline.baseline)
+          'creationPipeline': creationPipelineMetadata(pipeline),
         'destination': '${route.base}/chat/completions',
         'credentialName': route.credentialName,
         'output': output.path,
@@ -92,7 +131,11 @@ Future<void> main(List<String> args) async {
         'allowedModels': route.allowedModels,
         'benchmarkLabel': nemotronBenchmarkLabel(models, route.name),
         'modelFamilies': nemotronModelFamilies(models, route.name),
-        'transportProfiles': nemotronTransportProfiles(models, route.name),
+        'transportProfiles': nemotronTransportProfiles(
+          models,
+          route.name,
+          nemotronProfile: nemotronProfile,
+        ),
         'scenarios': scenarios.map((s) => s.toJson()).toList(),
         'maxAttempts': 3,
         'execution': nemotronExecution(concurrency, requestInterval),
@@ -136,7 +179,13 @@ Future<void> main(List<String> args) async {
                 : scenario.baseline);
         final derived = scoreNemotronResult(
           scenario,
-          attempt['syntheticResponse'] as String,
+          attempt['pipelineEvidence'] is Map
+              ? deriveCreationPipelineResponse(
+                  (attempt['providerResponse'] ?? attempt['syntheticResponse'])
+                      as String,
+                  Map<String, dynamic>.from(attempt['pipelineEvidence'] as Map),
+                )
+              : attempt['syntheticResponse'] as String,
           baseline,
         );
         if (jsonEncode(derived?.toJson()) != jsonEncode(row['candidate'])) {
@@ -152,8 +201,12 @@ Future<void> main(List<String> args) async {
       stdout.writeln(renderNemotronReport(checkpoint));
       return;
     }
+    final accessModels = [
+      ...models,
+      if (pipeline == CreationPipeline.cascade) pipelineFallbackModel,
+    ];
     final catalog = route.isNvidia
-        ? await readNvidiaNemotronCatalog(client, models)
+        ? await readNvidiaNemotronCatalog(client, accessModels)
         : selectFreeNemotronModels(await readNemotronCatalog(client), models);
     if (args.contains('--catalog')) {
       stdout.writeln(const JsonEncoder.withIndent('  ').convert(catalog));
@@ -182,6 +235,10 @@ Future<void> main(List<String> args) async {
       provider: route.name,
       concurrency: concurrency,
       requestInterval: requestInterval,
+      nemotronProfile: nemotronProfile,
+      creationPipeline: pipeline == CreationPipeline.baseline
+          ? null
+          : creationPipelineMetadata(pipeline),
     );
     Map<String, dynamic> checkpoint;
     if (args.contains('--resume')) {
@@ -223,7 +280,7 @@ Future<void> main(List<String> args) async {
     late final Map<String, dynamic> quota;
     try {
       quota = route.isNvidia
-          ? await readNvidiaNemotronAccess(client, key, models)
+          ? await readNvidiaNemotronAccess(client, key, accessModels)
           : await readNemotronQuota(client, key);
     } catch (e) {
       checkpoint['status'] = 'blocked';
@@ -245,14 +302,38 @@ Future<void> main(List<String> args) async {
     }
     final providers = {
       for (final model in models)
-        model: ChatCompletionProvider(
-          Uri.parse(route.base),
-          model,
-          key,
-          freeNemotronEvaluation: !route.isNvidia,
-          nvidiaModelEvaluation: route.isNvidia,
-        ),
+        model:
+            {
+              CreationPipeline.scoped,
+              CreationPipeline.plan,
+              CreationPipeline.repair,
+            }.contains(pipeline)
+            ? ExperimentalCreationProvider(
+                Uri.parse(route.base),
+                model,
+                key,
+                pipeline: pipeline,
+              )
+            : ChatCompletionProvider(
+                Uri.parse(route.base),
+                model,
+                key,
+                freeNemotronEvaluation: !route.isNvidia,
+                nvidiaModelEvaluation: route.isNvidia,
+                nemotronProfile: nemotronProfile,
+              ),
     };
+    final cascade = pipeline == CreationPipeline.cascade
+        ? CreationCascade(
+            providers[models.single]!,
+            ChatCompletionProvider(
+              Uri.parse(route.base),
+              pipelineFallbackModel,
+              key,
+              nvidiaModelEvaluation: true,
+            ),
+          )
+        : null;
     final runner = NemotronEvaluationRunner(
       checkpoint: checkpoint,
       scenarios: scenarios,
@@ -264,6 +345,25 @@ Future<void> main(List<String> args) async {
         final provider = providers[model]!;
         if (scenario.operation == 'guidance') {
           return invokeNemotronGuidance(provider, scenario);
+        }
+        if (cascade != null &&
+            !{'edit', 'sequence'}.contains(scenario.operation)) {
+          final row = (checkpoint['operations'] as List).singleWhere(
+            (row) => row['model'] == model && row['case'] == scenario.id,
+          );
+          final fallbackPreviouslyUsed = (row['attempts'] as List).any(
+            (attempt) =>
+                attempt['pipelineEvidence']?['servedByModel'] ==
+                pipelineFallbackModel,
+          );
+          return cascade.generate(
+            scenario.prompt,
+            baseline,
+            editing: false,
+            diagnostics: diagnostics,
+            rejectedOutput: rejected,
+            fallbackPreviouslyUsed: fallbackPreviouslyUsed,
+          );
         }
         return provider.generate(
           scenario.prompt,

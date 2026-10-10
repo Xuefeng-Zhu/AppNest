@@ -73,7 +73,7 @@ publication and reminder approval.
 ## NVIDIA development route and benchmark
 
 The NVIDIA route uses the exact API base `https://integrate.api.nvidia.com/v1`.
-The application configuration above selects Ultra. The optional
+The example configuration above selects Ultra. The optional
 [Nemotron benchmark](NEMOTRON_EVALUATION.md) defaults to NVIDIA and compares all
 four exact allowlisted model IDs without changing the application's selection:
 
@@ -91,6 +91,22 @@ nonstreaming and set `chat_template_kwargs.enable_thinking: false`. AppNest's
 local parsing, semantic validation, unsupported-request checks and bounded
 repairs remain authoritative. These settings do not establish provider-side
 schema enforcement or successful generation.
+
+The application also supports the exact NVIDIA model ID `z-ai/glm-5.3-flash`.
+To select GLM 5.3 Flash, keep the NVIDIA base and credential above and set
+`AI_MODEL: z-ai/glm-5.3-flash`, then restart the server. Its baseline transport
+supplies the JSON contract in instructions, uses low reasoning effort and sets
+`chat_template_kwargs.clear_thinking: true`; local validation remains required.
+Other comparison models, including GLM 5.3, Gemma and Laguna, remain explicit
+evaluation routes and are not accepted by NVIDIA application configuration.
+The separate [GLM Flash live application check](GLM_FLASH_LIVE_CHECK.md) records
+dated browser, publication and authenticated record-persistence evidence; the
+synthetic benchmark below does not establish those application layers.
+
+The separate [Nemotron tuning experiment](NEMOTRON_TUNING.md) exposes
+`--nemotron-profile` only in the evaluation CLI. These experimental profiles
+do not change the application transport: configured Nemotron models keep their
+baseline thinking-off profile, and GLM Flash keeps its baseline profile above.
 
 The public NVIDIA model pages advertise available free developer endpoints.
 The evaluator verifies that advertisement before a live run and records each
@@ -156,9 +172,22 @@ Its concurrency 3 and reasoning profiles differ from the historical serial
 thinking-disabled run, so latency is not a controlled comparison. Actual cost,
 account allowance and reset time remain unknown. See the linked guide for
 archived evidence, the seven-model category table and 42-result offline replay.
-These explicit `--models` selections do not change the application's Ultra
-configuration or the default four-model Nemotron benchmark. Do not resume until
+These explicit `--models` selections do not change the configured application
+model or the default four-model Nemotron benchmark. Do not resume until
 the provider block is resolved.
+
+The separate [GLM Flash, Gemma and Laguna comparison](NVIDIA_MODEL_COMPARISON.md)
+used a three-case response smoke before a fresh full phase. GLM Flash and the
+GLM 5.3 control each passed 36/36; GLM had lower observed overall operation time
+and Flash needed fewer validation repairs in this exploratory single trial.
+Gemma passed the smoke but returned no full-phase output; its lane was stopped
+after 12 completed timeouts, with one active request's outcome unknown and 31
+cases pending. Laguna returned no smoke output and was excluded. These two
+availability outcomes provide no full-phase quality score. The raw full
+checkpoint and separate operational-stop receipt preserve the partial coverage.
+The comparison does not select an application model. GLM Flash can now be
+configured explicitly through the application route described above; the
+default benchmark selection remains the four Nemotron models.
 
 If the evaluator receives HTTP 202, the provider has accepted asynchronous
 work without returning a final result. It records that operation as

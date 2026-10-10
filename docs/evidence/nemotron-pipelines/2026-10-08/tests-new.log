@@ -1,0 +1,67 @@
+Running build hooks...Running build hooks...00:00 +0: loading test/creation_pipeline_evaluation_test.dart
+00:00 +0: test/creation_pipeline_evaluation_test.dart: repair unsupported-only remains strict and invalid patch retries use full generation
+00:00 +1: test/creation_pipeline_evaluation_test.dart: repair unsupported-only remains strict and invalid patch retries use full generation
+00:00 +2: test/creation_pipeline_evaluation_test.dart: repair unsupported-only remains strict and invalid patch retries use full generation
+00:00 +3: test/creation_plan_test.dart: request transformation preserves all original user and repair data
+00:00 +4: test/creation_plan_test.dart: request transformation preserves all original user and repair data
+00:00 +5: test/creation_plan_test.dart: request transformation preserves all original user and repair data
+00:00 +6: test/creation_patch_test.dart: malformed, unsupported and unsafe rejected output falls back
+00:00 +7: test/creation_patch_test.dart: malformed, unsupported and unsafe rejected output falls back
+00:00 +8: test/creation_patch_test.dart: malformed, unsupported and unsafe rejected output falls back
+00:00 +9: test/creation_patch_test.dart: malformed, unsupported and unsafe rejected output falls back
+00:00 +10: test/creation_patch_test.dart: malformed, unsupported and unsafe rejected output falls back
+00:00 +11: test/creation_patch_test.dart: malformed, unsupported and unsafe rejected output falls back
+00:00 +12: test/creation_patch_test.dart: malformed, unsupported and unsafe rejected output falls back
+00:00 +13: test/creation_patch_test.dart: malformed, unsupported and unsafe rejected output falls back
+00:00 +14: test/creation_pipeline_evaluation_test.dart: malformed patch counts as correctness failure and keeps raw evidence
+00:00 +15: test/creation_pipeline_evaluation_test.dart: malformed patch counts as correctness failure and keeps raw evidence
+00:00 +16: test/creation_pipeline_evaluation_test.dart: malformed patch counts as correctness failure and keeps raw evidence
+00:00 +17: test/creation_pipeline_evaluation_test.dart: malformed patch counts as correctness failure and keeps raw evidence
+00:00 +18: test/creation_patch_test.dart: one complete outer JSON fence is compatible with normal parsing
+00:00 +19: test/scoped_creation_contract_test.dart: calendar retains every rich record schema branch
+00:00 +20: test/creation_plan_test.dart: capacity semantics, exact policy and unconditional reminders are preserved
+00:00 +21: test/creation_pipeline_evaluation_test.dart: cascade uses one call per attempt and records actual serving model
+00:00 +22: test/creation_pipeline_evaluation_test.dart: cascade uses one call per attempt and records actual serving model
+00:00 +23: test/creation_pipeline_evaluation_test.dart: cascade uses one call per attempt and records actual serving model
+00:00 +24: test/creation_pipeline_evaluation_test.dart: cascade uses one call per attempt and records actual serving model
+00:00 +25: test/creation_pipeline_evaluation_test.dart: cascade uses one call per attempt and records actual serving model
+00:00 +26: test/creation_pipeline_evaluation_test.dart: cascade uses one call per attempt and records actual serving model
+00:00 +27: test/creation_pipeline_evaluation_test.dart: cascade uses one call per attempt and records actual serving model
+00:00 +28: test/creation_pipeline_evaluation_test.dart: cascade uses one call per attempt and records actual serving model
+00:00 +29: test/creation_pipeline_evaluation_test.dart: cascade uses one call per attempt and records actual serving model
+00:00 +30: test/creation_pipeline_evaluation_test.dart: cascade uses one call per attempt and records actual serving model
+00:00 +31: test/creation_pipeline_evaluation_test.dart: cascade uses one call per attempt and records actual serving model
+00:00 +32: test/creation_pipeline_evaluation_test.dart: cascade uses one call per attempt and records actual serving model
+00:00 +33: test/creation_pipeline_evaluation_test.dart: cascade uses one call per attempt and records actual serving model
+00:00 +34: test/creation_pipeline_evaluation_test.dart: cascade uses one call per attempt and records actual serving model
+00:00 +35: test/creation_pipeline_evaluation_test.dart: cascade uses one call per attempt and records actual serving model
+00:00 +36: test/creation_pipeline_evaluation_test.dart: cascade uses one call per attempt and records actual serving model
+00:00 +37: test/creation_pipeline_evaluation_test.dart: cascade uses one call per attempt and records actual serving model
+00:00 +38: test/creation_pipeline_evaluation_test.dart: cascade uses one call per attempt and records actual serving model
+00:00 +39: test/creation_pipeline_evaluation_test.dart: cascade uses one call per attempt and records actual serving model
+00:00 +40: test/creation_pipeline_evaluation_test.dart: cascade uses one call per attempt and records actual serving model
+00:00 +41: test/creation_pipeline_evaluation_test.dart: cascade uses one call per attempt and records actual serving model
+00:00 +42: test/creation_pipeline_evaluation_test.dart: cascade uses one call per attempt and records actual serving model
+00:00 +43: test/creation_pipeline_evaluation_test.dart: cascade uses one call per attempt and records actual serving model
+00:00 +44: test/creation_pipeline_evaluation_test.dart: cascade uses one call per attempt and records actual serving model
+00:00 +45: test/creation_pipeline_evaluation_test.dart: cascade uses one call per attempt and records actual serving model
+00:00 +46: test/creation_pipeline_evaluation_test.dart: cascade uses one call per attempt and records actual serving model
+00:00 +47: test/creation_pipeline_evaluation_test.dart: cascade uses one call per attempt and records actual serving model
+00:00 +48: test/creation_pipeline_evaluation_test.dart: cascade uses one call per attempt and records actual serving model
+00:00 +49: test/creation_pipeline_evaluation_test.dart: cascade uses one call per attempt and records actual serving model
+00:00 +50: test/creation_pipeline_evaluation_test.dart: pipeline identity participates in checkpoint and resume guard
+00:00 +51: test/creation_pipeline_scenarios_test.dart: reading transfer accepts the complete independently authored app
+00:00 +52: test/creation_pipeline_scenarios_test.dart: reading rejects hidden checklist
+00:00 +53: test/creation_pipeline_scenarios_test.dart: reading rejects orphaned checklist
+00:00 +54: test/creation_pipeline_scenarios_test.dart: reading rejects a plain text control instead of multiline writing
+00:00 +55: test/creation_pipeline_scenarios_test.dart: reading rejects wrong optional writing-field requiredness
+00:00 +56: test/creation_pipeline_scenarios_test.dart: team transfer accepts the complete independently authored app
+00:00 +57: test/creation_pipeline_scenarios_test.dart: team rejects hidden board
+00:00 +58: test/creation_pipeline_scenarios_test.dart: team rejects orphaned board
+00:00 +59: test/creation_pipeline_scenarios_test.dart: team rejects a plain text control instead of multiline writing
+00:00 +60: test/creation_pipeline_scenarios_test.dart: team rejects wrong optional writing-field requiredness
+00:00 +61: test/creation_pipeline_scenarios_test.dart: reading rejects a hidden searchable list with a visible checklist
+00:00 +62: test/creation_pipeline_scenarios_test.dart: reading rejects a create-only shared form despite a valid edit route
+00:00 +63: test/creation_pipeline_scenarios_test.dart: team rejects reordered choices even with otherwise valid transitions
+00:00 +64: test/creation_pipeline_scenarios_test.dart: team rejects a one-way workflow instead of reversible transitions
+00:00 +65: All tests passed!

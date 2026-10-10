@@ -3,6 +3,10 @@
 [Documentation index](README.md) · [AI configuration](AI_SETUP.md) ·
 [Historical Nemotron evaluation](NEMOTRON_EVALUATION.md)
 
+The later [GLM Flash, Gemma and Laguna comparison](NVIDIA_MODEL_COMPARISON.md)
+uses a separate smoke gate and full-run checkpoint with GLM 5.3 as its control.
+The dated results below remain preserved independently.
+
 ## Blocked evaluation — 2026-10-08 UTC
 
 This opt-in NVIDIA developer API comparison has **108 planned operations: 36 per

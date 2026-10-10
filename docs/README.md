@@ -35,7 +35,11 @@ Begin with [verification records](VERIFICATION.md) for the scope of each check. 
 | [Fresh AI creation](AI_CREATION_CHECK.md) | Historical authenticated browser creation/publication and semantic edits |
 | [Customization AI evaluation](CUSTOMIZATION_AI_CHECK.md) | Historical targeted provider creation/edit batches with explicit baselines |
 | [Nemotron model evaluation](NEMOTRON_EVALUATION.md) | Reproducible free-route model comparison, scoring and checkpoint recovery |
+| [Nemotron contract tuning](NEMOTRON_TUNING.md) | Opt-in creation checklist and reasoning trials with frozen source, unchanged scoring and GLM comparison gates |
+| [Nemotron creation pipelines](NEMOTRON_PIPELINES.md) | Opt-in scoped prompts, deterministic plan compilation, bounded repairs and GLM fallback pilot |
 | [Kimi, GLM and DeepSeek evaluation](FREE_MODEL_EVALUATION.md) | Blocked 108-operation NVIDIA comparison, seven-model category observations and archived evidence |
+| [GLM Flash, Gemma and Laguna comparison](NVIDIA_MODEL_COMPARISON.md) | 2026-10-08 NVIDIA smoke and partial full phase: Flash and GLM passed 36/36 each; Gemma interrupted after timeouts, Laguna unavailable |
+| [GLM Flash live application check](GLM_FLASH_LIVE_CHECK.md) | Dated local browser, authenticated publication and record persistence check, with failed edit evidence |
 | [Generation failure investigation](GENERATION_FAILURE_CHECK.md) | A dated failure, subsequent changes, and bounded verification |
 | [Rich components live check](RICH_COMPONENTS_LIVE_CHECK.md) | Historical local RPC/browser media, forms, queries, and persistence |
 | [Phone Toolkit AI check](IPHONE_AI_CHECK.md) | Historical generation/browser behavior; distinct from native-device acceptance |

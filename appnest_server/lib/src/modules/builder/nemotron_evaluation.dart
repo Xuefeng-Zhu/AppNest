@@ -269,22 +269,29 @@ Map<String, String> nemotronModelFamilies(
 
 Map<String, dynamic> nemotronTransportProfiles(
   List<String> models,
-  String provider,
-) => {
-  for (final model in models)
-    model: provider == 'nvidia'
-        ? nvidiaEvaluationProfile(model).toJson()
-        : {
-            'profile': model.contains('super-')
-                ? 'openrouter-free-json-schema-v1'
-                : 'openrouter-free-instruction-schema-v1',
-            'reasoning': model.contains('super-') || model.contains('ultra-')
-                ? 'medium'
-                : 'model default',
-            'generationDeadlineSeconds': 90,
-            'guidanceDeadlineSeconds': 20,
-          },
-};
+  String provider, {
+  NvidiaNemotronProfile nemotronProfile = NvidiaNemotronProfile.baseline,
+}) {
+  validateNvidiaNemotronProfileSelection(models, provider, nemotronProfile);
+  return {
+    for (final model in models)
+      model: provider == 'nvidia'
+          ? nvidiaEvaluationProfile(
+              model,
+              nemotronProfile: nemotronProfile,
+            ).toJson()
+          : {
+              'profile': model.contains('super-')
+                  ? 'openrouter-free-json-schema-v1'
+                  : 'openrouter-free-instruction-schema-v1',
+              'reasoning': model.contains('super-') || model.contains('ultra-')
+                  ? 'medium'
+                  : 'model default',
+              'generationDeadlineSeconds': 90,
+              'guidanceDeadlineSeconds': 20,
+            },
+  };
+}
 
 Map<String, dynamic> newNemotronCheckpoint({
   required List<String> models,
@@ -294,14 +301,21 @@ Map<String, dynamic> newNemotronCheckpoint({
   String provider = 'openrouter',
   int concurrency = 1,
   Duration requestInterval = const Duration(seconds: 4),
+  NvidiaNemotronProfile nemotronProfile = NvidiaNemotronProfile.baseline,
+  Map<String, dynamic>? creationPipeline,
 }) {
   final execution = nemotronExecution(concurrency, requestInterval);
   final route = nemotronRoute(provider);
   validateNemotronModelSelection(models, route);
+  validateNvidiaNemotronProfileSelection(models, provider, nemotronProfile);
   final manifest = {
     'benchmarkVersion': nemotronBenchmarkVersion,
     'provider': provider,
-    'benchmarkLabel': nemotronBenchmarkLabel(models, provider),
+    'nemotronProfile': nemotronProfile.id,
+    'creationPipeline': ?creationPipeline,
+    'benchmarkLabel': creationPipeline == null
+        ? nemotronBenchmarkLabel(models, provider)
+        : 'AppNest ${creationPipeline['pipeline']} pipeline evaluation',
     'modelFamilies': nemotronModelFamilies(models, provider),
     'apiBase': route.base,
     'models': models,
@@ -309,7 +323,11 @@ Map<String, dynamic> newNemotronCheckpoint({
     'source': source,
     'maxAttempts': 3,
     'execution': execution,
-    'transportProfiles': nemotronTransportProfiles(models, provider),
+    'transportProfiles': nemotronTransportProfiles(
+      models,
+      provider,
+      nemotronProfile: nemotronProfile,
+    ),
   };
   final now = DateTime.now().toUtc().toIso8601String();
   return {
@@ -366,6 +384,8 @@ void validateNemotronResume(
   for (final key in [
     'benchmarkVersion',
     'provider',
+    'nemotronProfile',
+    'creationPipeline',
     'benchmarkLabel',
     'modelFamilies',
     'apiBase',
@@ -661,6 +681,11 @@ class NemotronEvaluationRunner {
             if (providerError?.retryAfter != null)
               'retryAfterSeconds': providerError!.retryAfter!.inSeconds,
             'usage': ?usage,
+            if (result?.pipelineEvidence != null ||
+                providerError?.pipelineEvidence != null)
+              'pipelineEvidence':
+                  result?.pipelineEvidence ?? providerError?.pipelineEvidence,
+            if (result?.rawText != null) 'providerResponse': result!.rawText,
             if (result != null || providerError?.syntheticResponse != null)
               'syntheticResponse':
                   result?.text ?? providerError!.syntheticResponse,
@@ -932,6 +957,11 @@ class NemotronEvaluationRunner {
             if (providerError?.retryAfter != null)
               'retryAfterSeconds': providerError!.retryAfter!.inSeconds,
             'usage': ?usage,
+            if (result?.pipelineEvidence != null ||
+                providerError?.pipelineEvidence != null)
+              'pipelineEvidence':
+                  result?.pipelineEvidence ?? providerError?.pipelineEvidence,
+            if (result?.rawText != null) 'providerResponse': result!.rawText,
             if (result != null || providerError?.syntheticResponse != null)
               'syntheticResponse':
                   result?.text ?? providerError!.syntheticResponse,

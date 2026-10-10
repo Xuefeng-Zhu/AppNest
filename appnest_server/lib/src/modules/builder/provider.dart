@@ -12,12 +12,24 @@ import '../../generated/guidance_question.dart';
 
 export '../../evaluation/nvidia_model_profiles.dart';
 import 'generation_requirements.dart';
+import 'nemotron_prompt.dart';
 import 'repair_bindings.dart';
 
 class AiResult {
   final String text, provider, model;
   final Map<String, dynamic> usage;
-  AiResult(this.text, this.provider, this.model, this.usage);
+
+  /// Synthetic opt-in pipeline evidence; ordinary application results omit it.
+  final String? rawText;
+  final Map<String, dynamic>? pipelineEvidence;
+  AiResult(
+    this.text,
+    this.provider,
+    this.model,
+    this.usage, {
+    this.rawText,
+    this.pipelineEvidence,
+  });
 }
 
 /// Safe, actionable diagnostics. Optional transport evidence is never logged
@@ -30,6 +42,7 @@ class AiResponseException implements Exception {
   final bool? retryable;
   final Map<String, dynamic>? usage;
   final String? syntheticResponse;
+  final Map<String, dynamic>? pipelineEvidence;
   const AiResponseException(
     this.kind,
     this.message, {
@@ -39,6 +52,7 @@ class AiResponseException implements Exception {
     this.retryable,
     this.usage,
     this.syntheticResponse,
+    this.pipelineEvidence,
   });
 }
 
@@ -1790,6 +1804,7 @@ class ChatCompletionProvider implements AiProvider, GuidanceProvider {
   final bool freeNemotronEvaluation;
   final bool nvidiaNemotronEvaluation;
   final bool nvidiaModelEvaluation;
+  final NvidiaNemotronProfile nemotronProfile;
   ChatCompletionProvider(
     this.base,
     this.model,
@@ -1799,8 +1814,15 @@ class ChatCompletionProvider implements AiProvider, GuidanceProvider {
     this.freeNemotronEvaluation = false,
     this.nvidiaNemotronEvaluation = false,
     this.nvidiaModelEvaluation = false,
+    this.nemotronProfile = NvidiaNemotronProfile.baseline,
     this.log,
   }) : _clientFactory = clientFactory ?? http.Client.new {
+    if (nemotronProfile != NvidiaNemotronProfile.baseline &&
+        !nvidiaModelEvaluation) {
+      throw ArgumentError(
+        'Experimental Nemotron profiles require explicit NVIDIA model evaluation.',
+      );
+    }
     if ([
           freeNemotronEvaluation,
           nvidiaNemotronEvaluation,
@@ -1828,6 +1850,12 @@ class ChatCompletionProvider implements AiProvider, GuidanceProvider {
         'NVIDIA model evaluation requires the exact NVIDIA API base and an allowlisted model.',
       );
     }
+    // Validate the single provider's exact experimental/control model before
+    // any client can be constructed. Run-level validation also requires a
+    // Super/Ultra target alongside any unchanged GLM controls.
+    if (nemotronProfile != NvidiaNemotronProfile.baseline) {
+      nvidiaEvaluationProfile(model, nemotronProfile: nemotronProfile);
+    }
   }
 
   bool get nvidiaEvaluation =>
@@ -1843,7 +1871,7 @@ class ChatCompletionProvider implements AiProvider, GuidanceProvider {
       freeNemotronEvaluation && model == freeNemotronModels[1];
 
   String get transportProfile => nvidiaEvaluation
-      ? nvidiaEvaluationProfile(model).name
+      ? nvidiaEvaluationProfile(model, nemotronProfile: nemotronProfile).name
       : freeNemotronEvaluation
       ? _structuredEvaluation
             ? 'openrouter-free-json-schema-v1'
@@ -1915,7 +1943,15 @@ class ChatCompletionProvider implements AiProvider, GuidanceProvider {
       // Apply only this exact model's documented settings. Reasoning controls
       // differ by family; OpenRouter routing fields do not apply to NVIDIA.
       adapted.remove('reasoning_effort');
-      adapted.addAll(nvidiaEvaluationProfile(model).transportOverrides());
+      adapted.addAll(
+        nvidiaEvaluationProfile(
+          model,
+          nemotronProfile: nemotronProfile,
+        ).transportOverrides(
+          creation:
+              generation && isNemotronCreationRequest(body['messages'] as List),
+        ),
+      );
     } else {
       adapted['provider'] = {
         'allow_fallbacks': false,
@@ -1937,7 +1973,7 @@ class ChatCompletionProvider implements AiProvider, GuidanceProvider {
             as Map<String, dynamic>;
     final originalSchema = jsonEncode(schema);
     final encodedSchema = jsonEncode(_compactInstructionSchema(schema));
-    final messages = (body['messages'] as List)
+    var messages = (body['messages'] as List)
         .map((message) => Map<String, dynamic>.from(message as Map))
         .toList();
     final system = messages.first;
@@ -1962,6 +1998,15 @@ class ChatCompletionProvider implements AiProvider, GuidanceProvider {
         'AppNest validates every response against the complete response schema. '
         'Return a matching response instance, never the schema itself. '
         'Complete response schema: $encodedSchema';
+    if (const {
+          NvidiaNemotronProfile.contractReasoning,
+          NvidiaNemotronProfile.contractOnly,
+          NvidiaNemotronProfile.efficientCreation,
+          NvidiaNemotronProfile.publisherCreation,
+        }.contains(nemotronProfile) &&
+        nvidiaNemotronModels.contains(model)) {
+      messages = emphasizeNemotronCreationContract(messages);
+    }
     adapted['messages'] = messages;
     return adapted;
   }
@@ -1980,10 +2025,14 @@ class ChatCompletionProvider implements AiProvider, GuidanceProvider {
       return null;
     }
     final nvidia = uri.host == 'integrate.api.nvidia.com';
+    // Flash is the single comparison model supported by application config.
+    // Reuse its documented baseline transport; experimental creation profiles
+    // remain available only to explicitly constructed evaluation providers.
+    final nvidiaFlash = nvidia && model == 'z-ai/glm-5.3-flash';
     if (nvidia &&
         (uri.replace(path: uri.path.replaceFirst(RegExp(r'/$'), '')) !=
                 Uri.parse('https://integrate.api.nvidia.com/v1') ||
-            !nvidiaNemotronModels.contains(model))) {
+            !nvidiaNemotronModels.contains(model) && !nvidiaFlash)) {
       return null;
     }
     // Never send a previously configured OpenRouter credential to NVIDIA.
@@ -1993,7 +2042,8 @@ class ChatCompletionProvider implements AiProvider, GuidanceProvider {
       uri,
       model,
       key,
-      nvidiaNemotronEvaluation: nvidia,
+      nvidiaNemotronEvaluation: nvidia && !nvidiaFlash,
+      nvidiaModelEvaluation: nvidiaFlash,
       log: (message) => s.log(message),
     );
   }
