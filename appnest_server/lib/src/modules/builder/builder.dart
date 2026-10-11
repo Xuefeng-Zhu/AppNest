@@ -11,6 +11,31 @@ import '../media/media.dart';
 import 'provider.dart';
 
 class Builder {
+  static PlatformInfo platform(Session s) {
+    final executionEnabled = s.serverpod.config.futureCallExecutionEnabled;
+    final aiAvailable =
+        executionEnabled && ChatCompletionProvider.configured(s) != null;
+    return PlatformInfo(
+      aiAvailable: aiAvailable,
+      aiMode: !executionEnabled
+          ? 'Template mode — AI background processing is disabled'
+          : aiAvailable
+          ? 'Live AI'
+          : 'Template mode — AI provider not configured',
+      development: s.serverpod.runMode == 'development',
+      actorId: actor(s),
+    );
+  }
+
+  static void _requireAiExecution(Session s) {
+    if (!s.serverpod.config.futureCallExecutionEnabled) {
+      fail(
+        'providerUnavailable',
+        'AI is unavailable on this server because background processing is disabled. Use templates or manual edits.',
+      );
+    }
+  }
+
   /// Guidance is a read-only definition operation. An empty result means the
   /// request can proceed as written. The reservation is committed before the
   /// provider request so concurrent calls share a strict rolling cap.
@@ -40,6 +65,7 @@ class Builder {
         }
         current = AppSpec.parse(d.candidateJson);
       }
+      _requireAiExecution(s);
       if (ai == null) {
         fail(
           'providerUnavailable',
@@ -153,8 +179,16 @@ class Builder {
       return snapshot(s, d, tx: tx);
     }),
   );
-  static Future<BuilderSnapshot> get(Session s, int draftId) async =>
-      snapshot(s, await draft(s, draftId));
+  static Future<BuilderSnapshot> get(Session s, int draftId) =>
+      s.db.transaction((tx) async {
+        var d = await draft(s, draftId, tx: tx);
+        // Generation saves the candidate and job status under the app lock.
+        // Read them under the same lock so polling cannot report a completed
+        // request while still returning its previous candidate.
+        await access(s, d.appId, tx: tx, lock: true);
+        d = await draft(s, draftId, tx: tx);
+        return snapshot(s, d, tx: tx);
+      });
   static Future<BuilderSnapshot> snapshot(
     Session s,
     AppDraft d, {
@@ -282,6 +316,7 @@ class Builder {
       if (d.mutation != mutation || d.publishedVersionId != null) {
         fail('recordConflict', 'This draft changed. Refresh it.');
       }
+      _requireAiExecution(s);
       final active = await GenerationJob.db.find(
         s,
         where: (t) =>
@@ -331,7 +366,7 @@ class Builder {
             tx: tx,
             startFromScratch: startFromScratch,
           ),
-          promptVersion: 'appnest-v1-typed-customization-20',
+          promptVersion: 'appnest-v1-typed-customization-21',
           nextAttemptAt: clock(),
           diagnostics: '',
           usageJson: '{}',
@@ -456,6 +491,7 @@ class Builder {
       )) {
         fail('invalidInput', 'Unknown requested reminder.');
       }
+      if (request.enabledRuleIds.isNotEmpty) Worker.requireRemindersEnabled(s);
       final review = hashJson({
         'candidateHash': spec.hash,
         'enabledRuleIds': List<String>.from(request.enabledRuleIds)..sort(),

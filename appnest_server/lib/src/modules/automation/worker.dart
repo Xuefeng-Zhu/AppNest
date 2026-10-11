@@ -19,6 +19,19 @@ class _ExpiredGenerationLease implements Exception {
 }
 
 class Worker {
+  static bool remindersEnabled(Session s) =>
+      s.serverpod.config.futureCallExecutionEnabled;
+
+  static void requireRemindersEnabled(Session s) {
+    if (!remindersEnabled(s)) {
+      fail(
+        'unsupportedCapability',
+        'Reminders are unavailable on this server because background jobs are disabled. '
+            'Publish without enabling reminders.',
+      );
+    }
+  }
+
   /// Delivery conditions deliberately do not participate in occurrence identity:
   /// completing/reopening or editing unrelated fields cannot resend a reminder.
   static bool conditionMatches(
@@ -141,14 +154,16 @@ class Worker {
       }
     }
     final generationsScheduled = await scheduleDueGenerations(s);
-    final runs = await AutomationRun.db.find(
-      s,
-      where: (t) =>
-          t.status.equals('pending') &
-          (t.nextAttemptAt <= clock().add(const Duration(minutes: 1))),
-      orderBy: (t) => t.id,
-      limit: Limits.automationBatch,
-    );
+    final runs = remindersEnabled(s)
+        ? await AutomationRun.db.find(
+            s,
+            where: (t) =>
+                t.status.equals('pending') &
+                (t.nextAttemptAt <= clock().add(const Duration(minutes: 1))),
+            orderBy: (t) => t.id,
+            limit: Limits.automationBatch,
+          )
+        : <AutomationRun>[];
     for (final run in runs) {
       if (!run.dueAt.isAfter(clock())) {
         try {
@@ -199,7 +214,7 @@ class Worker {
     if (app == null) return;
     e = await OutboxEvent.db.findById(s, eventId, transaction: tx);
     if (e == null || e.planned) return;
-    if (!app.archived && e.recordId != null) {
+    if (remindersEnabled(s) && !app.archived && e.recordId != null) {
       final record = await EntityRecord.db.findFirstRow(
         s,
         where: (t) =>
@@ -264,6 +279,7 @@ class Worker {
   static Future<void> execute(Session s, int runId) => s.db.transaction((
     tx,
   ) async {
+    if (!remindersEnabled(s)) return;
     var run = await AutomationRun.db.findById(s, runId, transaction: tx);
     if (run == null || run.status != 'pending' || run.dueAt.isAfter(clock())) {
       return;

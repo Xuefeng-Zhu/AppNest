@@ -1261,9 +1261,9 @@ class AppSpec {
         for (final id in viewIds) {
           final target = view(id);
           if (target.collectionId != col['id'] ||
-              !{'form', 'details'}.contains(target.type)) {
+              !fieldBindingViewTypes.contains(target.type)) {
             throw const SpecException(
-              'New fields can bind only to forms and details in the same collection',
+              'New fields can bind only to lists, tables, forms and details in the same collection',
             );
           }
         }

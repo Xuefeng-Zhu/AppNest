@@ -190,9 +190,10 @@ class BuilderScreenState extends State<BuilderScreen> {
     }
   }
 
-  void update(BuilderSnapshot d) {
+  void update(BuilderSnapshot d, {bool acceptedRequest = false}) {
     if (!mounted || d.mutation < draft.mutation) return;
-    final completed = generating && d.stage == 'preview ready';
+    final completed =
+        (generating || acceptedRequest) && d.stage == 'preview ready';
     final failed =
         d.stage == 'failed' &&
         (draft.stage != 'failed' ||
@@ -258,10 +259,12 @@ class BuilderScreenState extends State<BuilderScreen> {
     try {
       final next = await client.builder.get(draft.draftId);
       if (!mounted || busy || mutation != draft.mutation) return;
-      update(next);
+      if (!recoverAcceptedRequest(next)) update(next);
       setState(() => error = null);
     } catch (e) {
-      if (mounted) setState(() => error = e);
+      if (mounted && !busy && mutation == draft.mutation) {
+        setState(() => error = e);
+      }
     } finally {
       polling = false;
     }
@@ -326,17 +329,10 @@ class BuilderScreenState extends State<BuilderScreen> {
     }
     if (!await finishVisualEdit() || !mounted) return;
     await perform(() async {
-      final uncertain = uncertainGeneration;
-      if (uncertain != null) {
+      if (uncertainGeneration != null) {
         final recovered = await client.builder.get(draft.draftId);
+        if (!mounted || recoverAcceptedRequest(recovered)) return;
         update(recovered);
-        if (recovered.mutation > uncertain.mutation &&
-            recovered.latestRequest == uncertain.request &&
-            recovered.jobId != null &&
-            recovered.jobId != uncertain.jobId) {
-          acceptRequest(recovered, uncertain.request);
-          return;
-        }
         uncertainGeneration = null;
         if (generating || draft.stage == 'stale') return;
       }
@@ -360,13 +356,7 @@ class BuilderScreenState extends State<BuilderScreen> {
         // durable job before offering another write, including on the next send.
         try {
           final recovered = await client.builder.get(draft.draftId);
-          if (recovered.mutation > previousMutation &&
-              recovered.latestRequest == request &&
-              recovered.jobId != null &&
-              recovered.jobId != previousJobId) {
-            acceptRequest(recovered, request);
-            return;
-          }
+          if (!mounted || recoverAcceptedRequest(recovered)) return;
           update(recovered);
           uncertainGeneration = null;
         } catch (_) {
@@ -375,6 +365,19 @@ class BuilderScreenState extends State<BuilderScreen> {
         rethrow;
       }
     });
+  }
+
+  bool recoverAcceptedRequest(BuilderSnapshot next) {
+    final uncertain = uncertainGeneration;
+    if (uncertain == null ||
+        next.mutation <= uncertain.mutation ||
+        next.latestRequest != uncertain.request ||
+        next.jobId == null ||
+        next.jobId == uncertain.jobId) {
+      return false;
+    }
+    acceptRequest(next, uncertain.request);
+    return true;
   }
 
   void acceptRequest(BuilderSnapshot next, String request) {
@@ -386,7 +389,7 @@ class BuilderScreenState extends State<BuilderScreen> {
       guidanceQuestions = null;
       if (prompt.text.trim() == request) prompt.clear();
     });
-    update(next);
+    update(next, acceptedRequest: true);
     scrollConversation();
   }
 

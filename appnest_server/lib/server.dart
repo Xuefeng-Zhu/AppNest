@@ -96,10 +96,12 @@ void run(List<String> args) async {
   } finally {
     await setup.close();
   }
-  await pod.futureCalls.cancel('appnest-reconciler');
-  await pod.futureCalls
-      .callRecurring(identifier: 'appnest-reconciler')
-      .every(const Duration(seconds: 10))
-      .nestWorker
-      .reconcile();
+  if (pod.config.futureCallExecutionEnabled) {
+    await pod.futureCalls.cancel('appnest-reconciler');
+    await pod.futureCalls
+        .callRecurring(identifier: 'appnest-reconciler')
+        .every(const Duration(seconds: 10))
+        .nestWorker
+        .reconcile();
+  }
 }

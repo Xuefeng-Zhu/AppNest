@@ -21,12 +21,17 @@ definitions. **Create app** and **Send** enqueue generation directly.
   data reset operate only on the isolated preview adapter.
 - Accepted prompts remain visible for the current builder session. Subsequent
   requests use the existing candidate as context through the server's generation
-  mode rules. This change does not add durable conversation history or reopenable
-  draft navigation; leaving the builder does not preserve its client transcript.
+  mode rules. Unpublished drafts can be reopened from Continue building; the
+  saved candidate and latest request are restored. The full conversation lasts
+  for the current builder session.
 - Blank requests and overlapping submissions are blocked. Failed requests retain
   the editable prompt. Home retries reuse the begun draft, and recover a request
   whose enqueue succeeded but whose response was lost. A failed later generation
-  keeps the last preview visible. Connection recovery rechecks AI availability.
+  keeps the last preview visible. Recovering an already completed request also
+  shows its completion message. Obsolete refresh failures cannot replace a newer
+  accepted request's state. Refresh connection rechecks AI availability and
+  reconciles any uncertain request without resubmitting it; a different unsent
+  prompt stays in the composer.
 - The edit menu keeps manual field/label editing and Pages & navigation available.
   Publish opens a review sheet; reminder approvals name the trigger, recipient,
   timing and condition. Final confirmation retains exact-candidate publication,
@@ -75,6 +80,75 @@ review of that exact candidate, approved reminder rules, and any existing-record
 scope. Preview records stay isolated. Source validation and generation attempts
 do not establish production readiness or universal generation reliability; see
 the [architecture review](ARCHITECTURE_REVIEW.md) for outstanding findings.
+
+## Follow-up regression verification — 2026-10-07
+
+Follow-up polling now reads the candidate and job status in one transaction
+under the app lock. A deterministic PostgreSQL regression reproduced the prior
+failure: a response could pair `preview ready` with the old candidate, causing
+the UI to stop polling before showing the completed change. The regression
+passes with the consistent read. The Flutter builder also ignores obsolete
+poll errors and acknowledges requests recovered after generation already
+finished. The Refresh connection button uses the same accepted-request
+reconciliation as Send, including queued requests and already completed ones.
+
+Focused Flutter tests cover creation through a successful follow-up, retained
+preview sample data and navigation, reopened drafts, lost responses, obsolete
+polls, manual fields, home recovery and draft routing. PostgreSQL integration
+tests cover the actual enqueue/worker flow, exact definition preservation,
+failure recovery, competing follow-ups, late worker results, authorization,
+dispatch and draft recovery. Provider responses and Flutter transport in these
+tests are synthetic. At the focused test stage, workspace analysis,
+authored-source formatting and `git diff --check` passed. Focused runs passed
+74 Flutter widget tests and 21
+PostgreSQL integration tests:
+
+```sh
+# From appnest_flutter
+flutter test test/builder_creation_test.dart
+flutter test test/builder_add_field_test.dart test/home_recovery_test.dart test/draft_navigation_test.dart
+# From appnest_server
+dart test test/integration/generation_context_test.dart test/integration/generation_dispatch_test.dart test/integration/guidance_test.dart test/integration/draft_recovery_test.dart --concurrency=1
+```
+
+An isolated release-web compilation subsequently passed with
+`flutter build web --release --no-pub --dart-define=SERVER_URL=http://localhost:8180/ --output build/followup-check-web`
+from `appnest_flutter`. Its ignored output is in
+`appnest_flutter/build/followup-check-web`. The
+full verification script and physical-device checks were not part of this run.
+
+After explicit user approval, the compiled web output was copied to the local
+served `appnest_server/web/app`. All 46 served build files matched the compiled
+output; `main.dart.js` SHA256 was
+`3091fe747360870079fcc924ff34c5776c63795d3147cfa25bf1ec243e2e3354`.
+The previous local web output was preserved at
+`/private/tmp/appnest-web-before-followup-b4wkpp8i/app`.
+
+The user explicitly authorized restarting the existing backend. The old direct
+API process was stopped after verifying its identity and project directory;
+`serverpod --no-analytics start --no-tui --no-flutter --no-docker` then started
+the development watcher. Startup confirmed the current migration was applied,
+the server was running, and the local web service was available. The watcher
+and API listener remained running after verification. A subsequent workspace
+analysis reported four informational lints in concurrent evaluation/report
+files outside the follow-up changes.
+
+The approved browser creation returned app 194 at
+`http://localhost:8182/#/drafts/194`. After the restart, the same app loaded its
+generated notes preview. One follow-up requested the name **Follow-up Verified**
+and a new optional text field **Priority**, while retaining the existing title,
+note body, category, pages and green appearance. Job 107 encountered a provider
+overload on its first attempt; the built-in second attempt completed with
+`preview ready` and no error, confirmed through the official Serverpod MCP
+stdio bridge. No manual generation retry was sent.
+
+The browser showed the renamed app and Priority alongside Title, Note and
+Category in the note editor. Saving a synthetic preview note with Priority
+blank succeeded. Reloading the same app restored the renamed definition and
+Priority field; preview records reset to their synthetic seed data as expected.
+This verifies a live-provider follow-up and persisted draft definition in the
+local web runtime. No publication, live business-record write, physical-device
+check or production deployment was performed.
 
 ## Historical verification — 2026-09-22
 

@@ -245,7 +245,10 @@ class Queries {
               );
         var state = date == null ? 'unset' : 'disabled';
         var eligible = false;
-        if (date != null && rule != null && rule.enabled) {
+        if (Worker.remindersEnabled(s) &&
+            date != null &&
+            rule != null &&
+            rule.enabled) {
           final signature = Worker.scheduleSignature(rule, date, due);
           final run = await AutomationRun.db.findFirstRow(
             s,

@@ -1931,54 +1931,127 @@ void main() {
     },
   );
 
-  test('edit AddField grammar binds existing form and details without a guessed field id', () {
-    final spec = dailyPlannerTemplate();
+  test(
+    'edit AddField grammar binds list table form and details with one allocated id',
+    () {
+      for (final (spec, collectionId, targets) in [
+        (
+          dailyPlannerTemplate(),
+          'tasks',
+          [
+            'todayTasks',
+            'overdueTasks',
+            'allTasks',
+            'taskDetails',
+            'taskEditor',
+          ],
+        ),
+        (projectHubTemplate(), 'projects', ['taskTable', 'details', 'editor']),
+      ]) {
+        final body = buildAiRequest(
+          'test',
+          'Add a Source field to the list or table, form, and details',
+          spec,
+          editing: true,
+        );
+        final schema = body['response_format']['json_schema']['schema'] as Map;
+        final variants =
+            schema['anyOf'][0]['properties']['patches']['items']['anyOf']
+                as List;
+        final add = variants.singleWhere(
+          (v) =>
+              v['properties']['type']['const'] == 'AddField' &&
+              v['properties']['collectionId']['const'] == collectionId,
+        ) as Map;
+        final fields = add['properties'] as Map;
+        expect(fields['viewIds']['items']['enum'], unorderedEquals(targets));
+        expect(fields['viewIds']['maxItems'], targets.length);
+        expect(add['required'], ['type', 'collectionId', 'field']);
+        var allocations = 0;
+        final updated = spec.patch(
+          {
+            'type': 'AddField',
+            'collectionId': collectionId,
+            'field': {'label': 'Source', 'type': 'text', 'required': false},
+            'viewIds': targets,
+          },
+          () {
+            allocations++;
+            return 'serverAllocatedSource';
+          },
+        );
+        expect(allocations, 1);
+        expect(
+          updated.collection(collectionId).field('serverAllocatedSource').label,
+          'Source',
+        );
+        expect(updated.views.map((v) => v.id), spec.views.map((v) => v.id));
+        for (final id in targets) {
+          final original = spec.view(id);
+          expect(
+            updated.view(id).fieldIds,
+            original.fieldIds.isEmpty
+                ? isEmpty
+                : [...original.fieldIds, 'serverAllocatedSource'],
+            reason: id,
+          );
+        }
+        final system = (body['messages'] as List).first['content'] as String;
+        expect(
+          system,
+          contains('emit one AddField with every requested existing view ID'),
+        );
+        expect(system, contains('never follow it with guessed field IDs'));
+      }
+    },
+  );
+
+  test('edit AddField target enums remain scoped to each collection', () {
+    final definition = starterTemplates()['reading']!.toJson();
+    (definition['requires'] as List).add('views.configured.v1');
+    final other = jsonDecode(jsonEncode(definition['collections'][0])) as Map;
+    other['id'] = 'archiveBooks';
+    other['label'] = 'Archived books';
+    (definition['collections'] as List).add(other);
+    (definition['views'] as List).add({
+      'id': 'archiveList',
+      'type': 'list',
+      'collectionId': 'archiveBooks',
+      'label': 'Archive',
+      'titleFieldId': 'title',
+      'fieldIds': ['title'],
+      'actionIds': [],
+    });
+    final spec = AppSpec.parse(jsonEncode(definition));
     final body = buildAiRequest(
       'test',
-      'Add a Source field to the form and details',
+      'Add Source to Books',
       spec,
       editing: true,
     );
     final schema = body['response_format']['json_schema']['schema'] as Map;
     final variants =
         schema['anyOf'][0]['properties']['patches']['items']['anyOf'] as List;
-    final add = variants.firstWhere(
+    final adds = variants.where(
       (v) => v['properties']['type']['const'] == 'AddField',
-    ) as Map;
-    final fields = add['properties'] as Map;
-    final collectionId = fields['collectionId']['const'] as String;
-    final targets = spec.views
-        .where(
-          (v) =>
-              v.collectionId == collectionId &&
-              {'form', 'details'}.contains(v.type),
-        )
-        .map((v) => v.id)
-        .toList();
-    expect(fields['viewIds']['items']['enum'], targets);
-    expect(add['required'], ['type', 'collectionId', 'field']);
-    final updated = spec.patch({
-      'type': 'AddField',
-      'collectionId': collectionId,
-      'field': {'label': 'Source', 'type': 'text', 'required': false},
-      'viewIds': targets,
-    }, () => 'serverAllocatedSource');
-    expect(
-      updated.collection(collectionId).field('serverAllocatedSource').label,
-      'Source',
     );
-    for (final id in targets) {
-      final view = updated.view(id);
+    expect(adds, hasLength(2));
+    for (final add in adds) {
+      final fields = add['properties'] as Map;
+      final collectionId = fields['collectionId']['const'] as String;
+      final targets = fields['viewIds']['items']['enum'] as List;
+      expect(targets, isNotEmpty);
       expect(
-        view.fieldIds.isEmpty ||
-            view.fieldIds.contains('serverAllocatedSource'),
+        targets.every(
+          (id) => spec.view(id as String).collectionId == collectionId,
+        ),
         isTrue,
       );
+      expect(
+        targets.contains('archiveList'),
+        collectionId == 'archiveBooks',
+      );
     }
-    expect(
-      (body['messages'] as List).first['content'],
-      contains('never follow it with guessed field IDs'),
-    );
   });
 
   test(

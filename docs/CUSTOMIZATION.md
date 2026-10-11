@@ -23,12 +23,15 @@ Published apps also expose a Customize button. Semantic operation names remain
 internal. Notes, events, and reminder items retain their stable field, record,
 and page identities during customization.
 
-`AddField` may include `viewIds` naming existing forms/details in the same
-collection. The server allocates the new field ID and binds it to those views
+`AddField` may include `viewIds` naming existing lists, tables, forms or details
+in the same collection. The server allocates the new field ID and binds it to those views
 atomically; a stepped form receives it in the final step. Implicit all-field
 views remain implicit, including unselected stepped forms whose steps must
-cover the automatically visible field. AI edits can therefore add a visible field without
-guessing IDs or requiring another generation turn.
+cover the automatically visible field. Explicit field lists retain their order
+and append the new field. AI edits can therefore add a field to the list,
+details and editor in one request without guessing IDs or requiring another
+generation turn. Views in another collection and components without a field
+display contract remain invalid targets.
 
 **Use app** or **Apply changes** opens one review of the exact candidate. Reminder
 enablement and enrollment of existing records remain explicit. The new

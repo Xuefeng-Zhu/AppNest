@@ -21,6 +21,9 @@ class SpecException implements Exception {
   String toString() => message;
 }
 
+/// Views that can display a newly allocated field through AddField.viewIds.
+const fieldBindingViewTypes = {'list', 'table', 'form', 'details'};
+
 class Limits {
   static const definitionBytes = 131072,
       depth = 12,

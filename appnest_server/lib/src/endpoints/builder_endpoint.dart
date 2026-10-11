@@ -1,21 +1,19 @@
 import 'package:serverpod/serverpod.dart';
 
-import '../generated/protocol.dart';
+import '../generated/activity_item.dart';
+import '../generated/automation_run.dart';
+import '../generated/builder_snapshot.dart';
+import '../generated/guidance_question.dart';
+import '../generated/platform_info.dart';
+import '../generated/publish_request.dart';
 import '../modules/builder/builder.dart';
-import '../modules/builder/provider.dart';
 import '../modules/runtime/access.dart';
 
 class BuilderEndpoint extends Endpoint {
   @override
   bool get requireLogin => true;
-  Future<PlatformInfo> platform(Session session) async => PlatformInfo(
-    aiAvailable: ChatCompletionProvider.configured(session) != null,
-    aiMode: ChatCompletionProvider.configured(session) == null
-        ? 'Template mode — AI provider not configured'
-        : 'Live AI',
-    development: session.serverpod.runMode == 'development',
-    actorId: actor(session),
-  );
+  Future<PlatformInfo> platform(Session session) async =>
+      Builder.platform(session);
   Future<BuilderSnapshot> begin(
     Session session,
     int workspaceId,

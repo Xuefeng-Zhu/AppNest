@@ -41,6 +41,72 @@ void main() {
     expect(before.canonical, beforeJson);
   });
 
+  for (final type in ['list', 'table']) {
+    for (final implicit in [false, true]) {
+      test(
+        'AddField binds Priority to $type, details and editor with ${implicit ? 'implicit' : 'explicit'} fields',
+        () {
+          final json = notesTemplate().toJson();
+          final overview = (json['views'] as List).singleWhere(
+            (view) => view['id'] == 'allEntries',
+          );
+          overview['type'] = type;
+          if (implicit) overview.remove('fieldIds');
+          if (type == 'table') (json['requires'] as List).add('views.table.v1');
+          final before = AppSpec.parse(jsonEncode(json));
+          var allocations = 0;
+          final renamed = before.patch({
+            'type': 'RenameLabel',
+            'targetId': 'app',
+            'label': 'Priority Notes',
+          }, () => throw StateError('Rename must not allocate an ID'));
+          final after = renamed.patch(
+            {
+              'type': 'AddField',
+              'collectionId': 'notes',
+              'field': {
+                'label': 'Priority',
+                'type': 'choice',
+                'required': false,
+                'choices': ['Low', 'Normal', 'High'],
+              },
+              'viewIds': ['allEntries', 'entryDetails', 'entryEditor'],
+            },
+            () {
+              allocations++;
+              return 'allocatedPriority';
+            },
+          );
+
+          expect(allocations, 1);
+          expect(after.name, 'Priority Notes');
+          expect(after.collection('notes').fields.last.toJson(), {
+            'id': 'allocatedPriority',
+            'label': 'Priority',
+            'type': 'choice',
+            'required': false,
+            'choices': ['Low', 'Normal', 'High'],
+          });
+          final expected = renamed.toJson();
+          (expected['collections'][0]['fields'] as List).add(
+            after.collection('notes').fields.last.toJson(),
+          );
+          for (final target in expected['views'] as List) {
+            if (target['fieldIds'] != null) {
+              (target['fieldIds'] as List).add('allocatedPriority');
+            }
+          }
+          // Complete equality protects existing IDs, field order, options,
+          // query/filter bindings, actions and navigation from collateral edits.
+          expect(after.canonical, canonicalJson(expected));
+          expect(before.compatibilityErrors(after), isEmpty);
+          expect(before.canonical, canonicalJson(json));
+          expect(AppSpec.parse(after.canonical).hash, after.hash);
+        },
+      );
+    }
+  }
+
   test(
     'AddField extends the final step while preserving implicit all-field views',
     () {
@@ -175,13 +241,25 @@ void main() {
       'type': 'details',
       'collectionId': 'otherNotes',
     });
+    (json['views'] as List).add({
+      'id': 'otherList',
+      'type': 'list',
+      'collectionId': 'otherNotes',
+    });
+    (json['views'] as List).add({
+      'id': 'summary',
+      'type': 'summary',
+      'collectionId': 'notes',
+    });
+    (json['requires'] as List).add('views.summary.v1');
     final before = AppSpec.parse(jsonEncode(json));
     for (final viewIds in [
       ['entryEditor', 'entryEditor'],
       ['missingView'],
       ['otherDetails'],
-      ['allEntries'],
-      ['entryEditor', 'allEntries'],
+      ['otherList'],
+      ['summary'],
+      ['entryEditor', 'summary'],
       ['bad id'],
       List.generate(Limits.views + 1, (index) => 'view$index'),
       'entryEditor',

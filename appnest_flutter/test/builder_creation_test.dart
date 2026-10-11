@@ -20,6 +20,7 @@ class CreationClient extends Client {
   final patches = <Map<String, dynamic>>[];
   Object? getFailure;
   late BuilderSnapshot current;
+  Completer<BuilderSnapshot>? pendingGet;
   Completer<BuilderSnapshot>? pendingGeneration;
   Object? generationFailure;
   Object? platformFailure;
@@ -52,7 +53,7 @@ class CreationClient extends Client {
       case 'builder.get':
         gets.add(args['draftId'] as int);
         if (getFailure != null) throw getFailure!;
-        result = current;
+        result = pendingGet == null ? current : await pendingGet!.future;
       case 'builder.generate':
         generations.add(Map<String, dynamic>.from(args));
         if (generationFailure != null) throw generationFailure!;
@@ -123,6 +124,7 @@ void main() {
     client.patches.clear();
     client.getFailure = null;
     client.current = draft();
+    client.pendingGet = null;
     client.pendingGeneration = null;
     client.generationFailure = null;
     client.platformFailure = null;
@@ -263,6 +265,314 @@ void main() {
       tester.widget<TextField>(composer()).controller!.text,
       'A different unsent change',
     );
+    await closeBuilder(tester);
+  });
+
+  testWidgets('a lost response recovers an already completed follow-up', (
+    tester,
+  ) async {
+    final before = dailyPlannerTemplate();
+    await showBuilder(tester, initial: draft(spec: before));
+    const request = 'Use an editorial style';
+    final after = before.patch({
+      'type': 'SetAppearance',
+      'appearance': {'style': 'editorial'},
+    }, () => 'unused');
+    client.current = draft(
+      spec: after,
+      mutation: 1,
+      jobId: 7,
+      latestRequest: request,
+    );
+    client.generationFailure = const ServerpodClientNetworkException(
+      'response lost',
+    );
+    await tester.enterText(composer(), request);
+    await tester.pump();
+    await tester.tap(find.byTooltip('Send message'));
+    await tester.pumpAndSettle();
+
+    expect(client.generations, hasLength(1));
+    expect(client.gets, [9]);
+    expect(tester.widget<TextField>(composer()).controller!.text, isEmpty);
+    expect(find.text(request), findsOneWidget);
+    expect(
+      find.text(
+        'Your preview is ready. Try it out, or tell me what to adjust next.',
+      ),
+      findsOneWidget,
+    );
+    expect(
+      tester
+          .widget<MiniAppRuntime>(find.byType(MiniAppRuntime))
+          .adapter
+          .spec
+          .hash,
+      after.hash,
+    );
+    expect(find.text('Refresh connection'), findsNothing);
+    await closeBuilder(tester);
+  });
+
+  testWidgets(
+    'later recovery acknowledges completion once and preserves an unsent change',
+    (tester) async {
+      final before = dailyPlannerTemplate();
+      await showBuilder(tester, initial: draft(spec: before));
+      const request = 'Use an editorial style';
+      const unsent = 'Rename the calendar to Team schedule';
+      const acknowledgement =
+          'Your preview is ready. Try it out, or tell me what to adjust next.';
+      client.generationFailure = const ServerpodClientNetworkException(
+        'response lost',
+      );
+      client.getFailure = const ServerpodClientNetworkException(
+        'still offline',
+      );
+      await tester.enterText(composer(), request);
+      await tester.pump();
+      await tester.tap(find.byTooltip('Send message'));
+      await tester.pump();
+      expect(client.generations, hasLength(1));
+      expect(client.gets, [9]);
+      expect(tester.widget<TextField>(composer()).controller!.text, request);
+
+      final after = before.patch({
+        'type': 'SetAppearance',
+        'appearance': {'style': 'editorial'},
+      }, () => 'unused');
+      client.getFailure = null;
+      client.current = draft(
+        spec: after,
+        mutation: 1,
+        jobId: 7,
+        latestRequest: request,
+      );
+      await tester.enterText(composer(), unsent);
+      await tester.pump();
+      await tester.tap(find.byTooltip('Send message'));
+      await tester.pumpAndSettle();
+
+      final state = tester.state<BuilderScreenState>(
+        find.byType(BuilderScreen),
+      );
+      expect(client.generations, hasLength(1));
+      expect(client.gets, [9, 9]);
+      expect(tester.widget<TextField>(composer()).controller!.text, unsent);
+      expect(state.uncertainGeneration, isNull);
+      expect(state.draft.candidateHash, after.hash);
+      expect(state.conversation.map((message) => message.text), [
+        'Your app is ready to shape. Try the preview, then tell me what you would like to change.',
+        request,
+        acknowledgement,
+      ]);
+      expect(state.conversation[1].fromUser, isTrue);
+      expect(state.conversation[2].fromUser, isFalse);
+
+      await state.poll();
+      await tester.pumpAndSettle();
+      expect(
+        state.conversation.where((message) => message.text == acknowledgement),
+        hasLength(1),
+      );
+      expect(client.generations, hasLength(1));
+      expect(tester.widget<TextField>(composer()).controller!.text, unsent);
+      expect(find.text('Refresh connection'), findsNothing);
+      await closeBuilder(tester);
+    },
+  );
+
+  for (final unsent in [null, 'Rename the calendar to Team schedule']) {
+    testWidgets(
+      'Refresh connection acknowledges a completed uncertain request and ${unsent == null ? 'clears the original prompt' : 'preserves a different prompt'}',
+      (tester) async {
+        final before = dailyPlannerTemplate();
+        await showBuilder(tester, initial: draft(spec: before));
+        const request = 'Use an editorial style';
+        const acknowledgement =
+            'Your preview is ready. Try it out, or tell me what to adjust next.';
+        client.generationFailure = const ServerpodClientNetworkException(
+          'response lost',
+        );
+        client.getFailure = const ServerpodClientNetworkException(
+          'still offline',
+        );
+        await tester.enterText(composer(), request);
+        await tester.pump();
+        await tester.tap(find.byTooltip('Send message'));
+        await tester.pumpAndSettle();
+        expect(client.generations, hasLength(1));
+        expect(client.gets, [9]);
+        expect(find.text('Refresh connection'), findsOneWidget);
+
+        final after = before.patch({
+          'type': 'SetAppearance',
+          'appearance': {'style': 'editorial'},
+        }, () => 'unused');
+        client.getFailure = null;
+        client.current = draft(
+          spec: after,
+          mutation: 1,
+          jobId: 7,
+          latestRequest: request,
+        );
+        if (unsent != null) {
+          await tester.enterText(composer(), unsent);
+          await tester.pump();
+        }
+        await tester.tap(find.text('Refresh connection'));
+        await tester.pumpAndSettle();
+
+        final state = tester.state<BuilderScreenState>(
+          find.byType(BuilderScreen),
+        );
+        expect(client.generations, hasLength(1));
+        expect(client.gets, [9, 9]);
+        expect(client.platformRequests, 2);
+        expect(state.uncertainGeneration, isNull);
+        expect(state.draft.candidateHash, after.hash);
+        expect(state.conversation.map((message) => message.text), [
+          'Your app is ready to shape. Try the preview, then tell me what you would like to change.',
+          request,
+          acknowledgement,
+        ]);
+        expect(state.conversation[1].fromUser, isTrue);
+        expect(state.conversation[2].fromUser, isFalse);
+        expect(
+          tester.widget<TextField>(composer()).controller!.text,
+          unsent ?? '',
+        );
+        expect(find.text('Refresh connection'), findsNothing);
+
+        await state.poll();
+        await tester.pumpAndSettle();
+        expect(
+          state.conversation.where(
+            (message) => message.text == acknowledgement,
+          ),
+          hasLength(1),
+        );
+        expect(client.generations, hasLength(1));
+        expect(
+          tester.widget<TextField>(composer()).controller!.text,
+          unsent ?? '',
+        );
+        await closeBuilder(tester);
+      },
+    );
+  }
+
+  testWidgets('Refresh connection accepts a queued uncertain request once', (
+    tester,
+  ) async {
+    final before = dailyPlannerTemplate();
+    await showBuilder(tester, initial: draft(spec: before));
+    const request = 'Use an editorial style';
+    const acknowledgement =
+        'Your preview is ready. Try it out, or tell me what to adjust next.';
+    client.generationFailure = const ServerpodClientNetworkException(
+      'response lost',
+    );
+    client.getFailure = const ServerpodClientNetworkException('still offline');
+    await tester.enterText(composer(), request);
+    await tester.pump();
+    await tester.tap(find.byTooltip('Send message'));
+    await tester.pumpAndSettle();
+    expect(find.text('Refresh connection'), findsOneWidget);
+
+    client.getFailure = null;
+    client.current = draft(
+      spec: before,
+      stage: 'queued',
+      mutation: 1,
+      jobId: 7,
+      candidateReady: true,
+      latestRequest: request,
+    );
+    await tester.tap(find.text('Refresh connection'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 250));
+    final state = tester.state<BuilderScreenState>(find.byType(BuilderScreen));
+    expect(state.uncertainGeneration, isNull);
+    expect(state.draft.stage, 'queued');
+    expect(tester.widget<TextField>(composer()).controller!.text, isEmpty);
+    expect(
+      state.conversation
+          .where((message) => message.fromUser)
+          .map(
+            (message) => message.text,
+          ),
+      [request],
+    );
+    expect(
+      state.conversation.where((message) => message.text == acknowledgement),
+      isEmpty,
+    );
+
+    final after = before.patch({
+      'type': 'SetAppearance',
+      'appearance': {'style': 'editorial'},
+    }, () => 'unused');
+    client.current = draft(
+      spec: after,
+      mutation: 1,
+      jobId: 7,
+      latestRequest: request,
+    );
+    await tester.pump(const Duration(seconds: 2));
+    await tester.pumpAndSettle();
+    expect(state.draft.candidateHash, after.hash);
+    expect(
+      state.conversation.where((message) => message.text == acknowledgement),
+      hasLength(1),
+    );
+    await state.poll();
+    await tester.pumpAndSettle();
+    expect(
+      state.conversation.where((message) => message.text == acknowledgement),
+      hasLength(1),
+    );
+    expect(client.generations, hasLength(1));
+    expect(tester.widget<TextField>(composer()).controller!.text, isEmpty);
+    expect(find.text('Refresh connection'), findsNothing);
+    await closeBuilder(tester);
+  });
+
+  testWidgets('a stale failed poll cannot replace an accepted follow-up', (
+    tester,
+  ) async {
+    await showBuilder(tester, initial: draft());
+    final pendingGet = Completer<BuilderSnapshot>();
+    client.pendingGet = pendingGet;
+    final state = tester.state<BuilderScreenState>(find.byType(BuilderScreen));
+    final oldPoll = state.poll();
+    await tester.pump();
+    expect(client.gets, [9]);
+
+    const request = 'Use a calmer style';
+    client.current = draft(
+      stage: 'queued',
+      mutation: 1,
+      jobId: 7,
+      candidateReady: true,
+      latestRequest: request,
+    );
+    await tester.enterText(composer(), request);
+    await tester.pump();
+    await tester.tap(find.byTooltip('Send message'));
+    await tester.pump();
+    expect(client.generations, hasLength(1));
+    expect(state.draft.mutation, 1);
+
+    pendingGet.completeError(
+      const ServerpodClientNetworkException('obsolete poll failed'),
+    );
+    await oldPoll;
+    await tester.pump();
+    expect(state.error, isNull);
+    expect(state.draft.stage, 'queued');
+    expect(find.text('Refresh connection'), findsNothing);
+    expect(tester.widget<TextField>(composer()).controller!.text, isEmpty);
     await closeBuilder(tester);
   });
 
@@ -665,6 +975,192 @@ void main() {
         tester.getSize(find.byType(MiniAppRuntime)).width,
         greaterThan(390),
       );
+      await closeBuilder(tester);
+    },
+  );
+
+  testWidgets(
+    'a fresh creation accepts a follow-up and preserves preview data',
+    (tester) async {
+      const creationRequest = 'Make a planner for our volunteer team';
+      client.current = draft(
+        stage: 'queued',
+        mutation: 1,
+        jobId: 7,
+        latestRequest: creationRequest,
+      );
+      await showBuilder(
+        tester,
+        initial: client.current,
+        initialPrompt: creationRequest,
+        startFromScratch: true,
+      );
+      expect(find.byType(MiniAppRuntime), findsNothing);
+      expect(tester.widget<TextField>(composer()).enabled, isFalse);
+
+      final created = dailyPlannerTemplate();
+      client.current = draft(
+        spec: created,
+        mutation: 1,
+        jobId: 7,
+        latestRequest: creationRequest,
+      );
+      await tester.pump(const Duration(seconds: 2));
+      await tester.pumpAndSettle();
+      final runtime = tester.widget<MiniAppRuntime>(
+        find.byType(MiniAppRuntime),
+      );
+      final original = runtime.adapter;
+      final row = (await original.query('tasks', {})).items.first;
+      await original.execute(
+        original.spec.actions.firstWhere(
+          (action) =>
+              action.collectionId == 'tasks' &&
+              action.capability == 'records.patch.v1',
+        ),
+        row,
+        {
+          'data': {'title': 'Keep this sample task'},
+        },
+        'follow-up-preserves-sample',
+      );
+      await runtime.controller!.navigate(const MiniAppLocation('tasksPage'));
+      await tester.pumpAndSettle();
+
+      const followUp = 'Use an editorial style';
+      client.current = draft(
+        spec: created,
+        stage: 'queued',
+        mutation: 2,
+        jobId: 8,
+        candidateReady: true,
+        latestRequest: followUp,
+      );
+      await tester.enterText(composer(), followUp);
+      await tester.pump();
+      await tester.tap(find.byTooltip('Send message'));
+      await tester.pump();
+      expect(client.generations.single, {
+        'draftId': 9,
+        'mutation': 1,
+        'request': followUp,
+        'startFromScratch': true,
+      });
+      expect(client.questionRequests, isEmpty);
+      expect(tester.widget<TextField>(composer()).controller!.text, isEmpty);
+      expect(tester.widget<TextField>(composer()).enabled, isFalse);
+      expect(
+        tester.widget<MiniAppRuntime>(find.byType(MiniAppRuntime)).adapter,
+        same(original),
+      );
+
+      final changed = created.patch({
+        'type': 'SetAppearance',
+        'appearance': {'style': 'editorial'},
+      }, () => 'unused');
+      client.current = draft(
+        spec: changed,
+        mutation: 2,
+        jobId: 8,
+        latestRequest: followUp,
+      );
+      await tester.pump(const Duration(seconds: 2));
+      await tester.pumpAndSettle();
+      final updated = tester.widget<MiniAppRuntime>(
+        find.byType(MiniAppRuntime),
+      );
+      expect(updated.adapter, same(original));
+      expect(updated.adapter.spec.hash, changed.hash);
+      expect(updated.adapter.spec.appearance!.style, 'editorial');
+      expect(
+        (await updated.adapter.get(row.id)).data['title'],
+        'Keep this sample task',
+      );
+      expect(updated.controller!.location, const MiniAppLocation('tasksPage'));
+      final state = tester.state<BuilderScreenState>(
+        find.byType(BuilderScreen),
+      );
+      expect(
+        state.conversation
+            .where((message) => message.fromUser)
+            .map(
+              (message) => message.text,
+            ),
+        [creationRequest, followUp],
+      );
+      expect(tester.widget<TextField>(composer()).enabled, isTrue);
+      expect(
+        tester
+            .widget<FilledButton>(find.widgetWithText(FilledButton, 'Use app'))
+            .onPressed,
+        isNotNull,
+      );
+      expect(client.generations, hasLength(1));
+      expect(client.gets, [9, 9]);
+      await closeBuilder(tester);
+    },
+  );
+
+  testWidgets(
+    'a resumed ready draft accepts a follow-up at its saved revision',
+    (
+      tester,
+    ) async {
+      final created = dailyPlannerTemplate();
+      const originalRequest = 'Create a shared team planner';
+      client.current = draft(
+        spec: created,
+        mutation: 4,
+        jobId: 10,
+        latestRequest: originalRequest,
+      );
+      await showBuilder(tester, initial: client.current);
+      expect(find.text(originalRequest), findsOneWidget);
+      expect(find.byType(MiniAppRuntime), findsOneWidget);
+
+      const followUp = 'Use an editorial style';
+      client.current = draft(
+        spec: created,
+        stage: 'queued',
+        mutation: 5,
+        jobId: 11,
+        candidateReady: true,
+        latestRequest: followUp,
+      );
+      await tester.enterText(composer(), followUp);
+      await tester.pump();
+      await tester.tap(find.byTooltip('Send message'));
+      await tester.pump();
+      expect(client.generations.single, {
+        'draftId': 9,
+        'mutation': 4,
+        'request': followUp,
+        'startFromScratch': false,
+      });
+
+      final changed = created.patch({
+        'type': 'SetAppearance',
+        'appearance': {'style': 'editorial'},
+      }, () => 'unused');
+      client.current = draft(
+        spec: changed,
+        mutation: 5,
+        jobId: 11,
+        latestRequest: followUp,
+      );
+      await tester.pump(const Duration(seconds: 2));
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<MiniAppRuntime>(find.byType(MiniAppRuntime))
+            .adapter
+            .spec
+            .hash,
+        changed.hash,
+      );
+      expect(find.text(followUp), findsOneWidget);
+      expect(tester.widget<TextField>(composer()).enabled, isTrue);
+      expect(client.generations, hasLength(1));
       await closeBuilder(tester);
     },
   );
