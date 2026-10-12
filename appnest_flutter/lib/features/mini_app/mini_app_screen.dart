@@ -10,6 +10,7 @@ import '../builder/builder_screen.dart';
 import 'live_adapter.dart';
 import 'device_timer_store.dart';
 import 'device_capabilities.dart';
+import 'invitation_link.dart';
 
 class MiniAppScreen extends StatefulWidget {
   final int appId;
@@ -304,6 +305,8 @@ class MiniAppScreenState extends State<MiniAppScreen> {
     String role = 'member';
     final recipient = TextEditingController();
     String? token;
+    Uri? invitationLink;
+    bool creatingInvitation = false;
     Object? failure;
     await showDialog<void>(
       context: context,
@@ -334,7 +337,7 @@ class MiniAppScreenState extends State<MiniAppScreen> {
                         child: Text('Builder'),
                       ),
                     ],
-                    onChanged: token == null
+                    onChanged: token == null && !creatingInvitation
                         ? (value) => update(() => role = value!)
                         : null,
                   ),
@@ -358,7 +361,7 @@ class MiniAppScreenState extends State<MiniAppScreen> {
                     children: [
                       TextField(
                         controller: recipient,
-                        enabled: token == null,
+                        enabled: token == null && !creatingInvitation,
                         decoration: const InputDecoration(
                           labelText: 'Recipient account ID',
                           helperText: 'They can copy this from Your account.',
@@ -367,9 +370,14 @@ class MiniAppScreenState extends State<MiniAppScreen> {
                       ),
                     ],
                   ),
-                  if (token != null)
-                    SelectableText('${Uri.base.origin}/?invite=$token'),
-                  if (failure != null) Text(requestError(failure!)),
+                  if (token != null) SelectableText(invitationLink.toString()),
+                  if (failure != null)
+                    Text(
+                      failure is InvitationLinkConfigurationError
+                          ? (failure as InvitationLinkConfigurationError)
+                                .message
+                          : requestError(failure!),
+                    ),
                 ],
               ),
             ),
@@ -381,20 +389,43 @@ class MiniAppScreenState extends State<MiniAppScreen> {
             ),
             if (token == null)
               FilledButton(
-                onPressed: () async {
-                  try {
-                    final t = await client.apps.invite(
-                      widget.appId,
-                      role,
-                      recipient.text.trim().isEmpty
-                          ? null
-                          : recipient.text.trim(),
-                    );
-                    if (context.mounted) update(() => token = t);
-                  } catch (e) {
-                    if (context.mounted) update(() => failure = e);
-                  }
-                },
+                onPressed: creatingInvitation
+                    ? null
+                    : () async {
+                        update(() {
+                          creatingInvitation = true;
+                          failure = null;
+                        });
+                        try {
+                          // Resolve before creating a token: invalid configuration
+                          // must not mint an invitation with an unusable link.
+                          final origin = invitationWebOrigin(
+                            backendUrl: client.host,
+                            currentPage: Uri.base,
+                          );
+                          final t = await client.apps.invite(
+                            widget.appId,
+                            role,
+                            recipient.text.trim().isEmpty
+                                ? null
+                                : recipient.text.trim(),
+                          );
+                          if (context.mounted) {
+                            update(() {
+                              token = t;
+                              invitationLink = origin.replace(
+                                queryParameters: {'invite': t},
+                              );
+                            });
+                          }
+                        } catch (e) {
+                          if (context.mounted) update(() => failure = e);
+                        } finally {
+                          if (context.mounted) {
+                            update(() => creatingInvitation = false);
+                          }
+                        }
+                      },
                 child: const Text('Create invitation'),
               ),
             if (token != null)
@@ -408,7 +439,7 @@ class MiniAppScreenState extends State<MiniAppScreen> {
             if (token != null)
               FilledButton(
                 onPressed: () => Clipboard.setData(
-                  ClipboardData(text: '${Uri.base.origin}/?invite=$token'),
+                  ClipboardData(text: invitationLink.toString()),
                 ),
                 child: const Text('Copy link'),
               ),

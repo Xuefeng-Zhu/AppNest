@@ -70,6 +70,7 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(() async => tester.pumpWidget(const SizedBox()));
     await tester.pumpWidget(
       MaterialApp(
         home: MediaQuery(

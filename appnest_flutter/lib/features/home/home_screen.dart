@@ -51,6 +51,104 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       <int, ({int workspaceId, BuilderSnapshot draft})>{};
   bool invitationHandled = false;
   int loadGeneration = 0;
+  int inboxGeneration = 0;
+  bool inboxRefreshing = false;
+  bool inboxRefreshQueued = false;
+  Object? inboxError;
+  Timer? inboxTimer;
+  Future<List<InboxItem>>? inboxRequest;
+  bool foreground =
+      WidgetsBinding.instance.lifecycleState == null ||
+      WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed;
+
+  bool get inboxVisible =>
+      mounted &&
+      foreground &&
+      page == 2 &&
+      (ModalRoute.of(context)?.isCurrent ?? true);
+
+  void updateInboxPolling() {
+    inboxTimer?.cancel();
+    inboxTimer = null;
+    if (inboxVisible && !loading && error == null) {
+      inboxTimer = Timer.periodic(const Duration(seconds: 10), (_) {
+        if (inboxVisible && !inboxRefreshing) refreshInbox();
+      });
+    }
+  }
+
+  void selectPage(int value) {
+    setState(() {
+      page = value;
+      inboxGeneration++;
+    });
+    updateInboxPolling();
+    if (value == 2) refreshInbox();
+  }
+
+  /// Serialize reads with full launcher reloads as well as Inbox refreshes.
+  /// A reload waits for an obsolete read and then makes its own fresh request.
+  Future<List<InboxItem>> readInbox(int launcherGeneration) async {
+    while (inboxRequest != null) {
+      try {
+        await inboxRequest;
+      } catch (_) {
+        // The original caller handles its error; this caller performs a new
+        // authenticated read rather than accepting the obsolete response.
+      }
+    }
+    if (!mounted || launcherGeneration != loadGeneration) {
+      throw StateError('Obsolete launcher read');
+    }
+    final request = client.runtime.inbox();
+    inboxRequest = request;
+    try {
+      return await request;
+    } finally {
+      if (identical(inboxRequest, request)) inboxRequest = null;
+    }
+  }
+
+  Future<void> refreshInbox() async {
+    if (!inboxVisible || loading || error != null) return;
+    if (inboxRefreshing) {
+      inboxRefreshQueued = true;
+      return;
+    }
+    final generation = ++inboxGeneration;
+    final launcherGeneration = loadGeneration;
+    setState(() => inboxRefreshing = true);
+    try {
+      final items = await readInbox(launcherGeneration);
+      if (!inboxVisible ||
+          generation != inboxGeneration ||
+          launcherGeneration != loadGeneration) {
+        return;
+      }
+      setState(() {
+        inbox = items;
+        inboxError = null;
+      });
+    } catch (e) {
+      if (mounted &&
+          generation == inboxGeneration &&
+          launcherGeneration == loadGeneration) {
+        setState(() {
+          // A failed authorization check must not retain private Inbox data.
+          inbox = [];
+          inboxError = e;
+        });
+      }
+    } finally {
+      if (mounted) {
+        setState(() => inboxRefreshing = false);
+        final queued = inboxRefreshQueued;
+        inboxRefreshQueued = false;
+        if (queued && inboxVisible && !loading) refreshInbox();
+      }
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -93,6 +191,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    inboxGeneration++;
+    loadGeneration++;
+    inboxTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     prompt.dispose();
     super.dispose();
@@ -107,16 +208,26 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     // Only retry reads. Never replay a business command on reconnect/resume.
-    if (state == AppLifecycleState.resumed && error != null && !loading) {
-      load();
+    foreground = state == AppLifecycleState.resumed;
+    if (!foreground) inboxGeneration++;
+    updateInboxPolling();
+    if (foreground && !loading) {
+      if (error != null) {
+        load();
+      } else if (page == 2) {
+        refreshInbox();
+      }
     }
   }
 
   Future<void> load() async {
     if (!mounted) return;
     final generation = ++loadGeneration;
+    inboxGeneration++;
+    inboxRefreshQueued = false;
     final requestedWorkspace = workspaceId;
     setState(() => loading = true);
+    updateInboxPolling();
     try {
       final ws = await client.apps.workspaces(),
           p = await client.builder.platform();
@@ -127,7 +238,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       final results = await Future.wait<dynamic>([
         client.apps.list(selectedWorkspace),
         client.apps.templates(),
-        client.runtime.inbox(),
+        readInbox(generation),
       ]);
       if (!mounted || generation != loadGeneration) return;
       if (mounted) {
@@ -141,6 +252,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           apps = results[0] as List<AppManifest>;
           templates = results[1] as List<TemplateInfo>;
           inbox = results[2] as List<InboxItem>;
+          inboxError = null;
           loading = false;
           error = null;
         });
@@ -165,6 +277,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         });
       }
     }
+    if (mounted && generation == loadGeneration) updateInboxPolling();
   }
 
   Future<void> open(int id, {int? recordId}) async {
@@ -559,7 +672,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     ][i],
                   ),
                   title: Text(['Home', 'Templates', 'Inbox'][i]),
-                  onTap: () => setState(() => page = i),
+                  onTap: () => selectPage(i),
                 ),
               ),
             const Spacer(),
@@ -573,7 +686,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         )
       : NavigationBar(
           selectedIndex: page,
-          onDestinationSelected: (i) => setState(() => page = i),
+          onDestinationSelected: selectPage,
           destinations: const [
             NavigationDestination(
               icon: Icon(Icons.home_outlined),
@@ -1293,8 +1406,29 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       'Inbox',
                       style: Theme.of(context).textTheme.displaySmall,
                     ),
+                    const SizedBox(height: 12),
+                    TextButton.icon(
+                      onPressed: inboxRefreshing ? null : refreshInbox,
+                      icon: inboxRefreshing
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.refresh),
+                      label: Text(
+                        inboxRefreshing ? 'Refreshing…' : 'Refresh inbox',
+                      ),
+                    ),
+                    if (inboxError != null)
+                      Semantics(
+                        liveRegion: true,
+                        child: const Text(
+                          'Couldn’t refresh your Inbox. Check your connection or account access and try again.',
+                        ),
+                      ),
                     const SizedBox(height: 24),
-                    if (inbox.isEmpty)
+                    if (inbox.isEmpty && inboxError == null)
                       const Text(
                         'All quiet. Approved reminders will appear here.',
                       ),
