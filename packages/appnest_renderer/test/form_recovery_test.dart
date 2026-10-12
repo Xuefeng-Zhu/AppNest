@@ -101,6 +101,60 @@ Finder field(String label) => find.widgetWithText(TextField, label);
 
 void main() {
   testWidgets(
+    'pristine editor refresh updates values and their revision together',
+    (tester) async {
+      final adapter = ResponseLostPreview(projectHubTemplate())
+        ..loseResponse = false;
+      final controller = await mount(tester, adapter);
+      await controller.navigate(
+        const MiniAppLocation('formPage', recordId: 1, editing: true),
+      );
+      await tester.pumpAndSettle();
+      await adapter.externalEdit(1, 'Other member latest title');
+      await tester.pump(const Duration(seconds: 31));
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<TextField>(field('Task *')).controller!.text,
+        'Other member latest title',
+      );
+      await tester.enterText(field('Notes'), 'My unrelated note edit');
+      await press(tester, 'Save');
+      final saved = await adapter.get(1);
+      expect(saved.data['title'], 'Other member latest title');
+      expect(saved.data['notes'], 'My unrelated note edit');
+      expect(adapter.attempts.single['revision'], 2);
+    },
+  );
+
+  testWidgets(
+    'dirty editor keeps its original revision after another member edits',
+    (tester) async {
+      final adapter = ResponseLostPreview(projectHubTemplate())
+        ..loseResponse = false;
+      final controller = await mount(tester, adapter);
+      await controller.navigate(
+        const MiniAppLocation('formPage', recordId: 1, editing: true),
+      );
+      await tester.pumpAndSettle();
+      await tester.enterText(field('Notes'), 'Unsaved local notes');
+      await adapter.externalEdit(1, 'Another member changed this');
+      await tester.pump(const Duration(seconds: 31));
+      await tester.pumpAndSettle();
+      await press(tester, 'Save');
+      expect(adapter.attempts.single['revision'], 1);
+      expect(
+        (await adapter.get(1)).data['title'],
+        'Another member changed this',
+      );
+      expect(
+        tester.widget<TextField>(field('Notes')).controller!.text,
+        'Unsaved local notes',
+      );
+      expect(find.textContaining('Could not save.'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
     'lost create response retries the frozen command without a duplicate',
     (tester) async {
       final adapter = ResponseLostPreview(projectHubTemplate());

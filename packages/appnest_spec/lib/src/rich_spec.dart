@@ -331,6 +331,16 @@ void _validateRichView(AppSpec spec, ViewSpec view) {
         throw const SpecException(
           'Integer controls need integral bounds and steps',
         );
+      if (_numericTypes.contains(f.type)) {
+        for (final key in ['min', 'max']) {
+          final bound = c[key];
+          if (bound != null) {
+            f.normalize(
+              f.type == FieldType.integer ? (bound as num).toInt() : bound,
+            );
+          }
+        }
+      }
     }
     if (o['steps'] != null) {
       final fields = <String>{};

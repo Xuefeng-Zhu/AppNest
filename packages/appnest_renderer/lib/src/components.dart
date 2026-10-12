@@ -25,22 +25,25 @@ class RecordList extends StatelessWidget {
     required this.onAction,
   });
   @override
-  Widget build(BuildContext context) => Column(
-    crossAxisAlignment: CrossAxisAlignment.stretch,
-    children: items
-        .map(
-          (item) => Padding(
-            padding: const EdgeInsets.only(bottom: 12),
-            child: RecordDetails(
-              spec: spec,
-              view: view,
-              item: item,
-              onAction: onAction,
+  Widget build(BuildContext context) {
+    final content = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: items
+          .map(
+            (item) => Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: RecordDetails(
+                spec: spec,
+                view: view,
+                item: item,
+                onAction: onAction,
+              ),
             ),
-          ),
-        )
-        .toList(),
-  );
+          )
+          .toList(),
+    );
+    return view.presentation == 'compact' ? Card(child: content) : content;
+  }
 }
 
 class RecordDetails extends StatelessWidget {
@@ -59,73 +62,77 @@ class RecordDetails extends StatelessWidget {
   Widget build(BuildContext context) {
     final col = spec.collection(item.collectionId);
     final titleFieldId = view.titleFieldId ?? col.fields.first.id;
-    return Card(
-      child: Padding(
-        padding: EdgeInsets.all(_space(context, 20)),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _editableField(
-              context,
-              view,
-              titleFieldId,
-              Text(
-                col.field(titleFieldId).type == FieldType.image
-                    ? 'Image record'
-                    : '${item.data[titleFieldId] ?? 'Untitled'}',
-                style: Theme.of(context).textTheme.titleLarge,
-              ),
+    final compact = view.presentation == 'compact';
+    final content = Padding(
+      padding: EdgeInsets.all(_space(context, compact ? 12 : 20)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _editableField(
+            context,
+            view,
+            titleFieldId,
+            Text(
+              col.field(titleFieldId).type == FieldType.image
+                  ? 'Image record'
+                  : '${item.data[titleFieldId] ?? 'Untitled'}',
+              style: compact
+                  ? Theme.of(context).textTheme.titleMedium
+                  : Theme.of(context).textTheme.titleLarge,
             ),
-            const SizedBox(height: 12),
-            for (final f in col.fields.where(
-              (f) =>
-                  !{'capacity', 'action'}.contains(view.type) &&
-                  f.id != titleFieldId &&
-                  item.data[f.id] != null,
-            ))
-              Padding(
-                padding: const EdgeInsets.only(bottom: 6),
-                child: _editableField(
-                  context,
-                  view,
-                  f.id,
-                  Text(
-                    '${f.label}: ${f.type == FieldType.image
-                        ? 'Image attached'
-                        : f.type == FieldType.timestamp
-                        ? _displayDate(context, item.data[f.id] as String)
-                        : item.data[f.id]}',
-                  ),
+          ),
+          const SizedBox(height: 12),
+          for (final f
+              in (view.fieldIds.isEmpty
+                      ? col.fields
+                      : view.fieldIds.map(col.field))
+                  .where(
+                    (f) =>
+                        !{'capacity', 'action'}.contains(view.type) &&
+                        f.id != titleFieldId &&
+                        item.data[f.id] != null,
+                  ))
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: _editableField(
+                context,
+                view,
+                f.id,
+                Text(
+                  '${f.label}: ${f.type == FieldType.image
+                      ? 'Image attached'
+                      : f.type == FieldType.timestamp
+                      ? _displayDate(context, item.data[f.id] as String)
+                      : item.data[f.id]}',
                 ),
               ),
-            if (item.capacity != null) CapacitySummary(item: item),
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: view.actionIds
-                  .where(item.allowedActions.contains)
-                  .map(spec.action)
-                  .where(
-                    (a) =>
-                        a.capability != 'records.create.v1' &&
-                        !(a.capability == 'capacity.claim.v1' &&
-                            item.claimed) &&
-                        !(a.capability == 'capacity.release.v1' &&
-                            !item.claimed),
-                  )
-                  .map(
-                    (a) => ActionButton(
-                      action: a,
-                      onPressed: () => onAction(a, item),
-                    ),
-                  )
-                  .toList(),
             ),
-          ],
-        ),
+          if (item.capacity != null) CapacitySummary(item: item),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: view.actionIds
+                .where(item.allowedActions.contains)
+                .map(spec.action)
+                .where(
+                  (a) =>
+                      a.capability != 'records.create.v1' &&
+                      !(a.capability == 'capacity.claim.v1' && item.claimed) &&
+                      !(a.capability == 'capacity.release.v1' && !item.claimed),
+                )
+                .map(
+                  (a) => ActionButton(
+                    action: a,
+                    onPressed: () => onAction(a, item),
+                  ),
+                )
+                .toList(),
+          ),
+        ],
       ),
     );
+    return compact ? content : Card(child: content);
   }
 }
 
@@ -242,6 +249,7 @@ class RecordForm extends StatefulWidget {
   final int? capacity;
   final RuntimeAdapter? adapter;
   final RuntimeItem? record;
+  final List<String> fieldIds;
   const RecordForm({
     super.key,
     required this.collection,
@@ -250,6 +258,7 @@ class RecordForm extends StatefulWidget {
     this.capacity,
     this.adapter,
     this.record,
+    this.fieldIds = const [],
   });
   @override
   State<RecordForm> createState() => _RecordFormState();
@@ -263,13 +272,30 @@ class _RecordFormState extends State<RecordForm> {
   bool _uploading = false;
   late final TextEditingController capacity;
   bool get creating => widget.initial == null;
-  List<FieldSpec> get fields => widget.collection.fields
-      .where(
-        (f) =>
+  List<FieldSpec> get fields {
+    final selected = widget.fieldIds.isEmpty
+        ? widget.collection.fields
+        : widget.fieldIds.map(widget.collection.field).toList();
+    // Legacy definitions may omit required inputs in fieldIds. Keep those
+    // definitions usable without changing their serialization or hashes.
+    return [
+      ...selected.where(
+        (field) =>
             creating ||
-            !widget.collection.behaviors.any((b) => b.fieldId == f.id),
-      )
-      .toList();
+            !widget.collection.behaviors.any((b) => b.fieldId == field.id),
+      ),
+      if (creating && widget.fieldIds.isNotEmpty)
+        ...widget.collection.fields.where(
+          (field) =>
+              field.required &&
+              !widget.fieldIds.contains(field.id) &&
+              !widget.collection.behaviors.any(
+                (b) => b.type == 'workflow.v1' && b.fieldId == field.id,
+              ),
+        ),
+    ];
+  }
+
   @override
   void initState() {
     super.initState();
@@ -335,6 +361,16 @@ class _RecordFormState extends State<RecordForm> {
           _ => text.isEmpty ? null : text,
         };
         f.normalize(data[f.id]);
+      }
+      if (creating) {
+        for (final behavior in widget.collection.behaviors.where(
+          (behavior) => behavior.type == 'workflow.v1',
+        )) {
+          data.putIfAbsent(
+            behavior.fieldId!,
+            () => widget.collection.field(behavior.fieldId!).choices.first,
+          );
+        }
       }
       final input = <String, dynamic>{'data': data};
       if (creating &&

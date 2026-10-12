@@ -48,7 +48,10 @@ class __LegacyMiniAppRuntimeState extends State<_LegacyMiniAppRuntime>
   Timer? refreshTimer;
   Timer? reconnectTimer;
   String? filterChoice;
+  final filterChoices = <String, String>{};
   String search = '';
+  int _request = 0, _accessGeneration = 0;
+  ModalRoute<Map<String, dynamic>>? _editorRoute;
   _RuntimeCommand? _pendingCommand;
   RuntimeAdapter get adapter => widget.adapter;
   ViewSpec get view => adapter.spec.views.firstWhere((v) => v.id == viewId);
@@ -65,6 +68,7 @@ class __LegacyMiniAppRuntimeState extends State<_LegacyMiniAppRuntime>
   }
 
   void connect() {
+    _request++;
     reconnectTimer?.cancel();
     subscription?.cancel();
     subscription = adapter.watch().listen(
@@ -76,10 +80,9 @@ class __LegacyMiniAppRuntimeState extends State<_LegacyMiniAppRuntime>
         }
       },
       onError: (Object e) {
+        _invalidate(e);
         if (mounted)
           setState(() {
-            error = e;
-            page = null;
             reconnecting = true;
           });
         reconnectTimer = Timer(const Duration(seconds: 5), () {
@@ -87,6 +90,7 @@ class __LegacyMiniAppRuntimeState extends State<_LegacyMiniAppRuntime>
         });
       },
       onDone: () {
+        _invalidate(StateError('The connection was interrupted.'));
         if (mounted) setState(() => reconnecting = true);
         reconnectTimer = Timer(const Duration(seconds: 5), () {
           if (mounted) connect();
@@ -103,6 +107,7 @@ class __LegacyMiniAppRuntimeState extends State<_LegacyMiniAppRuntime>
 
   @override
   void dispose() {
+    _dismissEditor();
     subscription?.cancel();
     refreshTimer?.cancel();
     reconnectTimer?.cancel();
@@ -116,49 +121,98 @@ class __LegacyMiniAppRuntimeState extends State<_LegacyMiniAppRuntime>
       return;
     }
     fetching = true;
+    final request = ++_request;
     try {
-      do {
-        dirty = false;
-        final col = adapter.spec.collection(view.collectionId);
-        final choice = col.fields
-            .where((f) => f.type == FieldType.choice)
-            .firstOrNull;
-        final result = await adapter.query(view.collectionId, {
-          'limit': 50,
-          'filters': [
-            if (search.isNotEmpty && view.titleFieldId != null)
-              {
-                'fieldId': view.titleFieldId,
-                'operator': 'contains',
-                'value': search,
-              },
-            if (filterChoice != null && choice != null)
-              {'fieldId': choice.id, 'operator': 'eq', 'value': filterChoice},
-          ],
-          if (next && page?.cursor != null) 'cursor': page!.cursor,
-        });
-        if (mounted)
-          setState(() {
-            page = result;
-            error = null;
-            loading = false;
-            reconnecting = false;
-          });
-      } while (dirty && mounted);
-    } catch (e) {
-      if (mounted)
+      dirty = false;
+      final col = adapter.spec.collection(view.collectionId);
+      final choice = col.fields
+          .where((f) => f.type == FieldType.choice)
+          .firstOrNull;
+      final configured = view.configured;
+      final configuredQuery = resolveViewQuery(adapter.spec, view);
+      final result = await adapter.query(view.collectionId, {
+        ...configuredQuery,
+        if (!configured) 'limit': 50,
+        'filters': [
+          ...configuredQuery['filters'] as List,
+          if (search.isNotEmpty && _searchAllowed)
+            {
+              'fieldId': view.titleFieldId,
+              'operator': 'contains',
+              'value': search,
+            },
+          if (!configured && filterChoice != null && choice != null)
+            {'fieldId': choice.id, 'operator': 'eq', 'value': filterChoice},
+          if (configured)
+            for (final entry in filterChoices.entries)
+              {'fieldId': entry.key, 'operator': 'eq', 'value': entry.value},
+        ],
+        if (next && page?.cursor != null) 'cursor': page!.cursor,
+      });
+      if (mounted && request == _request)
         setState(() {
-          error = e;
+          page = result;
+          error = null;
           loading = false;
-          page = null;
+          reconnecting = false;
         });
+    } catch (e) {
+      if (mounted && request == _request) _invalidate(e);
     } finally {
       fetching = false;
+      if (dirty && mounted) refresh();
+    }
+  }
+
+  bool get _searchAllowed {
+    if (view.type == 'summary' || view.titleFieldId == null) return false;
+    if (adapter.spec
+            .collection(view.collectionId)
+            .field(view.titleFieldId!)
+            .type !=
+        FieldType.text)
+      return false;
+    final filters = resolveViewQuery(adapter.spec, view)['filters'] as List;
+    return filters.length + (view.configured ? view.filterFieldIds.length : 1) <
+        Limits.filters;
+  }
+
+  void _dismissEditor() {
+    final route = _editorRoute;
+    _editorRoute = null;
+    if (route != null && route.isActive) route.navigator?.removeRoute(route);
+  }
+
+  void _invalidate(Object issue) {
+    _request++;
+    _accessGeneration++;
+    dirty = false;
+    _dismissEditor();
+    if (!mounted) return;
+    setState(() {
+      error = issue;
+      loading = false;
+      page = null;
+    });
+  }
+
+  Future<Map<String, dynamic>?> _actionDialog(WidgetBuilder builder) async {
+    try {
+      return await showDialog<Map<String, dynamic>>(
+        context: context,
+        builder: (dialogContext) {
+          _editorRoute = ModalRoute.of<Map<String, dynamic>>(dialogContext);
+          return builder(dialogContext);
+        },
+      );
+    } finally {
+      _editorRoute = null;
     }
   }
 
   Future<void> run(ActionSpec action, RuntimeItem? item) async {
     if (_pendingCommand != null || loading) return;
+    final accessGeneration = _accessGeneration;
     final edit = _VisualEditScope.of(context);
     if (edit != null) {
       edit.onSelect(MiniAppEditTarget(MiniAppEditKind.section, view.id));
@@ -168,21 +222,20 @@ class __LegacyMiniAppRuntimeState extends State<_LegacyMiniAppRuntime>
     final col = adapter.spec.collection(action.collectionId);
     if (action.capability == 'records.create.v1' ||
         action.capability == 'records.patch.v1') {
-      input = await showDialog<Map<String, dynamic>>(
-        context: context,
-        builder: (context) => RecordForm(
+      input = await _actionDialog(
+        (context) => RecordForm(
           collection: col,
           adapter: adapter,
           record: item,
           initial: item?.data,
+          fieldIds: view.type == 'form' ? view.fieldIds : const [],
           members: adapter.members,
           capacity: item?.capacity,
         ),
       );
     } else if (action.capability == 'capacity.configure.v1') {
-      input = await showDialog<Map<String, dynamic>>(
-        context: context,
-        builder: (context) => _ValueDialog(
+      input = await _actionDialog(
+        (context) => _ValueDialog(
           label: 'Capacity',
           initial: '${item?.capacity ?? 1}',
           numeric: true,
@@ -196,16 +249,15 @@ class __LegacyMiniAppRuntimeState extends State<_LegacyMiniAppRuntime>
       final values = action.capability == 'assignment.assign.v1'
           ? await adapter.members()
           : b.transitions[item?.data[b.fieldId]] ?? [];
-      if (!mounted) return;
-      input = await showDialog<Map<String, dynamic>>(
-        context: context,
-        builder: (context) =>
-            _ChoiceDialog(label: action.label, values: values),
+      if (!mounted || accessGeneration != _accessGeneration) return;
+      input = await _actionDialog(
+        (context) => _ChoiceDialog(label: action.label, values: values),
       );
     } else {
       input = {};
     }
-    if (input == null || !mounted) return;
+    if (input == null || !mounted || accessGeneration != _accessGeneration)
+      return;
     await _execute(_RuntimeCommand(action, item, input));
   }
 
@@ -306,8 +358,10 @@ class __LegacyMiniAppRuntimeState extends State<_LegacyMiniAppRuntime>
                   if (id != null)
                     setState(() {
                       viewId = id;
+                      _request++;
                       page = null;
                       filterChoice = null;
+                      filterChoices.clear();
                       search = '';
                     });
                   refresh();
@@ -321,7 +375,9 @@ class __LegacyMiniAppRuntimeState extends State<_LegacyMiniAppRuntime>
                   icon: const Icon(Icons.add),
                   label: Text(create.label),
                 ),
-              if (choice != null && _VisualEditScope.of(context) == null)
+              if (!view.configured &&
+                  choice != null &&
+                  _VisualEditScope.of(context) == null)
                 DropdownButton<String>(
                   hint: const Text('All statuses'),
                   value: filterChoice,
@@ -339,6 +395,32 @@ class __LegacyMiniAppRuntimeState extends State<_LegacyMiniAppRuntime>
                     refresh();
                   },
                 ),
+              if (view.configured && _VisualEditScope.of(context) == null)
+                for (final id in view.filterFieldIds)
+                  DropdownButton<String>(
+                    key: ValueKey('filter-${view.id}-$id'),
+                    hint: Text('All ${col.field(id).label.toLowerCase()}'),
+                    value: filterChoices[id] ?? '',
+                    items: [
+                      DropdownMenuItem(
+                        value: '',
+                        child: Text('All ${col.field(id).label.toLowerCase()}'),
+                      ),
+                      for (final value in col.field(id).choices)
+                        DropdownMenuItem(value: value, child: Text(value)),
+                    ],
+                    onChanged: (value) {
+                      setState(() {
+                        if (value == null || value.isEmpty)
+                          filterChoices.remove(id);
+                        else
+                          filterChoices[id] = value;
+                        page = null;
+                        _request++;
+                      });
+                      refresh();
+                    },
+                  ),
               IconButton(
                 tooltip: 'Refresh records',
                 onPressed: () => refresh(),
@@ -347,9 +429,7 @@ class __LegacyMiniAppRuntimeState extends State<_LegacyMiniAppRuntime>
             ],
           ),
         ),
-        if (_VisualEditScope.of(context) == null &&
-            view.titleFieldId != null &&
-            col.field(view.titleFieldId!).type == FieldType.text)
+        if (_VisualEditScope.of(context) == null && _searchAllowed)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: TextField(
@@ -359,6 +439,8 @@ class __LegacyMiniAppRuntimeState extends State<_LegacyMiniAppRuntime>
               ),
               onSubmitted: (v) {
                 search = v;
+                page = null;
+                _request++;
                 refresh();
               },
             ),

@@ -43,6 +43,8 @@ class _RecordEditorState extends State<_RecordEditor> {
   final _fieldKeys = <String, GlobalKey>{};
   final _focusNodes = <String, FocusNode>{};
   _RuntimeCommand? _pendingCommand;
+  RuntimeItem? _baseRecord;
+  bool _edited = false, _syncingInitial = false;
   final _capacity = TextEditingController();
   List<String> _members = [];
   bool _saving = false, _uploading = false, _retryingSave = false;
@@ -85,6 +87,7 @@ class _RecordEditorState extends State<_RecordEditor> {
   void initState() {
     super.initState();
     _pendingCommand = widget.pendingCommand;
+    _baseRecord = widget.record;
     if (_pendingCommand != null) {
       _error =
           'Save outcome unconfirmed. Your changes may already be saved. '
@@ -131,7 +134,35 @@ class _RecordEditorState extends State<_RecordEditor> {
     }
   }
 
-  void _dirty() => widget.onDirtyChanged(true);
+  @override
+  void didUpdateWidget(covariant _RecordEditor oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Values and their revision are one editing snapshot. A pristine form may
+    // adopt a refresh, but an edited or receipt-bound form keeps its base.
+    if (!_edited &&
+        !_saving &&
+        !_uploading &&
+        _pendingCommand == null &&
+        oldWidget.record?.revision != widget.record?.revision) {
+      _syncingInitial = true;
+      for (final field in fields) {
+        final value = widget.initial?[field.id];
+        _values[field.id] = value;
+        _controllers[field.id]!.text = value?.toString() ?? '';
+      }
+      _capacity.text = '${widget.capacity ?? 1}';
+      _baseRecord = widget.record;
+      _fieldErrors.clear();
+      _error = null;
+      _syncingInitial = false;
+    }
+  }
+
+  void _dirty() {
+    if (_syncingInitial) return;
+    _edited = true;
+    widget.onDirtyChanged(true);
+  }
 
   @override
   void dispose() {
@@ -239,7 +270,7 @@ class _RecordEditorState extends State<_RecordEditor> {
               .first;
         }
       }
-      _pendingCommand = _RuntimeCommand(widget.action, widget.record, {
+      _pendingCommand = _RuntimeCommand(widget.action, _baseRecord, {
         'data': data,
         if (hasCapacity) 'capacity': int.parse(_capacity.text.trim()),
       });
@@ -425,6 +456,7 @@ class _RecordEditorState extends State<_RecordEditor> {
     } else {
       result = switch (field.type) {
         FieldType.choice || FieldType.member => DropdownButtonFormField<String>(
+          key: ValueKey('choice-${field.id}-${_baseRecord?.revision}'),
           focusNode: _focusNodes[field.id],
           initialValue: _values[field.id] as String?,
           isExpanded: true,

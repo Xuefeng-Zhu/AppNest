@@ -552,6 +552,53 @@ void main() {
     }
   });
 
+  test('numeric control bounds stay inside the normalized field domain', () {
+    for (final control in ['slider', 'stepper']) {
+      for (final field in ['minutes', 'energy']) {
+        for (final bounds in [
+          {'min': 1e16, 'max': 2e16, 'step': 1},
+          {'min': -2e16, 'max': -1e16, 'step': 1},
+        ]) {
+          expect(
+            () => mutate(
+              habits,
+              'editor',
+              (v) => v['options'] = {
+                'controls': [
+                  {'fieldId': field, 'control': control, ...bounds},
+                ],
+              },
+            ),
+            invalid,
+          );
+        }
+      }
+    }
+    final valid = mutate(
+      habits,
+      'editor',
+      (v) => v['options'] = {
+        'controls': [
+          {
+            'fieldId': 'minutes',
+            'control': 'stepper',
+            'min': -1e15,
+            'max': 1e15,
+            'step': 1,
+          },
+          {
+            'fieldId': 'energy',
+            'control': 'stepper',
+            'min': 1.0,
+            'max': 5.0,
+            'step': 1.0,
+          },
+        ],
+      },
+    );
+    expect(AppSpec.parse(valid.canonical).canonical, valid.canonical);
+  });
+
   test(
     'multi-step forms partition editable fields without duplicates or holes',
     () {
