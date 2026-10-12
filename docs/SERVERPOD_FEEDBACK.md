@@ -8,7 +8,7 @@ cross-check adds current AppNest ownership notes where the
 It does not upgrade these observations to claims about newer Serverpod releases,
 submitted upstream issues or production behavior.
 
-The original report records one confirmed diagnostic issue, three enhancement requests, and two additional feedback candidates from the AI-app creation trial. Items 7–10 add a startup-state discrepancy, two scheduler enhancement requests and streaming documentation guidance from a fresh 2026-10-07 source review. Evidence comes from the installed 4.0.0 packages, official documentation, and AppNest's recorded local verification. Candidates distinguish source observations from runtime behavior still needing an isolated reproduction. This is a local feedback draft; no upstream issues have been submitted.
+The original report records one confirmed diagnostic issue, three enhancement requests, and two additional feedback candidates from the AI-app creation trial. Items 7–10 add a startup-state discrepancy, two scheduler enhancement requests and streaming documentation guidance from a fresh 2026-10-07 source review. Items 11–14 add a session-cleanup candidate and three development/deployment tooling requests reviewed on 2026-10-11. Evidence comes from the installed 4.0.0 packages, official documentation, and AppNest's recorded local verification. Candidates distinguish source observations from runtime behavior still needing an isolated reproduction. This is a local feedback draft; no upstream issues have been submitted.
 
 ## 1. Browser transport failures report a misleading response-code message
 
@@ -63,6 +63,12 @@ execution before a run's persisted `nextAttemptAt` retry deadline, through both
 direct scheduled execution and reconciliation. That is an AppNest execution-guard
 defect, separate from this framework API request. Persisting backoff alone does
 not establish that the application's execution path honors it.
+
+**2026-10-11 AppNest remediation:** retry eligibility is now checked again under
+the app lock, and both callers share generation-fenced failure/backoff handling.
+The [PostgreSQL regressions](../appnest_server/test/integration/planner_runtime_test.dart)
+pass for early wakeups, contention, rollback and exhaustion. This repairs the
+application defect without changing the framework enhancement request above.
 
 ## 3. Provide a supported query path for dynamic JSONB fields
 
@@ -134,6 +140,12 @@ session-close cleanup. This confirms an AppNest stream-lifecycle problem; it doe
 not establish that the historical WebSocket diagnostic has the same cause or
 that Serverpod's shutdown ordering is defective. A live transport cancellation
 test remains outstanding. See the [review reproduction and recommendation](ARCHITECTURE_REVIEW.md#4-p2--cancelling-an-idle-event-stream-does-not-stop-polling-promptly).
+
+**2026-10-11 AppNest remediation:** the endpoint now uses a cancellation-aware
+controller and a session-close hook. Its [controller regressions](../appnest_server/test/revision_events_test.dart)
+pass for idle/pending cancellation, pause/resume, closure and access failure.
+Actual WebSocket transport cleanup remains unverified; these application tests
+do not establish the cause of the historical framework diagnostic.
 
 ## 7. Make startup completion reflect completed initialization
 
@@ -235,6 +247,101 @@ cancellation API. AppNest's direct endpoint reproduction establishes its own
 loop defect, not a framework transport defect. A live transport cancellation
 reproduction remains outstanding.
 
+## 11. Guarantee session cleanup when a close listener throws
+
+**Classification: source-backed framework defect candidate; standalone runtime reproduction required. Reviewed 2026-10-11.**
+
+In installed `serverpod` 4.0.0, `Session.close()` marks the session closed, copies
+and clears its close listeners, then awaits each listener before entering the
+framework cleanup `try` block. If a listener throws, that control flow skips the
+remaining listeners, message-central listener removal and session-log
+finalization. A later `close()` returns immediately because the closed flag is
+already set.
+
+Source pointers in `lib/src/server/session.dart`:
+
+- Lines 203–210: set `_closed`, snapshot listeners and await callbacks.
+- Lines 213–227: framework cleanup and log finalization follow the callback loop.
+- Lines 23–34: public callback registration/removal API.
+
+**Requested improvement:** isolate errors from individual callbacks so later
+callbacks still run, and guarantee framework cleanup independently of callback
+success. Preserve and report the original errors. Add a regression with two
+listeners where the first throws; verify that the second runs and framework
+listeners/logs are finalized even if closure reports an error.
+
+**Validation boundary:** the control flow was independently read and checked
+against the pinned package. No standalone execution, live connection leak or
+failure in newer releases was reproduced. Application callbacks still own
+their cleanup; this request concerns the framework's behavior when one fails.
+
+## 12. Provide one diagnostic report for agent setup
+
+**Classification: CLI/MCP developer-experience enhancement request. Reviewed 2026-10-11.**
+
+The [MCP bridge documentation](https://docs.serverpod.dev/concepts/cli/commands/mcp-server)
+explains project auto-detection and explicit `--server-dir` selection. During
+AppNest work, the required Serverpod/Dart tools were unavailable in the agent
+environment, requiring a documented fallback. That observation does not establish
+a Serverpod connection bug.
+
+**Requested improvement:** provide a read-only preflight report showing the
+resolved server directory, CLI/package versions, development-runner state, MCP
+bridge reachability and configured companion apps. Each failed check should name
+the exact next action and distinguish an absent runner, wrong project selection,
+missing agent configuration and failed handshake. A machine-readable form would
+let agents explain the problem without guessing or starting a duplicate server.
+
+The report should redact credentials and leave process startup under the user's
+control. This requests clearer diagnostics around the supported bridge, not a
+replacement for configuring an agent environment correctly.
+
+## 13. Add a physical-phone connection preflight
+
+**Classification: development workflow enhancement request. Reviewed 2026-10-11.**
+
+The [endpoint connection guide](https://docs.serverpod.dev/concepts/working-with-endpoints/)
+already explains that physical phones need the development machine's network
+address, with `SERVER_URL` and `publicHost` configured accordingly. The
+[companion-app configuration](https://docs.serverpod.dev/concepts/server-fundamentals/running-your-server)
+also supports choosing a Flutter device. These capabilities exist; the request
+is to make their combined workflow easier to verify.
+
+**Requested improvement:** when a physical phone is selected, show the resolved
+API address and `publicHost`, warn about loopback addresses, offer an explicit
+LAN-address choice and a connectivity check, and explain any mismatch before
+launching the app. Apply configuration changes only after the developer chooses
+the address; multiple interfaces and VPNs make silent selection unreliable.
+
+AppNest still owns its share-link origin and build configuration. Apple signing,
+developer trust and device unlock prompts are outside this request. No new
+physical-device connectivity reproduction was performed for this addition.
+
+## 14. Validate custom Docker inputs before building
+
+**Classification: custom-hosting tooling enhancement request. Reviewed 2026-10-11.**
+
+The [custom-hosting guide](https://docs.serverpod.dev/deployments/custom-hosting/hosting-elsewhere)
+documents the generated Dockerfile and repository-root build context. Serverpod
+Cloud already [includes workspace packages](https://docs.serverpod.dev/cloud/reference/private-dependencies)
+in its deployment package; this request targets validation of customized Docker
+builds rather than a claim that workspace deployment is unsupported.
+
+AppNest's audit found its Docker SDK below the application's declared minimum,
+a missing shared-package path dependency, and build-context inputs needing
+explicit secret exclusions. Those were application configuration problems and
+were repaired locally; they are not established framework-template defects.
+
+**Requested improvement:** add a pre-build check that compares Docker SDK inputs
+with package constraints, verifies required workspace/path dependencies enter
+the context, and warns when local password/environment/database files could be
+copied. Report actionable file paths without printing secret values. Include a
+small custom-workspace example and a safe context manifest developers can review.
+
+The developer remains responsible for customized Dockerfiles and runtime secret
+delivery. AppNest's equivalent minimal workspace compiled locally; a Linux Docker
+image/runtime check remains unverified because no Docker daemon was available.
+
 ## Findings outside Serverpod's ownership
 
 The AI trial's malformed responses, prompt context, semantic validation, unreachable generated actions, and missing action-label publication diffs were AppNest/provider issues. They are not evidence of Serverpod defects. Unavailable Serverpod/Dart MCP tools were an environment limitation, not a demonstrated framework failure.
@@ -243,8 +350,9 @@ The AI trial's malformed responses, prompt context, semantic validation, unreach
 
 Generated Dart endpoints and clients, embedded PostgreSQL, explicit transactions and row locks, and the integration-test harness fit this application well. AppNest's [recorded verification](VERIFICATION.md) includes real database persistence, a 20-participant capacity race, and a two-process restart check. The [feature map](SERVERPOD_FEATURE_MAP.md) connects these capabilities to product behavior.
 
-Those are historical local results. The explicitly dated architecture-review
-reproductions are the only newer test evidence referenced here. Items 7–10 were
+The original results remain historical. The 2026-10-11 remediation notes point
+to application regression coverage, not proof of framework transport behavior.
+Items 7–10 were
 cross-checked against installed 4.0.0 source and current official documentation;
 no new tests or development-server starts were performed for those additions.
 This report makes
@@ -252,3 +360,7 @@ no throughput, production-readiness, or multi-instance deployment claim. Item 1
 has direct framework diagnostic evidence; items 2–4 request APIs and examples
 around supported behavior; items 5–7 retain their stated runtime validation gaps;
 items 8–10 request scheduler capabilities and documentation.
+Items 11–14 were added from a 2026-10-11 pinned-source and official-documentation
+review. Item 11 needs a standalone runtime reproduction; items 12–14 are tooling
+requests. No new framework tests, development-server starts, deployments or
+upstream submissions were performed for these additions.
