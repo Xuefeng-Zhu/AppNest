@@ -8,11 +8,11 @@ cross-check adds current AppNest ownership notes where the
 It does not upgrade these observations to claims about newer Serverpod releases,
 submitted upstream issues or production behavior.
 
-The original report records one confirmed diagnostic issue, three enhancement requests, and two additional feedback candidates from the AI-app creation trial. Items 7–10 add a startup-state discrepancy, two scheduler enhancement requests and streaming documentation guidance from a fresh 2026-10-07 source review. Items 11–14 add a session-cleanup candidate and three development/deployment tooling requests reviewed on 2026-10-11. Item 15 records the project owner's feedback about manual startup friction. Evidence comes from the installed 4.0.0 packages, official documentation, and AppNest's recorded local verification. Candidates distinguish source observations from runtime behavior still needing an isolated reproduction. This is a local feedback draft; no upstream issues have been submitted.
+The original report records one confirmed diagnostic issue, three enhancement requests, and two additional feedback candidates from the AI-app creation trial. Items 7–10 add a startup-state discrepancy, two scheduler enhancement requests and streaming documentation guidance from a fresh 2026-10-07 source review. Items 11–14 add a session-cleanup candidate and three development/deployment tooling requests reviewed on 2026-10-11. Item 15 records the project owner's feedback about manual startup friction. Items 16–17 request clearer preview freshness and restart guidance, reviewed on 2026-10-12. Evidence comes from the installed 4.0.0 packages, official documentation, and AppNest's recorded local verification. Candidates distinguish source observations from runtime behavior still needing an isolated reproduction. This is a local feedback draft; no upstream issues have been submitted.
 
 ## Feedback categories
 
-All 15 items are grouped below by their primary request type. These categories
+All 17 items are grouped below by their primary request type. These categories
 describe the evidence and requested response; they do not assign severity or
 turn enhancement requests into confirmed bugs. Individual items retain their
 version, reproduction and ownership boundaries.
@@ -23,7 +23,7 @@ version, reproduction and ownership boundaries.
 | Candidates requiring isolated validation | [5](#5-clarify-defaulted-endpoint-parameters-and-generated-api-compatibility), [6](#6-classify-expected-websocket-close-races-more-quietly), [7](#7-make-startup-completion-reflect-completed-initialization), [11](#11-guarantee-session-cleanup-when-a-close-listener-throws) | Preserve observed/source-backed behavior and add focused reproductions. Item 7's source discrepancy is confirmed; its runtime/probe impact is unverified. |
 | API and scalability enhancements | [2](#2-allow-future-calls-to-be-enqueued-in-a-business-transaction), [3](#3-provide-a-supported-query-path-for-dynamic-jsonb-fields), [8](#8-isolate-future-call-workload-concurrency), [9](#9-bound-due-call-acquisition-before-queuing-the-backlog) | Request transaction-aware scheduling, supported dynamic queries, workload isolation and bounded acquisition; no measured capacity failure is claimed. |
 | Documentation and examples | [4](#4-make-committed-concurrency-tests-easier-to-discover), [10](#10-show-cancellation-safe-idle-polling-in-streaming-examples) | Demonstrate committed concurrency and cancellation-safe polling using existing APIs. |
-| Development and deployment tooling | [12](#12-provide-one-diagnostic-report-for-agent-setup), [13](#13-add-a-physical-phone-connection-preflight), [14](#14-validate-custom-docker-inputs-before-building), [15](#15-reduce-manual-development-server-startup-friction) | Request agent diagnostics, phone connection checks, custom Docker validation and opt-in startup automation; environment/application configuration remains separately owned. |
+| Development and deployment tooling | [12](#12-provide-one-diagnostic-report-for-agent-setup), [13](#13-add-a-physical-phone-connection-preflight), [14](#14-validate-custom-docker-inputs-before-building), [15](#15-reduce-manual-development-server-startup-friction), [16](#16-make-preview-freshness-visible), [17](#17-reduce-restart-ambiguity) | Request agent diagnostics, phone connection checks, custom Docker validation, opt-in startup automation, preview freshness and restart guidance; environment/application configuration remains separately owned. |
 
 ## Subsystem index
 
@@ -38,7 +38,7 @@ Some requests also improve documentation or diagnostics in another subsystem.
 | Database query API | [3](#3-provide-a-supported-query-path-for-dynamic-jsonb-fields) | Supported queries and projections for dynamic JSONB data. |
 | Code generation and API compatibility | [5](#5-clarify-defaulted-endpoint-parameters-and-generated-api-compatibility) | Endpoint defaults and generated/wire optionality. |
 | Integration testing | [4](#4-make-committed-concurrency-tests-easier-to-discover) | Independent committed-transaction race examples. |
-| CLI, MCP and Flutter development | [12](#12-provide-one-diagnostic-report-for-agent-setup), [13](#13-add-a-physical-phone-connection-preflight), [15](#15-reduce-manual-development-server-startup-friction) | Agent setup diagnostics, physical-phone connections and opt-in startup automation. |
+| CLI, MCP and Flutter development | [12](#12-provide-one-diagnostic-report-for-agent-setup), [13](#13-add-a-physical-phone-connection-preflight), [15](#15-reduce-manual-development-server-startup-friction), [16](#16-make-preview-freshness-visible), [17](#17-reduce-restart-ambiguity) | Agent setup diagnostics, physical-phone connections, opt-in startup automation, preview freshness and required restart actions. |
 | Custom hosting and build tooling | [14](#14-validate-custom-docker-inputs-before-building) | Docker SDK, dependency-context and secret-exclusion checks. |
 
 ## 1. Browser transport failures report a misleading response-code message
@@ -405,6 +405,63 @@ AppNest's current user-startup instruction is a project workflow policy, not
 proof of a universal Serverpod restriction. This addition records feedback; it
 does not change that policy or start a development process.
 
+## 16. Make preview freshness visible
+
+**Classification: development workflow enhancement request. Reviewed 2026-10-12.**
+
+AppNest's [development guide](DEVELOPMENT.md#ports-storage-and-lifecycle) documents
+two distinct web paths: a companion Flutter development app and the last built
+release bundle served on port 8182. Dart edits do not update that release bundle
+until it is rebuilt. A developer can therefore open a working page while viewing
+an older build than the source they just changed.
+
+The [Serverpod runner documentation](https://docs.serverpod.dev/concepts/server-fundamentals/running-your-server)
+already describes Flutter hot reload, static-file browser refresh and companion
+app selection. The request is to make the relationship between the active
+preview and those update mechanisms easier to inspect.
+Here, preview means the development frontend, not AppNest's isolated mini-app
+preview adapter.
+
+**Requested improvement:** show each preview's URL, launch mode, watched status
+and last successful reload or build, including pending or failed update actions,
+in the development runner and MCP status.
+Offer an action to open the running development app and clearly indicate when
+a configured static bundle needs rebuilding. For custom build paths, allow
+projects to supply build metadata; show unknown freshness when it cannot be
+established rather than implying the page reflects current source.
+
+AppNest owns its release-bundle path and rebuild command. No isolated Serverpod
+stale-page defect was reproduced; this requests visibility around development
+and static preview modes, not automatic compilation of arbitrary custom assets.
+
+## 17. Reduce restart ambiguity
+
+**Classification: CLI/MCP and Flutter development enhancement request. Reviewed 2026-10-12.**
+
+The [Serverpod 4.0.0 runner guide](https://docs.serverpod.dev/concepts/server-fundamentals/running-your-server)
+documents that `config/` changes are not watched and require pressing R. In
+watch mode, R performs a hot restart for changes that cannot be hot reloaded,
+such as startup-only code. A running companion Flutter app also retains its
+previous launch settings until restarted from the launch panel.
+
+These rules leave the developer or agent to determine whether a saved change
+is active, needs a restart, or requires relaunching the selected app. The
+[AppNest troubleshooting guide](DEVELOPMENT.md#troubleshooting) consequently
+includes separate hot-restart and static-rebuild checks when changes do not
+appear.
+
+**Requested improvement:** surface pending configuration or companion-app
+setting changes with a clear reason and the required action: server restart,
+Flutter hot restart, or app relaunch. Expose the same status through MCP so an
+agent can choose the appropriate existing operation. Provide the action next
+to the warning and confirm when the affected process has loaded the new
+settings. Explain reload failures and fallback restarts in the same status
+view; do not claim to detect every startup-only code change automatically.
+
+This is guidance and state visibility around documented behavior. No new
+hot-reload failure was reproduced, and the request does not change migration
+approval or imply that every file should trigger an automatic restart.
+
 ## Findings outside Serverpod's ownership
 
 The AI trial's malformed responses, prompt context, semantic validation, unreachable generated actions, and missing action-label publication diffs were AppNest/provider issues. They are not evidence of Serverpod defects. Unavailable Serverpod/Dart MCP tools were an environment limitation, not a demonstrated framework failure.
@@ -429,3 +486,6 @@ requests. No new framework tests, development-server starts, deployments or
 upstream submissions were performed for these additions.
 Item 15 records direct user feedback and an opt-in workflow request. No startup
 automation was implemented or exercised for that addition.
+Items 16–17 were added from the development guide and official 4.0.0 runner
+documentation on 2026-10-12. They request preview and restart visibility; no new
+framework tests, server starts or runtime defect reproductions were performed.
