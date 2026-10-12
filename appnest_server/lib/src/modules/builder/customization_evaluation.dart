@@ -200,13 +200,18 @@ void _validateCreate(String id, AppSpec spec) {
     if (id == 'notes-fields') {
       _require(
         records.any(
-          (v) => v.titleFieldId != null && v.filterFieldIds.isNotEmpty,
+          (v) =>
+              {'list', 'table', 'checklist'}.contains(v.type) &&
+              v.titleFieldId != null &&
+              collection.field(v.titleFieldId!).type == FieldType.text &&
+              (resolveViewQuery(spec, v)['filters'] as List).length +
+                      v.filterFieldIds.length <
+                  Limits.filters,
         ),
         'On a reachable record view such as ${records.first.id}, set '
-        'titleFieldId:${jsonEncode(titles.first)} and '
-        'filterFieldIds:${jsonEncode([category.id])}. '
-        'The search control requires BOTH view.titleFieldId referencing the '
-        'existing text title and view.filterFieldIds:[EXISTING_CATEGORY_FIELD_ID]. '
+        'titleFieldId:${jsonEncode(titles.first)} on a list, table, or checklist. '
+        'Text search uses the existing text title; choice filters are optional. '
+        'Leave one filter slot available for text search. '
         'Include views.configured.v1 in requires; do not create another title or category field.',
       );
       _require(

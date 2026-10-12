@@ -165,30 +165,19 @@ class Worker {
           )
         : <AutomationRun>[];
     for (final run in runs) {
-      if (!run.dueAt.isAfter(clock())) {
+      final eligibleAt = run.nextAttemptAt.isAfter(run.dueAt)
+          ? run.nextAttemptAt
+          : run.dueAt;
+      if (!eligibleAt.isAfter(clock())) {
         try {
           await execute(s, run.id!);
         } catch (_) {
-          run.attempts++;
-          run.status = run.attempts >= 5 ? 'failed' : 'pending';
-          run.errorCategory = 'retryableFailure';
-          run.nextAttemptAt = clock().add(Duration(seconds: 1 << run.attempts));
-          await s.db.unsafeExecute(
-            'UPDATE nest_run SET attempts=@attempts,status=@status,"errorCategory"=@error,"nextAttemptAt"=@next WHERE id=@id AND status=\'pending\' AND "leaseGeneration"=@lease',
-            parameters: QueryParameters.named({
-              'attempts': run.attempts,
-              'status': run.status,
-              'error': 'retryableFailure',
-              'next': run.nextAttemptAt,
-              'id': run.id,
-              'lease': run.leaseGeneration,
-            }),
-          );
-          s.log('run_retry run_id=${run.id} attempt=${run.attempts}');
+          // execute persists backoff for every caller after rollback. A stale
+          // reconciler snapshot must not advance the retry budget a second time.
         }
       } else {
         await s.serverpod.futureCalls
-            .callAtTime(run.dueAt, identifier: 'run-${run.id}')
+            .callAtTime(eligibleAt, identifier: 'run-${run.id}')
             .nestWorker
             .execute(run.id!);
       }
@@ -276,144 +265,205 @@ class Worker {
     e.planned = true;
     await OutboxEvent.db.updateRow(s, e, transaction: tx);
   });
-  static Future<void> execute(Session s, int runId) => s.db.transaction((
-    tx,
-  ) async {
-    if (!remindersEnabled(s)) return;
-    var run = await AutomationRun.db.findById(s, runId, transaction: tx);
-    if (run == null || run.status != 'pending' || run.dueAt.isAfter(clock())) {
-      return;
+  static bool _runEligible(AutomationRun run) =>
+      run.status == 'pending' &&
+      !run.dueAt.isAfter(clock()) &&
+      !run.nextAttemptAt.isAfter(clock());
+
+  static Future<void> execute(Session s, int runId) async {
+    int? claimedGeneration;
+    try {
+      await s.db.transaction((tx) async {
+        if (!remindersEnabled(s)) return;
+        var run = await AutomationRun.db.findById(s, runId, transaction: tx);
+        if (run == null || !_runEligible(run)) {
+          return;
+        }
+        final app = await MiniApp.db.findFirstRow(
+          s,
+          where: (t) => t.id.equals(run!.appId),
+          transaction: tx,
+          lockMode: LockMode.forUpdate,
+        );
+        if (app == null) return;
+        run = await AutomationRun.db.findById(s, runId, transaction: tx);
+        if (run == null || !_runEligible(run)) return;
+        claimedGeneration = run.leaseGeneration;
+        run.leaseGeneration++;
+        run.attempts++;
+        run.leaseUntil = clock().add(const Duration(seconds: 30));
+        final rule = await Automation.db.findById(
+              s,
+              run.automationId,
+              transaction: tx,
+            ),
+            record = await EntityRecord.db.findById(
+              s,
+              run.recordId,
+              transaction: tx,
+            );
+        var suppress =
+            app.archived ||
+            rule == null ||
+            !rule.enabled ||
+            rule.appId != app.id ||
+            record == null ||
+            record.deleted ||
+            record.appId != app.id;
+        final recipients = <String>{};
+        if (!suppress) {
+          final definition = AutomationSpec.fromJson(
+                payload(jsonDecode(rule.ruleJson)),
+              ),
+              date = payload(record.data)[definition.fieldId];
+          final due = date == null
+              ? null
+              : DateTime.parse(
+                  date as String,
+                ).subtract(Duration(seconds: definition.offsetSeconds));
+          suppress =
+              scheduleSignature(rule, date as String?, due) !=
+                  run.scheduleSignature ||
+              !conditionMatches(definition, payload(record.data)) ||
+              !await hasAccess(
+                s,
+                app,
+                rule.executionActorId,
+                tx,
+                builder: true,
+              );
+          if (!suppress) {
+            if (definition.effect == 'notifyOwner') {
+              // Owner identity is trusted app state, never a generated actor ID.
+              if (await hasAccess(s, app, app.ownerId, tx)) {
+                recipients.add(app.ownerId);
+              } else {
+                suppress = true;
+              }
+            } else if (definition.effect == 'notifyActiveClaimants') {
+              final pools = await ResourcePool.db.find(
+                s,
+                where: (t) =>
+                    t.appId.equals(app.id!) & t.recordId.equals(record.id!),
+                transaction: tx,
+              );
+              for (final pool in pools) {
+                final claims = await Claim.db.find(
+                  s,
+                  where: (t) =>
+                      t.poolId.equals(pool.id!) & t.active.equals(true),
+                  limit: Limits.notificationFanout + 1,
+                  transaction: tx,
+                );
+                if (claims.length > Limits.notificationFanout) {
+                  fail(
+                    'quotaExceeded',
+                    'Reminder fan-out exceeds the configured limit.',
+                  );
+                }
+                recipients.addAll(claims.map((c) => c.actorId));
+              }
+            } else {
+              final version = await AppVersion.db.findById(
+                    s,
+                    app.activeVersionId!,
+                    transaction: tx,
+                  ),
+                  spec = AppSpec.parse(version!.specJson),
+                  col = spec.collection(record.collectionId);
+              for (final b in col.behaviors.where(
+                (b) => b.type == 'assignment.v1',
+              )) {
+                final id = payload(record.data)[b.fieldId];
+                if (id is String) recipients.add(id);
+              }
+            }
+          }
+        }
+        if (recipients.length > Limits.notificationFanout) {
+          fail(
+            'quotaExceeded',
+            'Reminder fan-out exceeds the configured limit.',
+          );
+        }
+        if (!suppress) {
+          for (final id in recipients) {
+            if (!await hasAccess(s, app, id, tx)) continue;
+            final key = hashJson({
+              'occurrence': run.occurrenceKey,
+              'actor': id,
+            });
+            if (await Notification.db.findFirstRow(
+                  s,
+                  where: (t) => t.deliveryKey.equals(key),
+                  transaction: tx,
+                ) ==
+                null) {
+              await Notification.db.insertRow(
+                s,
+                Notification(
+                  appId: app.id!,
+                  workspaceId: app.workspaceId,
+                  actorId: id,
+                  runId: run.id!,
+                  deliveryKey: key,
+                  title: 'A reminder from ${app.name}',
+                  body: 'An upcoming item needs your attention. Open the app for current details.',
+                  createdAt: clock(),
+                ),
+                transaction: tx,
+              );
+            }
+          }
+        }
+        run.status = suppress ? 'suppressed' : 'succeeded';
+        run.completedAt = clock();
+        run.leaseUntil = null;
+        await AutomationRun.db.updateRow(s, run, transaction: tx);
+        s.log(
+          'run_complete run_id=$runId status=${run.status} lag_seconds=${clock().difference(run.dueAt).inSeconds}',
+        );
+      });
+    } catch (error, stack) {
+      if (claimedGeneration != null) {
+        await _recordRunFailure(s, runId, claimedGeneration!);
+      }
+      Error.throwWithStackTrace(error, stack);
     }
+  }
+
+  /// Failed effects roll back before this transaction. The same app lock and
+  /// generation fence prevent duplicate/stale wakeups from recording a second
+  /// failure, changing a terminal outcome, or shortening another retry deadline.
+  static Future<void> _recordRunFailure(
+    Session s,
+    int runId,
+    int generation,
+  ) => s.db.transaction((tx) async {
+    var run = await AutomationRun.db.findById(s, runId, transaction: tx);
+    if (run == null) return;
     final app = await MiniApp.db.findFirstRow(
       s,
       where: (t) => t.id.equals(run!.appId),
-      transaction: tx,
       lockMode: LockMode.forUpdate,
+      transaction: tx,
     );
     if (app == null) return;
     run = await AutomationRun.db.findById(s, runId, transaction: tx);
-    if (run == null || run.status != 'pending') return;
-    run.leaseGeneration++;
+    if (run == null ||
+        run.leaseGeneration != generation ||
+        !_runEligible(run)) {
+      return;
+    }
     run.attempts++;
-    run.leaseUntil = clock().add(const Duration(seconds: 30));
-    final rule = await Automation.db.findById(
-          s,
-          run.automationId,
-          transaction: tx,
-        ),
-        record = await EntityRecord.db.findById(
-          s,
-          run.recordId,
-          transaction: tx,
-        );
-    var suppress =
-        app.archived ||
-        rule == null ||
-        !rule.enabled ||
-        rule.appId != app.id ||
-        record == null ||
-        record.deleted ||
-        record.appId != app.id;
-    final recipients = <String>{};
-    if (!suppress) {
-      final definition = AutomationSpec.fromJson(
-            payload(jsonDecode(rule.ruleJson)),
-          ),
-          date = payload(record.data)[definition.fieldId];
-      final due = date == null
-          ? null
-          : DateTime.parse(
-              date as String,
-            ).subtract(Duration(seconds: definition.offsetSeconds));
-      suppress =
-          scheduleSignature(rule, date as String?, due) !=
-              run.scheduleSignature ||
-          !conditionMatches(definition, payload(record.data)) ||
-          !await hasAccess(s, app, rule.executionActorId, tx, builder: true);
-      if (!suppress) {
-        if (definition.effect == 'notifyOwner') {
-          // Owner identity is trusted app state, never a generated actor ID.
-          if (await hasAccess(s, app, app.ownerId, tx)) {
-            recipients.add(app.ownerId);
-          } else {
-            suppress = true;
-          }
-        } else if (definition.effect == 'notifyActiveClaimants') {
-          final pools = await ResourcePool.db.find(
-            s,
-            where: (t) =>
-                t.appId.equals(app.id!) & t.recordId.equals(record.id!),
-            transaction: tx,
-          );
-          for (final pool in pools) {
-            final claims = await Claim.db.find(
-              s,
-              where: (t) => t.poolId.equals(pool.id!) & t.active.equals(true),
-              limit: Limits.notificationFanout + 1,
-              transaction: tx,
-            );
-            if (claims.length > Limits.notificationFanout) {
-              fail(
-                'quotaExceeded',
-                'Reminder fan-out exceeds the configured limit.',
-              );
-            }
-            recipients.addAll(claims.map((c) => c.actorId));
-          }
-        } else {
-          final version = await AppVersion.db.findById(
-                s,
-                app.activeVersionId!,
-                transaction: tx,
-              ),
-              spec = AppSpec.parse(version!.specJson),
-              col = spec.collection(record.collectionId);
-          for (final b in col.behaviors.where(
-            (b) => b.type == 'assignment.v1',
-          )) {
-            final id = payload(record.data)[b.fieldId];
-            if (id is String) recipients.add(id);
-          }
-        }
-      }
-    }
-    if (recipients.length > Limits.notificationFanout) {
-      fail('quotaExceeded', 'Reminder fan-out exceeds the configured limit.');
-    }
-    if (!suppress) {
-      for (final id in recipients) {
-        if (!await hasAccess(s, app, id, tx)) continue;
-        final key = hashJson({'occurrence': run.occurrenceKey, 'actor': id});
-        if (await Notification.db.findFirstRow(
-              s,
-              where: (t) => t.deliveryKey.equals(key),
-              transaction: tx,
-            ) ==
-            null) {
-          await Notification.db.insertRow(
-            s,
-            Notification(
-              appId: app.id!,
-              workspaceId: app.workspaceId,
-              actorId: id,
-              runId: run.id!,
-              deliveryKey: key,
-              title: 'A reminder from ${app.name}',
-              body: 'An upcoming item needs your attention. Open the app for current details.',
-              createdAt: clock(),
-            ),
-            transaction: tx,
-          );
-        }
-      }
-    }
-    run.status = suppress ? 'suppressed' : 'succeeded';
-    run.completedAt = clock();
+    run.leaseGeneration++;
+    run.status = run.attempts >= 5 ? 'failed' : 'pending';
+    run.errorCategory = 'retryableFailure';
     run.leaseUntil = null;
+    run.nextAttemptAt = clock().add(Duration(seconds: 1 << run.attempts));
+    if (run.status == 'failed') run.completedAt = clock();
     await AutomationRun.db.updateRow(s, run, transaction: tx);
-    s.log(
-      'run_complete run_id=$runId status=${run.status} lag_seconds=${clock().difference(run.dueAt).inSeconds}',
-    );
+    s.log('run_retry run_id=$runId attempt=${run.attempts}');
   });
   static const _repairUsageKey = '_appnestRepair';
   static const _failureUsageKey = '_appnestFailureCategory';

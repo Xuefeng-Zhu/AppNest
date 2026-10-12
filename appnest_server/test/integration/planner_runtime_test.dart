@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:appnest_spec/appnest_spec.dart';
@@ -291,6 +292,156 @@ void main() {
         'Saved through the trusted action service',
       );
       expect((await reminder(id)).state, 'delivered');
+    });
+
+    test('direct wakeups and reconciliation respect retry deadlines', () async {
+      await approve();
+      final id = await create(
+        reminder: now.subtract(const Duration(seconds: 1)),
+      );
+      await plan();
+      final run = (await runs()).single;
+      run.attempts = 3;
+      run.nextAttemptAt = now.add(const Duration(seconds: 32));
+      await AutomationRun.db.updateRow(owner, run);
+
+      await NestWorkerFutureCall().execute(owner, run.id!);
+      await Worker.drain(owner);
+      final deferred = (await runs()).single;
+      expect(deferred.status, 'pending');
+      expect(deferred.attempts, 3);
+      expect(deferred.leaseGeneration, run.leaseGeneration);
+      expect(await Sharing.inbox(owner), isEmpty);
+
+      now = run.nextAttemptAt;
+      await Worker.drain(owner);
+      await NestWorkerFutureCall().execute(owner, run.id!);
+      expect((await runs()).single.status, 'succeeded');
+      expect((await runs()).single.attempts, 4);
+      expect((await Sharing.inbox(owner)).single.recordId, id);
+    });
+
+    test('failed direct wakeups persist the same bounded backoff as reconciliation', () async {
+      await approve();
+      await create(reminder: now.subtract(const Duration(seconds: 1)));
+      await plan();
+      final run = (await runs()).single;
+      final rule = (await Automation.db.findById(owner, run.automationId))!;
+      final validRule = rule.ruleJson;
+      rule.ruleJson = 'not valid JSON';
+      await Automation.db.updateRow(owner, rule);
+
+      await expectLater(
+        NestWorkerFutureCall().execute(owner, run.id!),
+        throwsFormatException,
+      );
+      var failed = (await runs()).single;
+      expect(failed.status, 'pending');
+      expect(failed.attempts, 1);
+      expect(failed.leaseGeneration, 1);
+      expect(failed.nextAttemptAt, now.add(const Duration(seconds: 2)));
+      expect(failed.errorCategory, 'retryableFailure');
+      expect(await Sharing.inbox(owner), isEmpty);
+
+      await Worker.drain(owner);
+      await NestWorkerFutureCall().execute(owner, run.id!);
+      expect((await runs()).single.attempts, 1);
+
+      // A reconciler failure advances the same persisted budget exactly once.
+      now = failed.nextAttemptAt;
+      await Worker.drain(owner);
+      failed = (await runs()).single;
+      expect(failed.attempts, 2);
+      expect(failed.leaseGeneration, 2);
+      expect(failed.nextAttemptAt, now.add(const Duration(seconds: 4)));
+
+      rule.ruleJson = validRule;
+      await Automation.db.updateRow(owner, rule);
+      now = failed.nextAttemptAt;
+      await NestWorkerFutureCall().execute(owner, run.id!);
+      expect((await runs()).single.status, 'succeeded');
+      expect((await runs()).single.attempts, 3);
+      expect(await Sharing.inbox(owner), hasLength(1));
+    });
+
+    test(
+      'a retry deadline committed while waiting for the app lock is rechecked',
+      () async {
+        await approve();
+        await create(reminder: now.subtract(const Duration(seconds: 1)));
+        await plan();
+        final run = (await runs()).single;
+        final locked = Completer<void>();
+        final release = Completer<void>();
+        final holder = user(actor(owner));
+        final waiting = user(actor(owner));
+        final blocker = holder.db.transaction((tx) async {
+          await MiniApp.db.findFirstRow(
+            holder,
+            where: (t) => t.id.equals(appId),
+            transaction: tx,
+            lockMode: LockMode.forUpdate,
+          );
+          locked.complete();
+          await release.future;
+          run.nextAttemptAt = now.add(const Duration(seconds: 32));
+          await AutomationRun.db.updateRow(holder, run, transaction: tx);
+        });
+        await locked.future;
+        final execution = Worker.execute(waiting, run.id!);
+        try {
+          var isWaiting = false;
+          for (var i = 0; i < 100; i++) {
+            final locks = await owner.db.unsafeQuery(
+              "SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock' AND query LIKE '%nest_app%'",
+            );
+            if ((locks.single.single as int) > 0) {
+              isWaiting = true;
+              break;
+            }
+            await Future<void>.delayed(const Duration(milliseconds: 10));
+          }
+          expect(
+            isWaiting,
+            isTrue,
+            reason: 'The worker must have read the old run and reached the contended app lock.',
+          );
+        } finally {
+          release.complete();
+          await blocker;
+          await execution;
+        }
+        expect((await runs()).single.status, 'pending');
+        expect((await runs()).single.attempts, 0);
+        expect(await Sharing.inbox(owner), isEmpty);
+      },
+    );
+
+    test('five direct effect failures exhaust one occurrence without extra deliveries', () async {
+      await approve();
+      await create(reminder: now.subtract(const Duration(seconds: 1)));
+      await plan();
+      final run = (await runs()).single;
+      final rule = (await Automation.db.findById(owner, run.automationId))!;
+      rule.ruleJson = 'not valid JSON';
+      await Automation.db.updateRow(owner, rule);
+      for (var attempt = 1; attempt <= 5; attempt++) {
+        await expectLater(
+          Worker.execute(owner, run.id!),
+          throwsFormatException,
+        );
+        final failed = (await runs()).single;
+        expect(failed.attempts, attempt);
+        expect(failed.status, attempt == 5 ? 'failed' : 'pending');
+        now = failed.nextAttemptAt;
+      }
+      await Worker.execute(owner, run.id!);
+      await Worker.drain(owner);
+      final terminal = (await runs()).single;
+      expect(terminal.attempts, 5);
+      expect(terminal.completedAt, isNotNull);
+      expect(terminal.leaseUntil, isNull);
+      expect(await Sharing.inbox(owner), isEmpty);
     });
 
     test('database-wide choice summaries, exclusive day bounds, null dates and authorization', () async {

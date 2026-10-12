@@ -112,7 +112,9 @@ class Commands {
               'Someone changed this record. Refresh to review their changes.',
             );
           }
-          final data = payload(row.data);
+          final previousData = payload(row.data);
+          final data = {...previousData};
+          String? assignedField;
           if (action.capability == 'records.patch.v1') {
             keys(input, {'data'}, 'patch input');
             final patch = payload(input['data']);
@@ -132,6 +134,9 @@ class Commands {
           } else {
             keys(input, {'value'}, 'action input');
             final behavior = col.behavior(action.behaviorId!);
+            if (action.capability == 'assignment.assign.v1') {
+              assignedField = behavior.fieldId;
+            }
             if (action.capability == 'workflow.transition.v1' &&
                 !(behavior.transitions[data[behavior.fieldId]] ?? []).contains(
                   input['value'],
@@ -141,7 +146,15 @@ class Commands {
             data[behavior.fieldId!] = input['value'];
           }
           row.data = col.normalizeRecord(data);
-          await _members(s, a, col, payload(row.data), tx);
+          await _members(
+            s,
+            a,
+            col,
+            payload(row.data),
+            tx,
+            previousData: previousData,
+            assignedField: assignedField,
+          );
           row.revision++;
           row.updatedAt = clock();
           row.writtenUnderVersionId = a.app.activeVersionId!;
@@ -264,12 +277,18 @@ class Commands {
     Access a,
     CollectionSpec col,
     Map<String, dynamic> data,
-    Transaction tx,
-  ) async {
+    Transaction tx, {
+    Map<String, dynamic>? previousData,
+    String? assignedField,
+  }) async {
     for (final field in col.fields.where(
       (f) => f.type == FieldType.member && data[f.id] != null,
     )) {
       final id = data[field.id] as String;
+      // Existing references are historical data, not authority. Preserve them
+      // on unrelated edits after revocation, but require current membership
+      // for creates, changed references, and explicit assignment actions.
+      if (field.id != assignedField && previousData?[field.id] == id) continue;
       if (id == a.app.ownerId) continue;
       final grant = await MiniAppGrant.db.findFirstRow(
         s,

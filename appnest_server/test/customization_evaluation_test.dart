@@ -70,9 +70,23 @@ void main() {
 
   test('notes require category, usable search and multiline note editing', () {
     final original = bases['notes-fields']!;
-    final noSearch = _change(original, (json) {
+    final noFilters = _change(original, (json) {
       for (final view in json['views']) {
         view.remove('filterFieldIds');
+      }
+    });
+    expect(
+      () => validateCustomizationScenario('notes-fields', noFilters),
+      returnsNormally,
+      reason: 'Text search does not require a category dropdown.',
+    );
+    final noSearch = _change(original, (json) {
+      json['requires'].add('views.board.v1');
+      for (final view in json['views']) {
+        if (view['type'] == 'list') {
+          view['type'] = 'board';
+          view['groupByFieldId'] = 'category';
+        }
       }
     });
     rejects('notes-fields', noSearch);
@@ -84,13 +98,13 @@ void main() {
           'actionable search repair',
           allOf(
             contains('titleFieldId:"title"'),
-            contains('filterFieldIds:["category"]'),
+            contains('list, table, or checklist'),
             contains('views.configured.v1'),
           ),
         ),
       ),
     );
-    final noCategory = _change(noSearch, (json) {
+    final noCategory = _change(noFilters, (json) {
       final field = (json['collections'][0]['fields'] as List).firstWhere(
         (f) => f['id'] == 'category',
       );
@@ -119,6 +133,30 @@ void main() {
           ),
         ),
       ),
+    );
+  });
+
+  test('notes text search requires an available resolved filter slot', () {
+    AppSpec withFilters(int count) => _change(bases['notes-fields']!, (json) {
+      for (final view in json['views']) {
+        view.remove('filterFieldIds');
+        if (view['type'] == 'list') {
+          view['query'] = {
+            'filters': [
+              for (var i = 0; i < count; i++)
+                {'fieldId': 'title', 'operator': 'contains', 'value': 'a'},
+            ],
+          };
+        }
+      }
+    });
+    rejects('notes-fields', withFilters(Limits.filters));
+    expect(
+      () => validateCustomizationScenario(
+        'notes-fields',
+        withFilters(Limits.filters - 1),
+      ),
+      returnsNormally,
     );
   });
 
