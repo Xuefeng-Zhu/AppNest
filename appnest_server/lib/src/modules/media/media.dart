@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:isolate';
 import 'dart:math';
 import 'dart:typed_data';
 
@@ -9,6 +8,9 @@ import 'package:serverpod/serverpod.dart';
 
 import '../../generated/protocol.dart';
 import '../runtime/access.dart';
+import 'image_preflight.dart';
+import 'image_worker.dart';
+import 'processing_admission.dart';
 
 class SanitizedImage {
   final Uint8List display, thumbnail;
@@ -26,7 +28,7 @@ class SanitizedImage {
 // Keep this closure outside endpoint/service scopes: capturing a Session in an
 // isolate closure would capture unsendable database connections and completers.
 Future<SanitizedImage> _sanitizeOffThread(Uint8List bytes) =>
-    Isolate.run(() => sanitizeImage(bytes));
+    runImageTask(() => sanitizeImage(bytes));
 
 /// Decode only supported, bounded still images; never retain original metadata.
 SanitizedImage sanitizeImage(Uint8List bytes) {
@@ -45,15 +47,19 @@ SanitizedImage _sanitizeImage(Uint8List bytes) {
   if (bytes.isEmpty || bytes.length > Media.maxOriginalBytes) {
     throw const SpecException('Images must be no larger than 5 MiB.');
   }
-  final decoder = image.findDecoderForData(bytes);
-  if (decoder is! image.JpegDecoder &&
-      decoder is! image.PngDecoder &&
-      decoder is! image.WebPDecoder) {
-    throw const SpecException('Choose a JPEG, PNG or WebP image.');
-  }
-  final info = decoder!.startDecode(bytes);
+  final checked = checkImageInput(bytes);
+  final image.Decoder decoder = switch (checked.format) {
+    StillImageFormat.jpeg => image.JpegDecoder(),
+    StillImageFormat.png => image.PngDecoder(),
+    StillImageFormat.webp => image.WebPDecoder(),
+  };
+  final info = decoder.startDecode(checked.bytes);
   if (info == null ||
-      info.numFrames != 1 ||
+      (checked.format == StillImageFormat.webp
+          ? info.numFrames > 1
+          : info.numFrames != 1) ||
+      info.width != checked.width ||
+      info.height != checked.height ||
       info.width < 1 ||
       info.height < 1 ||
       info.width > 8192 ||
@@ -66,6 +72,9 @@ SanitizedImage _sanitizeImage(Uint8List bytes) {
   final decoded = decoder.decodeFrame(0);
   if (decoded == null) {
     throw const SpecException('The image could not be decoded.');
+  }
+  if (checked.format == StillImageFormat.webp && checked.orientation != 1) {
+    decoded.exif.imageIfd.orientation = checked.orientation;
   }
   var clean = image.bakeOrientation(decoded);
   clean.exif = image.ExifData();
@@ -117,6 +126,7 @@ SanitizedImage _sanitizeImage(Uint8List bytes) {
 }
 
 class Media {
+  static final _processing = ProcessingAdmission();
   static const maxOriginalBytes = 5 * 1024 * 1024;
   static const maxThumbnailBytes = 512 * 1024;
   static const maxAppBytes = 250 * 1024 * 1024;
@@ -374,7 +384,15 @@ class Media {
       await _removeOriginal(s, asset);
       return info(asset);
     }
+    void Function()? release;
     try {
+      release = _processing.acquire(actor(s));
+      if (release == null) {
+        fail(
+          'quotaExceeded',
+          'Images are busy. Try this upload again shortly.',
+        );
+      }
       // Verification is idempotent at this service boundary, including retries after a crash.
       await s.storage.verifyUpload(
         storageId: 'private',
@@ -443,6 +461,8 @@ class Media {
         }),
       );
       rethrow;
+    } finally {
+      release?.call();
     }
   });
 

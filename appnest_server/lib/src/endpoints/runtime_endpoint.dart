@@ -6,6 +6,7 @@ import '../modules/runtime/commands.dart';
 import '../modules/runtime/queries.dart';
 import '../modules/runtime/aggregates.dart';
 import '../modules/collaboration/sharing.dart';
+import '../modules/runtime/revision_events.dart';
 
 class RuntimeEndpoint extends Endpoint {
   @override
@@ -48,16 +49,16 @@ class RuntimeEndpoint extends Endpoint {
   Future<List<InboxItem>> inbox(Session session) => Sharing.inbox(session);
   Future<void> readNotification(Session session, int id) =>
       Sharing.read(session, id);
-  Stream<AppEvent> events(Session session, int appId) async* {
-    // Small invalidations only. Recheck grants before every emission and every heartbeat.
-    var revision = -1;
-    while (true) {
-      final a = await access(session, appId);
-      if (a.app.controlRevision != revision) {
-        revision = a.app.controlRevision;
-        yield AppEvent(appId: appId, revision: revision, kind: 'refresh');
-      }
-      await Future<void>.delayed(const Duration(seconds: 2));
-    }
+  Stream<AppEvent> events(Session session, int appId) {
+    late final RevisionEvents events;
+    void closing(Session _) => events.stop();
+    events = RevisionEvents(
+      () async => (await access(session, appId)).app.controlRevision,
+      onStop: () => session.removeWillCloseListener(closing),
+    );
+    session.addWillCloseListener(closing);
+    return events.stream.map(
+      (revision) => AppEvent(appId: appId, revision: revision, kind: 'refresh'),
+    );
   }
 }
