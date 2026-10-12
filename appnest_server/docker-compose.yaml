@@ -3,11 +3,11 @@ services:
   postgres:
     image: ghcr.io/serverpod/postgres:16
     ports:
-      - "8090:5432"
+      - "127.0.0.1:8090:5432"
     environment:
       POSTGRES_USER: postgres
       POSTGRES_DB: appnest
-      POSTGRES_PASSWORD: "8SXTnklOoraUytTfaHhTFDiaA0UMr-GD"
+      POSTGRES_PASSWORD: ${APPNEST_DEV_DB_PASSWORD:?Set a unique optional development database password}
     volumes:
       - appnest_data:/var/lib/postgresql/data
 
@@ -16,11 +16,11 @@ services:
   postgres_test:
     image: ghcr.io/serverpod/postgres:16
     ports:
-      - "9090:5432"
+      - "127.0.0.1:9090:5432"
     environment:
       POSTGRES_USER: postgres
       POSTGRES_DB: appnest_test
-      POSTGRES_PASSWORD: "a9mTIg4c_rvxnA0MbZ2iTsIU0hq0h1RV"
+      POSTGRES_PASSWORD: ${APPNEST_TEST_DB_PASSWORD:?Set a unique optional test database password}
     volumes:
       - appnest_test_data:/var/lib/postgresql/data
 

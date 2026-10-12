@@ -22,23 +22,36 @@ verification entrypoint.
 | 8. Optional additions preserve records/claims/IDs | Tested | Spec compatibility + PostgreSQL publication test + actual endpoint demo + browser manual publish |
 | 9. Stale drafts/jobs and safe publication retries | Tested | Expected-version/hash/receipt and obsolete generation/manual mutation regressions |
 | 10. Interruption between committed run and scheduling recovers | Tested | Separate persistent PostgreSQL database and two actual processes; repeat wakeup → one durable notification |
-| 11. Rule/date/archive/grant changes suppress stale work | Tested, with lifecycle gaps | Execution-state tests and explicit re-enrollment regression. Reminder retry deadlines are not enforced; revoking an assignee can block unrelated edits |
-| 12. Reconnect/repeated invalidations recover state | Tested, bounded; defects open | Reconnect/resume/duplicate-event tests and historical live server restart. Legacy error handling can retain private UI state; idle endpoint cancellation can stall. No multi-instance/load acceptance |
+| 11. Rule/date/archive/grant changes suppress stale work | Tested locally | Execution-state and explicit re-enrollment regressions; retry eligibility is rechecked under the app lock, failure backoff is shared by direct/reconciler callers, and unchanged revoked assignees no longer block unrelated edits. New PostgreSQL regressions cover these boundaries |
+| 12. Reconnect/repeated invalidations recover state | Tested locally, bounded | Reconnect/resume/duplicate-event tests and historical live server restart. Legacy access failures dismiss editors and fence late reads; cancellation/session closure stops idle heartbeat polling. Widget/controller regressions cover these fixes; current WebSocket transport and multi-instance/load acceptance remain unverified |
 | 13. AI failure does not break apps; template mode explicit | Tested; dated live evidence | Bounded attempts, preserved prior apps, explicit template mode. Historical browser creation, publication, CRUD and semantic label editing are recorded in [AI_CREATION_CHECK.md](AI_CREATION_CHECK.md); broader creation/edit outcomes in [CUSTOMIZATION_AI_CHECK.md](CUSTOMIZATION_AI_CHECK.md) |
 | 14. Mobile/desktop, keyboard and large text | Tested, bounded | Renderer 390×844/1440×1000 at 150%; browser 1280×720 and 390×844; Tab focus and mobile builder publication. Full accessibility audit deferred |
 | 15. Discover and resume unfinished new apps after reopening | Tested locally | Committed PostgreSQL sessions cover author-private discovery, concurrent resume and revoked access; Flutter route tests cover `/drafts/<appId>`, refresh, authentication and publication using synthetic transport. Connected browser acceptance remains unverified |
 
-## Open acceptance gaps — architecture review 2026-10-07
+## Architecture review and current acceptance gaps
 
-The [review](ARCHITECTURE_REVIEW.md#confirmed-findings) reproduced six defects.
-The UI/UX fixes add retained-command recovery for repeated Save, verified with
-lost-response widget adapters. The remaining findings include CI SDK drift;
-legacy authorization errors that can retain or restore private UI
-state; idle event-stream cancellation can stall; reminder retry deadlines are
-ignored; and revoked assignees can block unrelated record changes. The receipt,
-authorization and durable-work designs remain in place, but these boundary cases
-prevent treating the table as blanket acceptance. Browser-reload recovery of
-pending record commands remains unimplemented.
+The 2026-10-07 [review](ARCHITECTURE_REVIEW.md#confirmed-findings) reproduced six
+defects and remains a historical record. Retained-command recovery now uses the
+original key/input/revision for **Retry save**, verified with lost-response widget
+adapters. Reminder retry deadlines and shared failure backoff are covered by
+PostgreSQL checks, including a contended app lock and terminal retry exhaustion.
+Unchanged revoked assignees remain historical references without blocking note
+or workflow edits; inactive creates and assignment actions remain rejected.
+
+The CI workflows now pin Flutter 3.47.0/Dart 3.13.0. Published commit
+`7ba9d63586b90213d24b731058dfabe86487a2f3` passed
+[Analyze](https://github.com/Xuefeng-Zhu/AppNest/actions/runs/38178300937),
+[Format](https://github.com/Xuefeng-Zhu/AppNest/actions/runs/38178300907) and
+[Tests](https://github.com/Xuefeng-Zhu/AppNest/actions/runs/38178300924) on
+2026-10-11. Subsequent working-tree changes need their own verification.
+
+Legacy authorization UI lifecycle now has stream/query failure and late-read
+widget regressions. Cancellation-aware event streams have idle/pending
+cancellation, pause/resume, session-closure and access-failure controller tests.
+Actual WebSocket transport cleanup and browser-reload recovery of pending record
+commands remain unverified or unimplemented respectively. The table does not
+establish multi-instance, live-provider, physical-device, deployment or full
+accessibility acceptance.
 
 That review ran static analysis, 81 spec tests, 259 server tests and 92 focused
 renderer tests. Eight additional invariant checks reproduced defects rather

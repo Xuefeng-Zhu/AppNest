@@ -136,7 +136,30 @@ Focused commands, each from its named package:
 
 Do not run multiple server test invocations against the same managed test database simultaneously. The test lifecycle is separate from the user-run development application. Live RPC demos require the development application; unit/integration suites do not.
 
-Release builds, authenticated browser flows, provider calls, physical-device behavior, and deployment checks are separate acceptance layers. Record them individually in [verification](VERIFICATION.md); do not infer them from a green test suite. GitHub CI was blocked by an SDK mismatch in the [2026-10-07 architecture review](ARCHITECTURE_REVIEW.md#1-p1--ci-cannot-validate-this-workspace); documentation changes do not repair the workflows.
+Release builds, authenticated browser flows, provider calls, physical-device behavior, and deployment checks are separate acceptance layers. Record them individually in [verification](VERIFICATION.md); do not infer them from a green test suite. The SDK mismatch in the [2026-10-07 architecture review](ARCHITECTURE_REVIEW.md#1-p1--ci-cannot-validate-this-workspace) is historical: all three workflows now pin Flutter 3.47.0/Dart 3.13.0. Published commit `7ba9d63586b90213d24b731058dfabe86487a2f3` passed Analyze, Format and Tests on 2026-10-11; this does not certify later working-tree changes.
+
+The Docker build uses Dart 3.13.0 and a minimal workspace containing the server
+and its path dependency, `packages/appnest_spec`. Build from the repository root
+with `docker build -f appnest_server/Dockerfile .`. The allowlisted `.dockerignore`
+keeps local passwords, environment files, embedded databases and caches out of
+the context. Supply production secrets at runtime; do not add them to the image.
+Container compilation/runtime and production configuration remain separate
+checks from the local test suites.
+
+Native production builds must set `--dart-define=APP_WEB_URL=https://your-appnest-web-host`.
+Invitation links use that public web origin. Browser builds use their current
+origin when the define is absent. Native development builds may derive web port
+8182 from the configured API host on port 8180; phones reject loopback hosts.
+The link opens the authenticated web launcher; this does not establish native
+universal-link or physical-device acceptance.
+
+The optional Compose databases are not used by normal development or tests.
+If needed, provide distinct `APPNEST_DEV_DB_PASSWORD` and
+`APPNEST_TEST_DB_PASSWORD` values outside source. Both ports bind to loopback.
+For an existing Compose database volume, changing the environment does not
+change its initialized PostgreSQL password: rotate that password through the
+owner's database administration workflow before reusing the volume. Preserve
+the data; do not delete a volume to rotate credentials.
 
 To navigate a running Flutter app, use Serverpod MCP `get_flutter_app_dtd`, Dart MCP `connect_dart_tooling_daemon`, then `flutter_driver`. Text entry emulation is disabled in `driver.dart` for normal hand use; enable it explicitly and hot restart if driver typing is needed. If MCP tools are unavailable, report that evidence limit rather than inventing a driver result.
 
@@ -151,6 +174,6 @@ To navigate a running Flutter app, use Serverpod MCP `get_flutter_app_dtd`, Dart
 | AI is unavailable or fails | Check the server-side configuration and [AI troubleshooting](AI_SETUP.md); templates remain available. |
 | Address already in use | Identify the existing AppNest owner/session; stop that session before relaunching. Preserve other projects. |
 | Schema drift | Inspect migrations and companion tenant guards; use MCP repair migration rather than dropping custom guards or resetting data. |
-| A command failed after a possible save | Review existing records before submitting another create. Ambiguous Save retry currently has a [known duplicate risk](ARCHITECTURE_REVIEW.md#2-p2--save-retry-can-duplicate-a-committed-create). |
+| A command failed after a possible save | Use **Retry save** while the runtime remains open; it replays the retained key, exact input and original revision. Reconnect does not replay business commands. After browser reload, inspect existing records before creating again because pending UI commands do not survive reload. |
 
 [Documentation index](README.md) · [Project README](../README.md)

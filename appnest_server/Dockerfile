@@ -1,19 +1,22 @@
 # Build from the project root with:
 # docker build -f appnest_server/Dockerfile .
+# Local secrets/databases are excluded by .dockerignore. Supply secrets at runtime.
 
 # Build stage
-FROM dart:3.12.2 AS build
+FROM dart:3.13.0 AS build
 
 # Create a minimal workspace that preserves locked server dependency versions.
 WORKDIR /app
 COPY pubspec.lock .
 COPY appnest_server appnest_server
+COPY packages/appnest_spec packages/appnest_spec
 RUN printf '%s\n' \
   'name: _' \
   'environment:' \
-  '  sdk: ^3.12.2' \
+  '  sdk: ">=3.13.0 <3.14.0"' \
   'workspace:' \
   '  - appnest_server' \
+  '  - packages/appnest_spec' \
   > pubspec.yaml
 RUN dart pub get
 
