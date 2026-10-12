@@ -10,6 +10,37 @@ submitted upstream issues or production behavior.
 
 The original report records one confirmed diagnostic issue, three enhancement requests, and two additional feedback candidates from the AI-app creation trial. Items 7–10 add a startup-state discrepancy, two scheduler enhancement requests and streaming documentation guidance from a fresh 2026-10-07 source review. Items 11–14 add a session-cleanup candidate and three development/deployment tooling requests reviewed on 2026-10-11. Evidence comes from the installed 4.0.0 packages, official documentation, and AppNest's recorded local verification. Candidates distinguish source observations from runtime behavior still needing an isolated reproduction. This is a local feedback draft; no upstream issues have been submitted.
 
+## Feedback categories
+
+All 14 items are grouped below by their primary request type. These categories
+describe the evidence and requested response; they do not assign severity or
+turn enhancement requests into confirmed bugs. Individual items retain their
+version, reproduction and ownership boundaries.
+
+| Category | Items | Evidence and next step |
+| --- | --- | --- |
+| Confirmed diagnostic issue | [1](#1-browser-transport-failures-report-a-misleading-response-code-message) | Observed browser failure plus framework source; request more accurate error wording. |
+| Candidates requiring isolated validation | [5](#5-clarify-defaulted-endpoint-parameters-and-generated-api-compatibility), [6](#6-classify-expected-websocket-close-races-more-quietly), [7](#7-make-startup-completion-reflect-completed-initialization), [11](#11-guarantee-session-cleanup-when-a-close-listener-throws) | Preserve observed/source-backed behavior and add focused reproductions. Item 7's source discrepancy is confirmed; its runtime/probe impact is unverified. |
+| API and scalability enhancements | [2](#2-allow-future-calls-to-be-enqueued-in-a-business-transaction), [3](#3-provide-a-supported-query-path-for-dynamic-jsonb-fields), [8](#8-isolate-future-call-workload-concurrency), [9](#9-bound-due-call-acquisition-before-queuing-the-backlog) | Request transaction-aware scheduling, supported dynamic queries, workload isolation and bounded acquisition; no measured capacity failure is claimed. |
+| Documentation and examples | [4](#4-make-committed-concurrency-tests-easier-to-discover), [10](#10-show-cancellation-safe-idle-polling-in-streaming-examples) | Demonstrate committed concurrency and cancellation-safe polling using existing APIs. |
+| Development and deployment tooling | [12](#12-provide-one-diagnostic-report-for-agent-setup), [13](#13-add-a-physical-phone-connection-preflight), [14](#14-validate-custom-docker-inputs-before-building) | Request agent diagnostics, phone connection checks and custom Docker validation; environment/application configuration remains separately owned. |
+
+## Subsystem index
+
+Each item appears once in this routing index, under its primary subsystem.
+Some requests also improve documentation or diagnostics in another subsystem.
+
+| Serverpod subsystem | Items | Focus |
+| --- | --- | --- |
+| Client transport and streaming | [1](#1-browser-transport-failures-report-a-misleading-response-code-message), [6](#6-classify-expected-websocket-close-races-more-quietly), [10](#10-show-cancellation-safe-idle-polling-in-streaming-examples) | Network diagnostics, WebSocket teardown and idle-stream cleanup guidance. |
+| Session lifecycle and readiness | [7](#7-make-startup-completion-reflect-completed-initialization), [11](#11-guarantee-session-cleanup-when-a-close-listener-throws) | Startup completion semantics and cleanup after callback failure. |
+| Future Calls and scheduling | [2](#2-allow-future-calls-to-be-enqueued-in-a-business-transaction), [8](#8-isolate-future-call-workload-concurrency), [9](#9-bound-due-call-acquisition-before-queuing-the-backlog) | Transactional enqueueing/retries, concurrency isolation and backlog acquisition. |
+| Database query API | [3](#3-provide-a-supported-query-path-for-dynamic-jsonb-fields) | Supported queries and projections for dynamic JSONB data. |
+| Code generation and API compatibility | [5](#5-clarify-defaulted-endpoint-parameters-and-generated-api-compatibility) | Endpoint defaults and generated/wire optionality. |
+| Integration testing | [4](#4-make-committed-concurrency-tests-easier-to-discover) | Independent committed-transaction race examples. |
+| CLI, MCP and Flutter development | [12](#12-provide-one-diagnostic-report-for-agent-setup), [13](#13-add-a-physical-phone-connection-preflight) | Agent setup diagnostics and physical-phone connections. |
+| Custom hosting and build tooling | [14](#14-validate-custom-docker-inputs-before-building) | Docker SDK, dependency-context and secret-exclusion checks. |
+
 ## 1. Browser transport failures report a misleading response-code message
 
 **Classification: confirmed diagnostic issue in `serverpod_client`.**
