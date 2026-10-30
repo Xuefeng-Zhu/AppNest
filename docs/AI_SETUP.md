@@ -41,6 +41,40 @@ Restart the existing server through the project's Serverpod workflow so it
 loads changed passwords. See the [example password file](../appnest_server/config/passwords.example.yaml)
 and [local startup instructions](../README.md#start-developing).
 
+## Nebius Token Factory development route
+
+The generic server-side adapter accepts a Nebius Token Factory API base,
+model ID and `AI_API_KEY`. For the endpoint and model recorded in the September
+22, 2026 connected check, add the following entries under `development` in the
+ignored `appnest_server/config/passwords.yaml`; preserve its existing database and
+authentication entries:
+
+```yaml
+development:
+  # Keep existing database/authentication entries here.
+  AI_BASE_URL: https://api.tokenfactory.us-central1.nebius.com/v1
+  AI_MODEL: nvidia/Nemotron-3-Ultra-550b-a55b
+  AI_API_KEY: YOUR_SERVER_ONLY_NEBIUS_KEY
+```
+
+Replace only the placeholder with your own credential through a local secure
+configuration workflow. Keep the file owner-readable and ignored; do not
+commit or expose the key, send it to Flutter, or paste it into an issue or chat.
+The adapter appends `/chat/completions` and sends its normal `json_schema`
+response format for creation and edits and `json_object` for guidance. The
+selected service and model must support the requested formats; local AppNest
+validation still checks the result. Requests use the generic provider timeout
+and retry limits documented below. Restart the existing server to load changed
+configuration and use synthetic data when testing.
+
+The [September 22 connected record](AI_CREATION_CHECK.md#connected-outcomes-recorded-on-2026-09-22)
+identifies this exact host and model for successful local creation and editing,
+alongside initial failures and subsequent prompt refinements. It is historical
+and does not establish current account access, quota, model availability,
+response-format support, deployment configuration, or present-day success.
+A later October 13 hosted QA used GLM 5.3 Flash through NVIDIA's developer API;
+it is separate evidence and does not verify Nebius in the hosted release.
+
 ## Provider request contract
 
 | Operation | Normal request | Context sent |

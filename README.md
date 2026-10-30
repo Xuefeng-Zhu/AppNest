@@ -95,6 +95,32 @@ Use the credential entry matching your provider and restart the existing server 
 
 See [AI setup](docs/AI_SETUP.md) for supported routes, configuration examples, response formats, limits, retries, and troubleshooting. [Provider evaluations](docs/README.md#dated-evidence-and-investigations) describe dated results and their failures; they do not guarantee current availability or generation quality.
 
+## Nebius Token Factory and NVIDIA Nemotron
+
+AppNest's server-side AI adapter can be configured for Nebius Token Factory.
+On September 22, 2026, a connected local check used Token Factory and NVIDIA
+Nemotron 3 Ultra to generate Plant Corner and Trip Kit, publish them locally,
+work with synthetic saved records, and apply a reviewed follow-up edit. The
+[dated AI creation record](docs/AI_CREATION_CHECK.md) describes the exact
+provider, model, successes, and initial failures. This historical check does
+not establish current provider availability or the configuration of a hosted
+app.
+
+To reproduce locally, follow [Start developing](#start-developing), configure
+Nebius under the server's ignored `passwords.yaml` as shown in
+[Nebius setup](docs/AI_SETUP.md#nebius-token-factory-development-route), and
+restart the existing server so it loads those values. Sign in, choose **New
+app**, describe a simple packing list, inspect the generated preview, and
+review publication. Add a record, request a supported label change, publish
+it, and reload to check that the record remains. Use synthetic data and your
+own provider account; inference can consume that account's quota or credits.
+The server keeps the API key; do not put it in Flutter or source control.
+
+An October 13 hosted QA run used GLM 5.3 Flash through NVIDIA's developer API,
+not the Nebius route. It covered one account and two live AI requests. Current
+hosted provider configuration, judge access, and continued availability have
+not been verified by this document.
+
 ## How it works
 
 ```mermaid
@@ -139,6 +165,6 @@ Change source models, endpoints, and services rather than generated server/proto
 
 ## Current scope
 
-AppNest is a **local MVP**. External notification delivery and background phone alerts, public deployment, payments, executable plug-ins, offline writes, and destructive data migrations remain outside its current scope.
+AppNest is an **MVP**. An experimental hosted release was tested in October 2026; its current availability and judge access are unverified. Production operations, external notification delivery and background phone alerts, payments, executable plug-ins, offline writes, and destructive data migrations remain outside its current scope.
 
 Pending record commands can be retried with **Retry save** while the runtime remains open, but pending UI recovery state does not survive browser reload. Physical-device behavior, production operations, scale, and a full accessibility audit require separate acceptance. Start with [security and operational limits](docs/SECURITY.md), [requirements](docs/REQUIREMENTS.md), and the [documentation index](docs/README.md) for those boundaries.
