@@ -22,9 +22,40 @@ final serverUrl = getServerUrl();
 /// instead of using a global client object. This is just a simple example.
 late final Client client;
 
-Future<void> initializeClient() async {
+final _initialization = ClientInitialization(() async {
   client = Client(await serverUrl)
     ..connectivityMonitor = FlutterConnectivityMonitor()
     ..authSessionManager = FlutterAuthSessionManager();
-  await client.auth.initialize();
+  return client.auth;
+});
+
+Future<void> initializeClient() => _initialization.initialize();
+
+/// Creates the transport and restores storage once; retry only revalidates the
+/// same session. SDK initialization has a two-second validation deadline whose
+/// raw TimeoutException escapes its network-error handling on authenticated web
+/// reloads. Allow both Cloud refresh and status requests their normal deadlines.
+class ClientInitialization {
+  ClientInitialization(
+    this.createSessionManager, {
+    this.validationTimeout = const Duration(seconds: 45),
+  });
+
+  final Future<FlutterAuthSessionManager> Function() createSessionManager;
+  final Duration validationTimeout;
+  FlutterAuthSessionManager? _auth;
+  bool _restored = false;
+  Future<void>? _pending;
+
+  Future<void> initialize() =>
+      _pending ??= _initialize().whenComplete(() => _pending = null);
+
+  Future<void> _initialize() async {
+    final auth = _auth ??= await createSessionManager();
+    if (!_restored) {
+      await auth.restore();
+      _restored = true;
+    }
+    await auth.validateAuthentication(timeout: validationTimeout);
+  }
 }

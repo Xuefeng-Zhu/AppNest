@@ -13,8 +13,28 @@ import 'provider.dart';
 class Builder {
   static PlatformInfo platform(Session s) {
     final executionEnabled = s.serverpod.config.futureCallExecutionEnabled;
-    final aiAvailable =
-        executionEnabled && ChatCompletionProvider.configured(s) != null;
+    final providerConfigured = ChatCompletionProvider.configured(s) != null;
+    if (!providerConfigured) {
+      final base = s.passwords['AI_BASE_URL'];
+      final model = s.passwords['AI_MODEL'];
+      final uri = Uri.tryParse(base ?? '');
+      final nvidiaHost = uri?.host == 'integrate.api.nvidia.com';
+      final key = s.passwords[nvidiaHost ? 'NVIDIA_API_KEY' : 'AI_API_KEY'];
+      // Configuration diagnostics contain only booleans, never supplied values.
+      s.log(
+        'ai_configuration ${jsonEncode(<String, bool>{
+          'basePresent': base != null && base.trim().isNotEmpty,
+          'modelPresent': model != null && model.trim().isNotEmpty,
+          'baseValid': uri != null && {'https', 'http'}.contains(uri.scheme) && uri.host.isNotEmpty,
+          'nvidiaHost': nvidiaHost,
+          'nvidiaBase': uri != null && uri.replace(path: uri.path.replaceFirst(RegExp(r'/$'), '')) == Uri.parse('https://integrate.api.nvidia.com/v1'),
+          'modelSupported': model != null && model.trim().isNotEmpty && (!nvidiaHost || nvidiaNemotronModels.contains(model) || model == 'z-ai/glm-5.3-flash'),
+          'selectedKeyPresent': key != null && key.trim().isNotEmpty,
+          'providerConfigured': providerConfigured,
+        })}',
+      );
+    }
+    final aiAvailable = executionEnabled && providerConfigured;
     return PlatformInfo(
       aiAvailable: aiAvailable,
       aiMode: !executionEnabled

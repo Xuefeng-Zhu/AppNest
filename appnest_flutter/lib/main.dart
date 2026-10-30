@@ -2,12 +2,12 @@ import 'package:flutter/material.dart';
 
 import 'client.dart';
 import 'screens/sign_in_screen.dart';
+import 'screens/startup_screen.dart';
 import 'features/home/home_screen.dart';
 import 'navigation/app_router.dart';
 
-void main() async {
+void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  await initializeClient();
   runApp(const MyApp());
 }
 
@@ -77,7 +77,14 @@ ThemeData _buildTheme(Brightness brightness) {
 }
 
 class MyApp extends StatefulWidget {
-  const MyApp({super.key});
+  const MyApp({
+    super.key,
+    this.initialize,
+    this.routeInformationProvider,
+  });
+
+  final Future<void> Function()? initialize;
+  final RouteInformationProvider? routeInformationProvider;
 
   @override
   State<MyApp> createState() => _MyAppState();
@@ -100,6 +107,11 @@ class _MyAppState extends State<MyApp> {
       themeMode: ThemeMode.light,
       routerDelegate: router,
       routeInformationParser: const AppNestRouteParser(),
+      routeInformationProvider: widget.routeInformationProvider,
+      builder: (context, child) => StartupScreen(
+        initialize: widget.initialize ?? initializeClient,
+        child: child!,
+      ),
     );
   }
 }
